@@ -28,6 +28,12 @@ platforms = [
 max = "26.6.*"
 python = "3.12.*"
 
+[target.linux-64.dependencies]
+# Native library repair for the fuse-mojo npm platform package on Linux
+# (rpath rewrite to $ORIGIN after vendoring the Mojo runtime; delocate
+# covers the same step on macOS).
+patchelf = ">=0.17"
+
 [pypi-dependencies]
 numpy = ">=1.26,<3"
 # Test/benchmark oracle only: the differential suite compares bm25_mojo against
@@ -74,3 +80,18 @@ test-cclib-fallback = { cmd = "pytest tests/test_gaussgrid_differential.py tests
 bench-cclib = { cmd = "python benchmarks/bench_gaussgrid.py", env = { PYTHONPATH = "python/cclib_mojo", PYTHONNOUSERSITE = "1" }, depends-on = ["build-kernel-gaussgrid"] }
 # Build the platform wheel for cclib_mojo (wheel-only; no sdist).
 wheel-cclib = { cmd = "bash python/cclib_mojo/build_wheel.sh", env = { PYTHONNOUSERSITE = "1" }, depends-on = ["build-kernel-gaussgrid"] }
+
+# --- fuse-mojo (TypeScript flagship) ---
+# Compile the Fuse Bitap kernel + pthread shim under kernels/fuse/build/.
+build-kernel-fuse = "bash kernels/fuse/build.sh"
+# Differential suite vs published Fuse.js: native backend, then forced fallback.
+# Node.js/npm come from the host (CI uses setup-node), not from pixi.
+test-fuse = { cmd = "bash typescript/fuse-mojo/scripts/test_all.sh", depends-on = ["build-kernel-fuse"] }
+# Reproducible benchmark: Fuse.js vs fuse-mojo native (median of 5 runs).
+bench-fuse = { cmd = "node benchmarks/bench_fuse.mjs", depends-on = ["build-kernel-fuse"] }
+# Pack the npm platform package and repair the native libraries
+# (delocate on macOS / patchelf on Linux) so no build-machine paths remain.
+pack-fuse = { cmd = "bash typescript/fuse-mojo/scripts/pack-platform.sh", depends-on = ["build-kernel-fuse"] }
+# End-user bar: fresh npm project from packed tarballs, README quick-start,
+# native backend and simulated-Windows fallback with identical output.
+smoke-fuse = { cmd = "bash typescript/fuse-mojo/scripts/smoke.sh", depends-on = ["pack-fuse"] }
