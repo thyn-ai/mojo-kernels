@@ -97,8 +97,9 @@ Key points to hit:
   drop-in-compatible backend for an existing, cited community tool —
   the same optional-backend pattern cclib already uses — rather than a
   new ecosystem. Upstreaming a `mojo` backend to cclib has been
-  proposed to the maintainers (link the cclib/cclib issue here once
-  opened); the independent package remains usable regardless.
+  proposed to the maintainers
+  ([cclib/cclib#1909](https://github.com/cclib/cclib/issues/1909));
+  the independent package remains usable regardless.
 
 ## 5. Software design (~200 words)
 
@@ -311,5 +312,7 @@ reproducible via `pixi run bench-cclib`.
 - [ ] Confirm redistribution terms for Modular's Mojo runtime binaries
       inside wheels (flagged in the package README) before the public
       PyPI release the paper will reference.
-- [ ] Link the cclib/cclib optional-backend issue from "State of the
-      field" / impact statement once opened.
+- [x] Link the cclib/cclib optional-backend issue from "State of the
+      field" / impact statement — opened as
+      [cclib/cclib#1909](https://github.com/cclib/cclib/issues/1909)
+      (2026-09-19).
