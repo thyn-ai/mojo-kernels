@@ -118,10 +118,15 @@ implementation** (`bm25_mojo/_reference.py`, clean-room, NumPy-only):
 - Inspect what's active: `bm25_mojo.backend_info()` and
   `bm25_mojo.native_available()`.
 - Wheels are **per-platform** (`py3-none-macosx_*_arm64`,
-  `py3-none-manylinux_2_35_x86_64`) and **wheel-only** — no sdist, because a
-  source tarball cannot rebuild the native library. A pure `py3-none-any`
-  fallback wheel can be produced with `BM25_MOJO_ALLOW_PURE_WHEEL=1` (e.g. for
-  Windows).
+  `py3-none-manylinux_*_x86_64`) and **wheel-only** — no sdist, because a
+  source tarball cannot rebuild the native library. Each wheel is
+  **self-contained**: `delocate` (macOS) / `auditwheel repair` (Linux) vendor
+  the Mojo runtime libraries into the wheel and rewrite the kernel library's
+  load paths to be wheel-relative, so no Mojo toolchain is needed at install
+  time. (Redistribution terms for Modular's runtime binaries should be
+  confirmed with Modular before any public release.) A pure `py3-none-any`
+  fallback wheel can be produced with `BM25_MOJO_ALLOW_PURE_WHEEL=1` (e.g.
+  for Windows).
 
 ## API parity notes
 
@@ -159,7 +164,7 @@ python/<name>_mojo/<name>_mojo/  #   __init__ / core / _native.py / _reference.p
 tests/                           # differential suite vs the reference library
 benchmarks/                      # seeded, reproducible benchmark scripts
 pixi.toml                        # pinned Mojo + Python toolchain, all tasks
-.github/workflows/ci.yml         # ubuntu + macOS: build → test → wheel → smoke (+ advisory auditwheel)
+.github/workflows/ci.yml         # ubuntu + macOS: build → test → wheel repair → hermetic smoke
 ```
 
 Adding a new kernel means: write the kernel with the same ABI shape
