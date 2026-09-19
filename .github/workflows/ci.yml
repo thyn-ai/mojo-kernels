@@ -1,0 +1,54 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    name: differential tests + wheel (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pixi
+        shell: bash
+        run: |
+          curl -fsSL https://pixi.sh/install.sh | bash
+          echo "$HOME/.pixi/bin" >> "$GITHUB_PATH"
+
+      - name: Build the BM25 Mojo kernel
+        run: pixi run build-kernel-bm25
+
+      - name: Differential suite (native backend, then forced fallback)
+        run: pixi run test
+
+      - name: Build the platform wheel (wheel-only)
+        run: pixi run wheel-bm25
+
+      - name: Smoke-test the wheel in a clean venv
+        shell: bash
+        run: |
+          python3 -m venv /tmp/bm25-wheel-smoke
+          /tmp/bm25-wheel-smoke/bin/pip install --quiet python/bm25_mojo/dist/*.whl
+          cd /tmp && /tmp/bm25-wheel-smoke/bin/python - <<'EOF'
+          import bm25_mojo
+          bm25 = bm25_mojo.BM25Okapi([["hello", "world"], ["hello", "mojo"]])
+          scores = bm25.get_scores(["hello"])
+          assert scores.shape == (2,) and scores[0] > 0 and scores[1] > 0
+          info = bm25_mojo.backend_info()
+          assert info["native_available"], f"wheel must carry the native kernel: {info}"
+          print("wheel smoke OK:", bm25_mojo.__version__, info["native_source"])
+          EOF
+
+      - name: Upload wheel
+        uses: actions/upload-artifact@v4
+        with:
+          name: bm25-mojo-wheel-${{ matrix.os }}
+          path: python/bm25_mojo/dist/*.whl
+          retention-days: 14
