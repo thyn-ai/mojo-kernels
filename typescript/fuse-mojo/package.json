@@ -13,6 +13,6 @@
     "bench": "node ../../benchmarks/bench_fuse.mjs"
   },
   "devDependencies": {
-    "fuse.js": "7.1.0"
+    "fuse.js": "7.5.0"
   }
 }
