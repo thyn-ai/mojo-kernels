@@ -1,0 +1,20 @@
+# pixi environments
+.pixi/
+
+# build outputs
+build/
+dist/
+*.dylib
+*.so
+*.dll
+*.egg-info/
+__mojocache__/
+
+# python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+
+# os
+.DS_Store

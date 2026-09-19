@@ -1,0 +1,53 @@
+# pixi workspace for thyn-ai/mojo-kernels.
+#
+# One reproducible toolchain for every kernel in this repo:
+#   * the Mojo compiler, from Modular's stable conda channel (`max`)
+#   * Python + numpy + pytest, for the wrapper, differential tests and benchmarks
+#
+# `pixi run build-kernel-bm25` compiles the BM25 kernel into a shared library.
+# `pixi run test` runs the differential suite (native + forced fallback).
+
+[workspace]
+name = "mojo-kernels"
+version = "0.1.0"
+description = "Mojo kernel acceleration factory: prebuilt per-platform kernels with thin Python wrappers and pure-Python fallbacks."
+authors = ["thyn-ai"]
+license = "Apache-2.0"
+channels = ["https://conda.modular.com/max", "https://prefix.dev/conda-forge"]
+# Platforms with a working Mojo toolchain: macOS Apple Silicon and Linux x86_64.
+# There is no Windows Mojo path today, so Windows consumers get the pure-Python
+# fallback from the wrapper package. The macos/glibc pins are the floor for
+# PyPI wheel-tag resolution.
+platforms = [
+  { platform = "osx-arm64", macos = "14.0" },
+  { platform = "linux-64", glibc = "2.35" },
+]
+
+[dependencies]
+# Mojo ships as part of MAX; max-core pins the mojo-compiler package.
+max = "26.6.*"
+python = "3.12.*"
+
+[pypi-dependencies]
+numpy = ">=1.26,<3"
+# Test/benchmark oracle only: the differential suite compares bm25_mojo against
+# the reference rank_bm25 package element-wise. Not a runtime dependency of the
+# published wrapper. Pinned: the oracle must be the published PyPI release.
+rank_bm25 = "==0.2.2"
+pytest = ">=8"
+build = ">=1"
+hatchling = ">=1.21"
+
+[tasks]
+# Compile the BM25 kernel into a shared library under kernels/bm25/build/.
+build-kernel-bm25 = "bash kernels/bm25/build.sh"
+# Differential suite: native path, then again with the fallback forced on.
+# PYTHONPATH makes the in-repo wrapper importable; PYTHONNOUSERSITE keeps
+# stray user site-packages out of the toolchain.
+test = { cmd = "bash scripts/test_all.sh", env = { PYTHONPATH = "python/bm25_mojo", PYTHONNOUSERSITE = "1" }, depends-on = ["build-kernel-bm25"] }
+test-native = { cmd = "pytest tests -q", env = { PYTHONPATH = "python/bm25_mojo", PYTHONNOUSERSITE = "1" }, depends-on = ["build-kernel-bm25"] }
+test-fallback = { cmd = "pytest tests -q", env = { PYTHONPATH = "python/bm25_mojo", PYTHONNOUSERSITE = "1", BM25_MOJO_DISABLE_NATIVE = "1" } }
+# Reproducible benchmark: rank_bm25 vs bm25_mojo (median of 5 runs).
+bench = { cmd = "python benchmarks/bench_bm25.py", env = { PYTHONPATH = "python/bm25_mojo", PYTHONNOUSERSITE = "1" }, depends-on = ["build-kernel-bm25"] }
+# Build the platform wheel for bm25_mojo (wheel-only; no sdist).
+wheel-bm25 = { cmd = "bash python/bm25_mojo/build_wheel.sh", env = { PYTHONNOUSERSITE = "1" }, depends-on = ["build-kernel-bm25"] }
