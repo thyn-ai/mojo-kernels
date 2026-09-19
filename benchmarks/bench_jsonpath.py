@@ -125,6 +125,9 @@ def check_parity(doc) -> None:
 
 def bench(doc, oracle_find, our_find) -> dict:
     """Cold (first-call) and warm (median-of-5 battery) timings per backend."""
+    # Guard the native timing pass against a stray fallback override leaked
+    # from the surrounding environment (or a prior failed parity check).
+    os.environ.pop("JSONPATH_MOJO_DISABLE_NATIVE", None)
     results = {}
     for name, fn in (("oracle", oracle_find), ("mojo-native", our_find), ("mojo-fallback", None)):
         if fn is None:
