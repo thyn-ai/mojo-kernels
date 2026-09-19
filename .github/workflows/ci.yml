@@ -40,8 +40,9 @@ jobs:
           # Hide the pixi env for the smoke: an end user has no Mojo toolchain,
           # so the wheel must load its kernel purely from its own vendored
           # libraries (not via the build machine's absolute rpath).
+          repo_root="$PWD"
           mv .pixi .pixi-hidden
-          trap 'mv .pixi-hidden .pixi' EXIT
+          trap 'mv "$repo_root/.pixi-hidden" "$repo_root/.pixi"' EXIT
           cd /tmp && /tmp/bm25-wheel-smoke/bin/python - <<'EOF'
           import bm25_mojo
           # "world" appears in 1 of 3 docs, so its Okapi idf is positive and
