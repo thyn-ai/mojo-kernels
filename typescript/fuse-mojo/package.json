@@ -7,12 +7,16 @@
     "packages/core"
   ],
   "scripts": {
-    "test": "node --test tests/*.test.cjs",
-    "test:fallback": "FUSE_MOJO_DISABLE_NATIVE=1 node --test tests/*.test.cjs",
+    "test": "node --test tests/*.test.cjs tests/*.test.js",
+    "test:fallback": "FUSE_MOJO_DISABLE_NATIVE=1 node --test tests/*.test.cjs tests/*.test.js",
     "test:all": "bash scripts/test_all.sh",
+    "test:property": "node --test tests/parity.property.test.js",
+    "test:property:fallback": "FUSE_MOJO_DISABLE_NATIVE=1 node --test tests/parity.property.test.js",
+    "test:property:all": "bash scripts/test_property.sh",
     "bench": "node ../../benchmarks/bench_fuse.mjs"
   },
   "devDependencies": {
+    "fast-check": "4.10.0",
     "fuse.js": "7.1.0"
   }
 }

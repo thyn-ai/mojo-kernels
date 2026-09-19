@@ -1,0 +1,149 @@
+# Fuzzing: differential atheris harnesses for the Python kernels and
+# fast-check parity properties for fuse-mojo (fuzz/README.md).
+#
+# Every pull request gets a bounded budget (60 s of coverage-guided search
+# per atheris harness, 2,000 fast-check scenarios per property); the nightly
+# run gets 20 minutes per harness and 50,000 scenarios. The seed corpora
+# under fuzz/corpus/ are already replayed by the normal test suites on every
+# platform (tests/test_fuzz_regression_*.py), so this workflow is where the
+# search for *new* inputs happens.
+#
+# atheris publishes manylinux x86_64 wheels only, hence the Ubuntu-only
+# Python job (the `fuzz` pixi environment). The fast-check job runs on the
+# same two runners as ci-fuse.yml because the native backend is a different
+# binary on each.
+#
+# Read-only token everywhere: the jobs build, fuzz and upload crash
+# artifacts, nothing else.
+name: fuzz
+
+on:
+  pull_request:
+  schedule:
+    - cron: "17 3 * * *" # nightly, 03:17 UTC
+  workflow_dispatch:
+    inputs:
+      atheris_seconds:
+        description: "-max_total_time per atheris harness (seconds)"
+        default: "600"
+        required: false
+      fc_num_runs:
+        description: "fast-check scenarios per property"
+        default: "20000"
+        required: false
+
+permissions:
+  contents: read
+
+# One run per ref; a newer push to a pull request cancels the run it
+# supersedes. Scheduled and dispatched runs always complete.
+concurrency:
+  group: fuzz-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  atheris:
+    name: atheris differential fuzzing (${{ matrix.harness }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        harness: [bm25, cclib]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install pixi
+        uses: prefix-dev/setup-pixi@d3f436a425481402e6a95a1d1fc10331c708cd9e # v0.10.2
+        with:
+          # Binary only; `pixi run -e fuzz` installs the fuzz environment
+          # (toolchain + atheris) lazily, exactly like the ci-*.yml workflows.
+          run-install: false
+
+      - name: Choose the fuzzing budget
+        id: budget
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          DISPATCH_SECONDS: ${{ inputs.atheris_seconds }}
+        run: |
+          case "$EVENT_NAME" in
+            pull_request) seconds=60 ;;
+            workflow_dispatch) seconds="${DISPATCH_SECONDS:-600}" ;;
+            *) seconds=1200 ;;
+          esac
+          echo "seconds=$seconds" >> "$GITHUB_OUTPUT"
+          echo "atheris budget: ${seconds}s per harness"
+
+      - name: Build the kernel and fuzz (${{ matrix.harness }})
+        env:
+          SECONDS_BUDGET: ${{ steps.budget.outputs.seconds }}
+        # The task builds the kernel (depends-on), then runs the harness with
+        # the checked-in seeds as the starting corpus; new inputs and crash
+        # artifacts land under .fuzz-work/. A divergence is a libFuzzer
+        # crash: non-zero exit, artifact written, input printed in the log.
+        run: >
+          pixi run -e fuzz fuzz-${{ matrix.harness }} --
+          -max_total_time="$SECONDS_BUDGET" -print_final_stats=1
+
+      - name: Replay the seed corpus (regression mode, same environment)
+        if: always()
+        run: pixi run -e fuzz fuzz-regression-${{ matrix.harness }}
+
+      - name: Upload crash artifacts
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: fuzz-artifacts-${{ matrix.harness }}
+          path: |
+            .fuzz-work/crash-*
+            .fuzz-work/leak-*
+            .fuzz-work/timeout-*
+            .fuzz-work/oom-*
+          if-no-files-found: ignore
+          retention-days: 30
+
+  fast-check:
+    name: fast-check parity properties (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install pixi
+        uses: prefix-dev/setup-pixi@d3f436a425481402e6a95a1d1fc10331c708cd9e # v0.10.2
+        with:
+          run-install: false
+
+      - name: Install Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 20
+
+      - name: Choose the fuzzing budget
+        id: budget
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          DISPATCH_RUNS: ${{ inputs.fc_num_runs }}
+        run: |
+          case "$EVENT_NAME" in
+            pull_request) runs=2000 ;;
+            workflow_dispatch) runs="${DISPATCH_RUNS:-20000}" ;;
+            *) runs=50000 ;;
+          esac
+          echo "runs=$runs" >> "$GITHUB_OUTPUT"
+          echo "fast-check budget: $runs scenarios per property"
+
+      - name: Build the Fuse kernel and run the properties (native, then forced fallback)
+        env:
+          FC_NUM_RUNS: ${{ steps.budget.outputs.runs }}
+        # A failing property prints the shrunk counterexample plus the seed
+        # and path that replay it (FC_SEED / FC_PATH, see fuzz/README.md).
+        run: pixi run fuzz-fuse

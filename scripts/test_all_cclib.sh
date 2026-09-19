@@ -6,7 +6,7 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-SUITE="tests/test_gaussgrid_differential.py tests/test_gaussgrid_loader.py"
+SUITE="tests/test_gaussgrid_differential.py tests/test_gaussgrid_loader.py tests/test_fuzz_regression_cclib.py"
 
 echo "== cclib-mojo differential suite: native backend =="
 pytest $SUITE -q

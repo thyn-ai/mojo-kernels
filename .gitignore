@@ -21,3 +21,6 @@ __pycache__/
 
 # node
 node_modules/
+
+# fuzzing work directory (libFuzzer corpus growth + crash artifacts)
+.fuzz-work/
