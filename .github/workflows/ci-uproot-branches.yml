@@ -1,0 +1,84 @@
+name: ci-uproot-branches
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    name: uproot-mojo differential tests + wheel (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pixi
+        shell: bash
+        run: |
+          curl -fsSL https://pixi.sh/install.sh | bash
+          echo "$HOME/.pixi/bin" >> "$GITHUB_PATH"
+
+      - name: Build the uproot-branches Mojo kernel
+        run: pixi run bash kernels/uproot-branches/build.sh
+
+      - name: Install oracle deps (uproot/awkward) into the pixi env
+        # The repo pixi manifest is shared; these test-oracle packages are
+        # installed per-leg instead (pinned, matching the README benchmark).
+        run: pixi run python -m pip install "uproot==5.7.6" "awkward==2.14.0" "cramjam==2.12.1"
+
+      - name: Differential suite (native backend, then forced fallback)
+        run: pixi run bash scripts/test_all_uproot-branches.sh
+
+      - name: Build + repair the platform wheel (delocate/auditwheel)
+        run: pixi run bash python/uproot-branches_mojo/build_wheel.sh
+
+      - name: Smoke-test the wheel in a clean venv
+        shell: bash
+        run: |
+          set -e
+          python3 -m venv /tmp/uproot-wheel-smoke
+          /tmp/uproot-wheel-smoke/bin/pip install --quiet python/uproot-branches_mojo/dist/*.whl uproot awkward
+          # Hide the pixi env for the smoke: an end user has no Mojo toolchain,
+          # so the wheel must load its kernel purely from its own vendored
+          # libraries (not via the build machine's absolute rpath).
+          repo_root="$PWD"
+          mv .pixi .pixi-hidden
+          trap 'mv "$repo_root/.pixi-hidden" "$repo_root/.pixi"' EXIT
+          # Copy the quickstart out of the source tree: running it in place
+          # would put the source package on sys.path[0] and shadow the wheel.
+          cp python/uproot-branches_mojo/quickstart.py /tmp/uproot-branches-quickstart.py
+          cd /tmp
+          /tmp/uproot-wheel-smoke/bin/python /tmp/uproot-branches-quickstart.py | tee /tmp/quickstart-native.txt
+          # The forced fallback must produce the same checksum.
+          UPROOT_MOJO_DISABLE_NATIVE=1 /tmp/uproot-wheel-smoke/bin/python /tmp/uproot-branches-quickstart.py | tee /tmp/quickstart-fallback.txt
+          /tmp/uproot-wheel-smoke/bin/python - <<'EOF'
+          import re
+
+          import uproot_mojo
+
+          info = uproot_mojo.backend_info()
+          assert info["native_available"], f"wheel must carry the native kernel: {info}"
+          assert "bundled in wheel" in info["native_source"], info["native_source"]
+
+          def checksum(path):
+              text = open(path).read()
+              m = re.search(r"branch checksum: ([0-9.eE+-]+)", text)
+              assert m, f"no checksum in {path}"
+              return float(m.group(1))
+
+          native = checksum("/tmp/quickstart-native.txt")
+          fallback = checksum("/tmp/quickstart-fallback.txt")
+          assert native == fallback, (native, fallback)
+          print("wheel smoke OK:", uproot_mojo.__version__, info["native_source"])
+          EOF
+
+      - name: Upload wheel
+        uses: actions/upload-artifact@v4
+        with:
+          name: uproot-mojo-wheel-${{ matrix.os }}
+          path: python/uproot-branches_mojo/dist/*.whl
+          retention-days: 14
