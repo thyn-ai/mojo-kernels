@@ -5,6 +5,11 @@ on:
     branches: [main]
   pull_request:
 
+# Read-only token for every job: the workflow only builds, tests and uploads a
+# build artifact (artifact upload needs no write scope).
+permissions:
+  contents: read
+
 jobs:
   test:
     name: pykalman-mojo differential tests + wheel (${{ matrix.os }})
