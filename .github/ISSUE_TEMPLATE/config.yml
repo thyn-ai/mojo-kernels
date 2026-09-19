@@ -1,0 +1,15 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Usage questions, ideas, show-and-tell
+    url: https://github.com/thyn-ai/mojo-kernels/discussions
+    about: >-
+      GitHub Discussions is the place for open-ended questions and benchmark
+      results — issues are for bugs and concrete requests.
+  - name: Report a security vulnerability
+    url: https://github.com/thyn-ai/mojo-kernels/blob/main/SECURITY.md
+    about: >-
+      Never report a vulnerability in a public issue. SECURITY.md explains
+      how to report privately through GitHub Security Advisories.
+  - name: Community chat
+    url: https://algenta.ai/discord
+    about: General questions and discussion with other users.
