@@ -1,0 +1,82 @@
+name: ci-ruptures
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    name: ruptures-mojo differential tests + wheel (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pixi
+        shell: bash
+        run: |
+          curl -fsSL https://pixi.sh/install.sh | bash
+          echo "$HOME/.pixi/bin" >> "$GITHUB_PATH"
+
+      - name: Install uv (fetches the pinned ruptures oracle outside the pixi env)
+        shell: bash
+        run: |
+          curl -fsSL https://astral.sh/uv/install.sh | sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Build the ruptures Mojo kernel
+        run: pixi run bash kernels/ruptures/build.sh
+
+      - name: Differential suite (native backend, then forced fallback)
+        # The script uv-installs ruptures==1.1.10 (with its own numpy/scipy)
+        # into $TMPDIR/ruptures-oracle-1.1.10 if it is not importable, and
+        # puts it on PYTHONPATH ahead of the pixi site-packages.
+        run: |
+          PYTHONPATH="python/ruptures_mojo" PYTHONNOUSERSITE=1 \
+            pixi run bash scripts/test_all_ruptures.sh
+
+      - name: Build + repair the platform wheel (delocate/auditwheel)
+        run: pixi run bash python/ruptures_mojo/build_wheel.sh
+
+      - name: Smoke-test the wheel in a clean venv
+        shell: bash
+        run: |
+          set -e
+          python3 -m venv /tmp/ruptures-wheel-smoke
+          /tmp/ruptures-wheel-smoke/bin/pip install --quiet python/ruptures_mojo/dist/*.whl
+          # Hide the pixi env for the smoke: an end user has no Mojo toolchain,
+          # so the wheel must load its kernel purely from its own vendored
+          # libraries (not via the build machine's absolute rpath).
+          repo_root="$PWD"
+          mv .pixi .pixi-hidden-ruptures
+          trap 'mv "$repo_root/.pixi-hidden-ruptures" "$repo_root/.pixi"' EXIT
+          cd /tmp && /tmp/ruptures-wheel-smoke/bin/python - <<'EOF'
+          import ruptures_mojo
+
+          # Step signal: the true change point at 60 is on the jump grid, so
+          # every method must find it (deterministic on both backends).
+          signal = [0.0] * 60 + [5.0] * 60
+          assert ruptures_mojo.detect(signal, "dynp", n_bkps=1) == [60, 120]
+          assert ruptures_mojo.detect(signal, "binseg", n_bkps=1) == [60, 120]
+          bkps = ruptures_mojo.detect(signal, "pelt", pen=1.0)
+          assert bkps[0] == 60 and bkps[-1] == 120, bkps
+          info = ruptures_mojo.backend_info()
+          assert info["native_available"], f"wheel must carry the native kernel: {info}"
+          # The forced fallback must return the same breakpoint lists.
+          import os
+
+          os.environ["RUPTURES_MOJO_DISABLE_NATIVE"] = "1"
+          assert ruptures_mojo.detect(signal, "dynp", n_bkps=1) == [60, 120]
+          print("wheel smoke OK:", ruptures_mojo.__version__, info["native_source"])
+          EOF
+
+      - name: Upload wheel
+        uses: actions/upload-artifact@v4
+        with:
+          name: ruptures-mojo-wheel-${{ matrix.os }}
+          path: python/ruptures_mojo/dist/*.whl
+          retention-days: 14
