@@ -44,10 +44,12 @@ jobs:
           mv .pixi .pixi-hidden
           trap 'mv "$repo_root/.pixi-hidden" "$repo_root/.pixi"' EXIT
           cd /tmp
-          /tmp/cclib-wheel-smoke/bin/python "$repo_root/python/cclib_mojo/quickstart.py" | tee /tmp/quickstart-native.txt
+          # quickstart.py lives at the repo root so its directory contains no
+          # cclib_mojo/ package: sys.path[0] cannot shadow the installed wheel.
+          /tmp/cclib-wheel-smoke/bin/python "$repo_root/quickstart.py" | tee /tmp/quickstart-native.txt
           # The forced fallback must produce the same results (documented
           # 1e-10 tolerance; identical to all printed digits here).
-          CCLIB_MOJO_DISABLE_NATIVE=1 /tmp/cclib-wheel-smoke/bin/python "$repo_root/python/cclib_mojo/quickstart.py" | tee /tmp/quickstart-fallback.txt
+          CCLIB_MOJO_DISABLE_NATIVE=1 /tmp/cclib-wheel-smoke/bin/python "$repo_root/quickstart.py" | tee /tmp/quickstart-fallback.txt
           /tmp/cclib-wheel-smoke/bin/python - <<'EOF'
           import re
 
