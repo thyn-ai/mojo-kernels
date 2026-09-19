@@ -28,14 +28,20 @@ jobs:
       - name: Differential suite (native backend, then forced fallback)
         run: pixi run test
 
-      - name: Build the platform wheel (wheel-only)
+      - name: Build + repair the platform wheel (delocate/auditwheel)
         run: pixi run wheel-bm25
 
       - name: Smoke-test the wheel in a clean venv
         shell: bash
         run: |
+          set -e
           python3 -m venv /tmp/bm25-wheel-smoke
           /tmp/bm25-wheel-smoke/bin/pip install --quiet python/bm25_mojo/dist/*.whl
+          # Hide the pixi env for the smoke: an end user has no Mojo toolchain,
+          # so the wheel must load its kernel purely from its own vendored
+          # libraries (not via the build machine's absolute rpath).
+          mv .pixi .pixi-hidden
+          trap 'mv .pixi-hidden .pixi' EXIT
           cd /tmp && /tmp/bm25-wheel-smoke/bin/python - <<'EOF'
           import bm25_mojo
           # "world" appears in 1 of 3 docs, so its Okapi idf is positive and
@@ -48,14 +54,6 @@ jobs:
           assert info["native_available"], f"wheel must carry the native kernel: {info}"
           print("wheel smoke OK:", bm25_mojo.__version__, info["native_source"])
           EOF
-
-      - name: Audit the Linux wheel (advisory)
-        if: runner.os == 'Linux'
-        shell: bash
-        run: |
-          python3 -m pip install --quiet auditwheel
-          python3 -m auditwheel show python/bm25_mojo/dist/*.whl || \
-            echo "::warning::auditwheel reports the wheel does not satisfy its manylinux_2_35 tag (advisory only)"
 
       - name: Upload wheel
         uses: actions/upload-artifact@v4

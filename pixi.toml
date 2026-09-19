@@ -37,6 +37,11 @@ rank_bm25 = "==0.2.2"
 pytest = ">=8"
 build = ">=1"
 hatchling = ">=1.21"
+# Wheel repair: vendor the Mojo runtime shared libraries into the wheel and
+# rewrite the kernel library's load paths to be wheel-relative, so installed
+# wheels are self-contained on end-user machines (no pixi env required).
+delocate = ">=0.10"
+auditwheel = ">=6"
 
 [tasks]
 # Compile the BM25 kernel into a shared library under kernels/bm25/build/.
