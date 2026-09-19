@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "description": "Prebuilt fusemojo Mojo kernel for Linux x86_64 (used by @fuse-mojo/core).",
   "license": "Apache-2.0",
-  "author": "Algenta, Inc.",
+  "author": "Algenta",
   "os": ["linux"],
   "cpu": ["x64"],
   "files": ["lib/"],
