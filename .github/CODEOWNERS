@@ -1,0 +1,32 @@
+# See https://docs.github.com/articles/about-codeowners for syntax.
+# Order matters — later matches take precedence, so the most specific rules
+# are listed after the tree-wide rules.
+#
+# NOTE: mirrors the same note in thyn-ai/algenta-sdk's CODEOWNERS. The
+# thyn-ai org has exactly one member today (@0xamlab) and no teams.
+# Every entry below is that one real account, not a placeholder — replace
+# with real teams (@thyn-ai/kernel-maintainers, @thyn-ai/python-wrapper-
+# maintainers, @thyn-ai/ts-wrapper-maintainers) as soon as a second
+# maintainer joins. Until then, do NOT turn on the ruleset's "Require review
+# from Code Owners" — GitHub blocks a PR author from approving their own PR,
+# so a solo-owner CODEOWNERS with that setting on would make every PR
+# unmergeable by the only person who can open one.
+
+/kernels/      @0xamlab
+/python/       @0xamlab
+/typescript/   @0xamlab
+/tests/        @0xamlab
+/benchmarks/   @0xamlab
+
+# The toolchain lock and the packaging scripts decide what ends up inside the
+# published wheels and npm tarballs (vendored Mojo runtime libraries, rpath
+# rewrites). A PR touching them gets flagged for deliberate review rather than
+# being mergeable as an incidental part of a routine kernel PR.
+/pixi.toml                              @0xamlab
+/pixi.lock                              @0xamlab
+/python/*/build_wheel.sh                @0xamlab
+/python/*/hatch_build.py                @0xamlab
+/typescript/fuse-mojo/scripts/          @0xamlab
+
+# Workflow files are as security-sensitive as the code they run.
+/.github/ @0xamlab
