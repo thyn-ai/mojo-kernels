@@ -277,41 +277,54 @@ def _extreme_magnitude(case: Case) -> bool:
         for alpha, _ in prims
         if math.isfinite(alpha) and alpha > 0.0
     )
-    coordinates = (c for atom in case.atomcoords for c in atom if math.isfinite(c))
+    atoms = (c for atom in case.atomcoords for c in atom)
+    corners = (o + (n - 1) * st for o, st, n in zip(case.origin, case.step, case.shape))
+    coordinates = (c for c in (*atoms, *case.origin, *corners) if math.isfinite(c))
     return any(not (EXPONENT_SANE_MIN <= alpha <= EXPONENT_SANE_MAX) for alpha in exponents) or any(
         abs(c) > COORDINATE_SANE_MAX for c in coordinates
     )
 
 
-def _prefactor_overflows(basis, axes, coeff2d: np.ndarray) -> bool:
-    """True when the kernel's prefactor overflows the double range at some
-    grid point for some basis function, MO row and primitive.
+def _overflows_in_either_order(basis, axes, coeff2d: np.ndarray) -> bool:
+    """True when an intermediate product overflows the double range in the
+    kernel's or the fallback's evaluation order at some grid point.
 
-    The kernel evaluates ``pre = ((c * N) * (x-cx)^l) * (y-cy)^m`` and then
-    ``s = pre * w_p`` before the per-axis Gaussian factors; the fallback
-    multiplies polynomial and contraction (weight times exponential) first.
-    When ``pre`` or ``s`` is inf and the exponential has underflowed to 0 the
-    two orders give inf * 0 = NaN versus 0. IEEE overflow depends on the
-    association order, so this mirrors the kernel's order exactly rather
-    than testing a rearranged product. Unreachable for physical inputs (it
-    needs |c * N * r^L| or |c * N * r^L * w| beyond ~1e308) -- the third
-    symptom of the missing magnitude validation tracked in the issue above.
+    The two backends associate the same factors differently:
+
+    * kernel:   ``pre = ((c * N) * (x-cx)^l) * (y-cy)^m``, ``s = pre * w_p``,
+      then the per-axis Gaussian factors;
+    * fallback: ``poly = (x-cx)^l * (y-cy)^m * (z-cz)^n``, times the
+      contraction (weights times one exponential), then ``c * N``.
+
+    IEEE overflow depends on that order: a huge coefficient makes the kernel's
+    ``pre`` inf while the fallback's ``poly`` is finite; a huge grid distance
+    with a tiny coefficient makes ``poly`` inf while ``pre`` is finite. Where
+    the exponential has underflowed to 0 the overflowing side then evaluates
+    inf * 0 = NaN and the other side 0. This mirrors both orders exactly
+    (IEEE multiplication is deterministic). Unreachable for physical inputs
+    -- the third symptom of the missing magnitude validation tracked in the
+    issue above.
     """
-    ax, ay, _ = axes
+    ax, ay, az = axes
     with np.errstate(all="ignore"):
         for b in range(basis.n_bf):
+            if not np.any(coeff2d[:, b] != 0.0):
+                continue  # both backends skip exactly-zero coefficients
             o0, o1 = int(basis.offsets[b]), int(basis.offsets[b + 1])
             dxl = (ax - basis.center_x[b]) ** basis.powers_l[b]
             dym = (ay - basis.center_y[b]) ** basis.powers_m[b]
-            for row in coeff2d:
-                if row[b] == 0.0:
-                    continue  # the kernel skips exactly-zero coefficients
-                pre = ((row[b] * basis.bf_norm[b]) * dxl[:, None]) * dym[None, :]
-                if np.isinf(pre).any():
-                    return True
-                for p in range(o0, o1):
-                    if np.isinf(pre * basis.prim_w[p]).any():
-                        return True
+            dzn = (az - basis.center_z[b]) ** basis.powers_n[b]
+            poly = dxl[:, None, None] * dym[None, :, None] * dzn[None, None, :]
+            if np.isinf(poly).any():
+                return True  # fallback order
+            for c in coeff2d[:, b]:
+                if c == 0.0:
+                    continue
+                pre = ((c * basis.bf_norm[b]) * dxl[:, None]) * dym[None, :]
+                if np.isinf(pre).any() or any(
+                    np.isinf(pre * basis.prim_w[p]).any() for p in range(o0, o1)
+                ):
+                    return True  # kernel order
     return False
 
 
@@ -488,9 +501,10 @@ def evaluate(case: Case) -> str | None:
         ok = _close_mask(native, fallback, scale)
         if not np.all(ok):
             # Known shape: every disagreement has a non-finite value on at
-            # least one side, and the prefactor really does overflow here.
+            # least one side, and an intermediate product really does
+            # overflow in one backend's evaluation order here.
             non_finite = ~np.isfinite(native) | ~np.isfinite(fallback)
-            if np.all(ok | non_finite) and _prefactor_overflows(basis, axes, coeff2d):
+            if np.all(ok | non_finite) and _overflows_in_either_order(basis, axes, coeff2d):
                 outcome = ISSUE_EXTREME_MAGNITUDE.key
             else:
                 _assert_close("native kernel vs fallback", native, fallback, scale, case)

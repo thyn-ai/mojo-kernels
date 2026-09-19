@@ -143,6 +143,18 @@ def _cclib_reproducers(harness) -> dict[str, bytes]:
             mo_index=None,
             origin=(1e170, 0.0, 0.0), step=(1.0, 1.0, 1.0), shape=(1, 1, 1),
         ),
+        # The mirror image (found by the sixth Linux run, 180 s): a tiny
+        # coefficient on the D-shell xy function far from the centre. The
+        # fallback's polynomial x * y overflows on its own (inf * 0 = NaN)
+        # while the kernel's ((c N) x) y stays finite and yields 0.
+        "known-issue-extreme-magnitude-9.bin": Case(
+            raw_numbers=True, defect=0,
+            gbasis=((("D", ((1.0, 1.0),)),),),
+            atomcoords=((0.0, 0.0, 0.0),),
+            coeff=((0.0, 0.0, 0.0, 1e-200, 0.0, 0.0),),
+            mo_index=None,
+            origin=(1e160, 1e160, 0.0), step=(1.0, 1.0, 1.0), shape=(1, 1, 1),
+        ),
     }
     return {name: harness.encode(c) for name, c in cases.items()}
 
