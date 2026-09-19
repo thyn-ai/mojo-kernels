@@ -1,0 +1,64 @@
+name: Bug report
+description: A kernel, wrapper package, or fallback isn't behaving like the reference library.
+labels: ["bug"]
+body:
+  - type: dropdown
+    id: package
+    attributes:
+      label: Which package?
+      options:
+        - bm25-mojo (Python, rank_bm25 drop-in)
+        - cclib-mojo (Python, cclib volume grids)
+        - "@fuse-mojo/core (TypeScript/Node, Fuse.js drop-in)"
+        - Mojo kernel source (kernels/)
+        - Build / packaging / CI
+        - Not sure
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Package version
+      placeholder: e.g. bm25-mojo 0.1.0, @fuse-mojo/core 0.1.0
+    validations:
+      required: true
+  - type: dropdown
+    id: backend
+    attributes:
+      label: Which backend was active?
+      description: >-
+        Check with `bm25_mojo.backend_info()`, `cclib_mojo.backend_info()`,
+        or `Fuse.backendInfo()`. If the bug disappears with
+        `<NAME>_MOJO_DISABLE_NATIVE=1`, say so below.
+      options:
+        - Native Mojo kernel
+        - Pure-language fallback (Python / JavaScript)
+        - Both
+        - Not sure
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: >-
+        A clear description of the bug, and what you expected instead. If the
+        result differs from the reference library (rank_bm25, Fuse.js, cclib),
+        include the reference output too.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Minimal reproduction
+      description: A small code snippet that reproduces the issue (Python or JavaScript).
+      render: shell
+    validations:
+      required: false
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: OS and CPU architecture, Python/Node version, install method (pip/npm wheel or built from source with pixi), and anything else relevant.
+    validations:
+      required: false
