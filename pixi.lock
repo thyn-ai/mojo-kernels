@@ -118,6 +118,7 @@ environments:
       - conda: https://prefix.dev/conda-forge/linux-64/ncurses-6.6-hdb14827_1.conda
       - conda: https://prefix.dev/conda-forge/linux-64/numpy-2.5.3-py312he827f4e_0.conda
       - conda: https://prefix.dev/conda-forge/linux-64/openssl-3.6.4-h781a0a9_0.conda
+      - conda: https://prefix.dev/conda-forge/linux-64/patchelf-0.19.1-hee9eb32_1.conda
       - conda: https://prefix.dev/conda-forge/linux-64/psutil-7.2.2-py312h1b36aeb_3.conda
       - conda: https://prefix.dev/conda-forge/linux-64/python-3.12.14-h5f976f7_3_cpython.conda
       - conda: https://prefix.dev/conda-forge/linux-64/readline-8.3-hd6e31c0_1.conda
@@ -640,6 +641,19 @@ packages:
     - openssl >=3.6.4,<4.0a0
   size: 3202955
   timestamp: 1787698780103
+- conda: https://prefix.dev/conda-forge/linux-64/patchelf-0.19.1-hee9eb32_1.conda
+  sha256: f138da28cd92824eb58ca11b3f9d5d6d32e1cbd31d7f5589ccda1a7398522b6b
+  md5: 21ce762527ea167059a17516773a8cc4
+  depends:
+  - __glibc >=2.17,<3.0.a0
+  - libstdcxx >=15
+  - libgcc >=15
+  license: GPL-3.0-or-later
+  license_family: GPL
+  purls: []
+  run_exports: {}
+  size: 152278
+  timestamp: 1787380796884
 - conda: https://prefix.dev/conda-forge/linux-64/psutil-7.2.2-py312h1b36aeb_3.conda
   sha256: 9b6f0247591f062a188cd42580916476c0d939a89d65f3ecefb37e84b5c17d7a
   md5: 2f8faed6c111c9ed0c1d217bc1be75f2
