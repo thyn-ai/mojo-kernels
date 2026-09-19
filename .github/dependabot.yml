@@ -14,7 +14,7 @@
 #     backend (hatchling): the two `pip` entries below.
 #   * typescript/fuse-mojo/package-lock.json -- the npm workspace (koffi, and the Fuse.js oracle as
 #     a dev dependency): the `npm` entry below, pointed at the workspace root so the lockfile is
-#     updated together with packages/core.
+#     updated together with packages/core. The oracle itself is pinned (see the `ignore` there).
 #   * .github/workflows/*.yml -- the SHA-pinned actions: the `github-actions` entry below.
 version: 2
 updates:
@@ -49,6 +49,25 @@ updates:
       deps:
         patterns:
           - "*"
+    ignore:
+      # fuse.js is not a runtime dependency: it is the differential-test ORACLE that
+      # @fuse-mojo/core (the kernels/fuse Bitap kernel and the vendored 7.1.0 fallback) must match
+      # bit-for-bit. Fuse.js 7.2.0 and later change observable search semantics, so a bump turns
+      # every `includeMatches` cell red -- not a lockfile or API-shape problem but a real
+      # divergence from what the kernel implements (verified on 7.2.0, 7.3.0, 7.4.x and 7.5.0):
+      #   * 7.2.0 deduplicates and merges overlapping match indices (krisk/Fuse#735) and selects
+      #     top-k with a heap under `limit`; the kernel reproduces 7.1.0's per-chunk index lists
+      #     and its sort-then-slice `limit`.
+      #   * 7.4.0 restricts highlight indices to the Bitap-matched window (krisk/Fuse#792), so
+      #     7.1.0-style stray single-character spans are no longer reported.
+      #   * 7.5.0 applies `minMatchCharLength` in the exact-match shortcut (#831), normalises key
+      #     weights in object search (#833) and recounts words in fieldNorm (#830): result
+      #     counts and scores move.
+      # The kernel tracks Fuse.js 7.1.x semantics until the parity work for the new semantics is
+      # done (it needs kernel + vendored-fallback changes and a re-baseline of the suite, not a
+      # dependency bump). Lift this rule as part of that work, in the same PR.
+      - dependency-name: "fuse.js"
+        versions: [">= 7.2.0"]
     commit-message:
       prefix: chore(fuse-mojo)
 
