@@ -1,6 +1,6 @@
 # mojo-kernels
 
-[![ci](https://github.com/thyn-ai/mojo-kernels/actions/workflows/ci.yml/badge.svg)](https://github.com/thyn-ai/mojo-kernels/actions/workflows/ci.yml)
+[![ci](https://github.com/thyn-ai/mojo-kernels/actions/workflows/ci.yml/badge.svg)](https://github.com/thyn-ai/mojo-kernels/actions/workflows/ci.yml) [![All Contributors](https://img.shields.io/github/all-contributors/thyn-ai/mojo-kernels?color=ee8449)](#contributors)
 [![ci-cclib](https://github.com/thyn-ai/mojo-kernels/actions/workflows/ci-cclib.yml/badge.svg)](https://github.com/thyn-ai/mojo-kernels/actions/workflows/ci-cclib.yml)
 [![ci-fuse](https://github.com/thyn-ai/mojo-kernels/actions/workflows/ci-fuse.yml/badge.svg)](https://github.com/thyn-ai/mojo-kernels/actions/workflows/ci-fuse.yml)
 [![CodeQL](https://github.com/thyn-ai/mojo-kernels/actions/workflows/codeql.yml/badge.svg)](https://github.com/thyn-ai/mojo-kernels/actions/workflows/codeql.yml)
@@ -290,6 +290,29 @@ a kernel change needs (differential parity on both backends, clean-room only).
 Security reports are never public: see [SECURITY.md](./SECURITY.md) for the
 private channels and what is in scope. This project follows the
 [Contributor Covenant](./CODE_OF_CONDUCT.md).
+
+
+## Related repositories
+
+Open-source repositories from the Algenta team. The Algenta engine itself is proprietary; everything listed here is Apache-2.0. Issues and discussions are welcome in whichever repository owns the code.
+
+- [thyn-ai/algenta-sdk](https://github.com/thyn-ai/algenta-sdk) — Python & TypeScript SDKs for the Algenta decision engine: governed tool profiles, execution receipts, approvals.
+- [thyn-ai/algenta-integrations](https://github.com/thyn-ai/algenta-integrations) — Framework integrations for Algenta: LangChain, LlamaIndex, pydantic-ai, MAF, Haystack, LiteLLM, Ray Serve, vLLM, Vercel AI SDK and n8n.
+- [thyn-ai/mojo-kernels](https://github.com/thyn-ai/mojo-kernels) (this repository) — Clean-room Mojo kernels as drop-in accelerators for popular Python/TypeScript libraries, with bit-exact parity and pure-language fallbacks.
+- [thyn-ai/security-toolchain](https://github.com/thyn-ai/security-toolchain) — The pinned, checksum-verified security toolchain (Gitleaks, Opengrep, OSV-Scanner, Trivy config, actionlint) that every thyn-ai repository runs locally and in CI.
+
+## Contributors
+
+Thanks go to these people ([emoji key](https://allcontributors.org/docs/en/emoji-key)):
+
+<!-- ALL-CONTRIBUTORS-LIST:START - Do not remove or modify this section -->
+<!-- prettier-ignore-start -->
+<!-- markdownlint-disable -->
+<!-- markdownlint-restore -->
+<!-- prettier-ignore-end -->
+<!-- ALL-CONTRIBUTORS-LIST:END -->
+
+This project follows the [all-contributors](https://github.com/all-contributors/all-contributors) specification. Contributions of any kind are welcome.
 
 ## License
 
