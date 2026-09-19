@@ -1,0 +1,81 @@
+name: ci-biopython
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    name: bio-mojo differential tests + wheel (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pixi
+        shell: bash
+        run: |
+          curl -fsSL https://pixi.sh/install.sh | bash
+          echo "$HOME/.pixi/bin" >> "$GITHUB_PATH"
+
+      - name: Install uv (provisions the pinned biopython oracle)
+        shell: bash
+        run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Build the bioparse Mojo kernel
+        run: pixi run bash kernels/bioparse/build.sh
+
+      - name: Differential suite vs biopython (native backend, then forced fallback)
+        env:
+          PYTHONPATH: python/bio_mojo
+          PYTHONNOUSERSITE: "1"
+        run: pixi run bash scripts/test_all_biopython.sh
+
+      - name: Build + repair the platform wheel (delocate/auditwheel)
+        run: pixi run bash python/bio_mojo/build_wheel.sh
+
+      - name: Smoke-test the wheel in a clean venv
+        shell: bash
+        run: |
+          set -e
+          python3 -m venv /tmp/bio-wheel-smoke
+          /tmp/bio-wheel-smoke/bin/pip install --quiet python/bio_mojo/dist/*.whl
+          # Hide the pixi env for the smoke: an end user has no Mojo toolchain,
+          # so the wheel must load its kernel purely from its own vendored
+          # libraries (not via the build machine's absolute rpath).
+          repo_root="$PWD"
+          mv .pixi .pixi-hidden
+          trap 'mv "$repo_root/.pixi-hidden" "$repo_root/.pixi"' EXIT
+          cd /tmp
+          /tmp/bio-wheel-smoke/bin/python "$repo_root/python/bio_mojo/examples/quickstart.py" > /tmp/quickstart-native.txt
+          BIO_MOJO_DISABLE_NATIVE=1 /tmp/bio-wheel-smoke/bin/python "$repo_root/python/bio_mojo/examples/quickstart.py" > /tmp/quickstart-fallback.txt
+          /tmp/bio-wheel-smoke/bin/python - <<'EOF'
+          import bio_mojo
+
+          info = bio_mojo.backend_info()
+          assert info["native_available"], f"wheel must carry the native kernel: {info}"
+
+          def checksum(path):
+              for line in open(path):
+                  if line.startswith("checksum:"):
+                      return line.strip()
+              raise AssertionError(f"no checksum in {path}")
+
+          native = checksum("/tmp/quickstart-native.txt")
+          fallback = checksum("/tmp/quickstart-fallback.txt")
+          assert native == fallback, (native, fallback)
+          print("wheel smoke OK:", bio_mojo.__version__, info["native_source"])
+          EOF
+
+      - name: Upload wheel
+        uses: actions/upload-artifact@v4
+        with:
+          name: bio-mojo-wheel-${{ matrix.os }}
+          path: python/bio_mojo/dist/*.whl
+          retention-days: 14
