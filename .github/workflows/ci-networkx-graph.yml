@@ -1,0 +1,80 @@
+name: ci-networkx-graph
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    name: nx-mojo differential tests + wheel (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pixi
+        shell: bash
+        run: |
+          curl -fsSL https://pixi.sh/install.sh | bash
+          echo "$HOME/.pixi/bin" >> "$GITHUB_PATH"
+
+      - name: Build the networkx-graph Mojo kernel
+        run: pixi run bash kernels/networkx-graph/build.sh
+
+      - name: Differential suite (native backend, then forced fallback)
+        # The script provisions the pinned oracle (networkx==3.5) into
+        # build/nx-test-oracle itself; pixi.toml is out of this kernel's
+        # scope, so no pixi task is registered for it.
+        run: PYTHONPATH=python/nx_mojo PYTHONNOUSERSITE=1 pixi run bash scripts/test_all_networkx_graph.sh
+
+      - name: Build + repair the platform wheel (delocate/auditwheel)
+        run: PYTHONNOUSERSITE=1 pixi run bash python/nx_mojo/build_wheel.sh
+
+      - name: Smoke-test the wheel in a clean venv
+        shell: bash
+        run: |
+          set -e
+          python3 -m venv /tmp/nx-wheel-smoke
+          /tmp/nx-wheel-smoke/bin/pip install --quiet python/nx_mojo/dist/*.whl
+          cp python/nx_mojo/quickstart.py /tmp/nx-quickstart.py
+          # Hide the pixi env for the smoke: an end user has no Mojo toolchain,
+          # so the wheel must load its kernel purely from its own vendored
+          # libraries (not via the build machine's absolute rpath).
+          repo_root="$PWD"
+          mv .pixi .pixi-hidden
+          trap 'mv "$repo_root/.pixi-hidden" "$repo_root/.pixi"' EXIT
+          cd /tmp
+          # Run the quickstart from a copy outside the repo: the script's own
+          # directory must not shadow the installed wheel on sys.path.
+          /tmp/nx-wheel-smoke/bin/python /tmp/nx-quickstart.py | tee /tmp/quickstart-native.txt
+          # The forced fallback must produce the same results (1e-12; identical
+          # to all printed digits here).
+          NX_MOJO_DISABLE_NATIVE=1 /tmp/nx-wheel-smoke/bin/python /tmp/nx-quickstart.py | tee /tmp/quickstart-fallback.txt
+          /tmp/nx-wheel-smoke/bin/python - <<'EOF'
+          import re
+
+          import nx_mojo
+
+          info = nx_mojo.backend_info()
+          assert info["native_available"], f"wheel must carry the native kernel: {info}"
+
+          def checksums(path):
+              text = open(path).read()
+              return re.findall(r"checksum: ([0-9.eE+-]+)", text)
+
+          native = checksums("/tmp/quickstart-native.txt")
+          fallback = checksums("/tmp/quickstart-fallback.txt")
+          assert native and native == fallback, (native, fallback)
+          print("wheel smoke OK:", nx_mojo.__version__, info["native_source"])
+          EOF
+
+      - name: Upload wheel
+        uses: actions/upload-artifact@v4
+        with:
+          name: nx-mojo-wheel-${{ matrix.os }}
+          path: python/nx_mojo/dist/*.whl
+          retention-days: 14
