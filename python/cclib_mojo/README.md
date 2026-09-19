@@ -255,7 +255,7 @@ Python Quantum Chemistry*.
 
 ## License
 
-Apache-2.0, © 2026 Algenta, Inc. The kernel and wrapper are clean-room
+Apache-2.0, © 2026 Algenta The kernel and wrapper are clean-room
 implementations of the textbook contracted-Gaussian formulas (Taketa,
 Huzinaga, O-ohata, J. Phys. Soc. Jap. 21, 2313 (1966)). cclib and PyQuante
 are used only as test/benchmark references, never as runtime dependencies.

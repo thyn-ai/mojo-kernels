@@ -9,7 +9,7 @@ description = "Fast electron-density and wavefunction-on-grid evaluation for ccl
 readme = "README.md"
 requires-python = ">=3.9"
 license = "Apache-2.0"
-authors = [{ name = "Algenta, Inc." }]
+authors = [{ name = "Algenta" }]
 keywords = ["cclib", "computational-chemistry", "electron-density", "wavefunction", "gaussian-basis", "mojo", "cube-file"]
 classifiers = [
   "Intended Audience :: Science/Research",
