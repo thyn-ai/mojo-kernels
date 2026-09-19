@@ -1,0 +1,17 @@
+name: Question
+description: Ask a usage question about a mojo-kernels package or kernel.
+labels: ["question"]
+body:
+  - type: markdown
+    attributes:
+      value: >-
+        For faster answers, consider
+        https://github.com/thyn-ai/mojo-kernels/discussions or
+        https://algenta.ai/discord instead — this template is here for
+        questions worth keeping searchable.
+  - type: textarea
+    id: question
+    attributes:
+      label: Your question
+    validations:
+      required: true

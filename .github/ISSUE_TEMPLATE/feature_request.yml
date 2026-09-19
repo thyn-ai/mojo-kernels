@@ -1,0 +1,34 @@
+name: Feature request
+description: >-
+  Propose a new kernel, an option the wrapper doesn't cover yet, or another
+  improvement. New kernels follow the factory template in README.md.
+labels: ["enhancement"]
+body:
+  - type: dropdown
+    id: scope
+    attributes:
+      label: What kind of request?
+      options:
+        - New kernel (accelerate another popular Python/JS library hot loop)
+        - Missing option or API surface in an existing wrapper
+        - Performance improvement to an existing kernel
+        - Packaging / platform support
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What would you like?
+      description: >-
+        Describe the use case, not just the API shape you'd guess at. For a
+        new kernel, name the reference library and the hot loop it would
+        replace.
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: Why isn't an existing kernel, option, or the fallback sufficient?
+    validations:
+      required: false

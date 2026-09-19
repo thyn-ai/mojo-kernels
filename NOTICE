@@ -1,0 +1,13 @@
+mojo-kernels
+Copyright 2026 Algenta and the mojo-kernels contributors
+
+This product is licensed under the Apache License, Version 2.0. See LICENSE
+for the full license text.
+
+This repository contains clean-room Mojo kernels and their Python and
+TypeScript wrapper packages (bm25-mojo, cclib-mojo, @fuse-mojo/core). The
+reference libraries they accelerate (rank_bm25, Fuse.js, cclib/PyQuante) are
+used only as test and benchmark oracles and are not runtime dependencies.
+
+Fuse.js is additionally vendored as fuse-mojo's fallback backend under its
+own Apache-2.0 license; see typescript/fuse-mojo/packages/core/NOTICE.
