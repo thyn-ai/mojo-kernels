@@ -1,0 +1,81 @@
+name: ci-toml
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    name: toml-mojo differential tests + wheel (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pixi
+        shell: bash
+        run: |
+          curl -fsSL https://pixi.sh/install.sh | bash
+          echo "$HOME/.pixi/bin" >> "$GITHUB_PATH"
+
+      - name: Build the toml Mojo kernel
+        run: pixi run bash kernels/toml/build.sh
+
+      - name: Differential suite (native backend, then forced fallback)
+        run: pixi run bash scripts/test_all_toml.sh
+        env:
+          PYTHONPATH: python/toml_mojo
+          PYTHONNOUSERSITE: "1"
+
+      - name: Build + repair the platform wheel (delocate/auditwheel)
+        run: pixi run bash python/toml_mojo/build_wheel.sh
+        env:
+          PYTHONNOUSERSITE: "1"
+
+      - name: Smoke-test the wheel in a clean venv
+        shell: bash
+        run: |
+          set -e
+          python3 -m venv /tmp/toml-wheel-smoke
+          /tmp/toml-wheel-smoke/bin/pip install --quiet python/toml_mojo/dist/*.whl
+          # Hide the pixi env for the smoke: an end user has no Mojo toolchain,
+          # so the wheel must load its kernel purely from its own vendored
+          # libraries (not via the build machine's absolute rpath).
+          repo_root="$PWD"
+          mv .pixi .pixi-hidden
+          trap 'mv "$repo_root/.pixi-hidden" "$repo_root/.pixi"' EXIT
+          # Run the quickstart from /tmp: the script's own directory must not
+          # shadow the installed wheel with the in-repo package.
+          cp python/toml_mojo/quickstart_smoke.py /tmp/toml_quickstart_smoke.py
+          cd /tmp
+          /tmp/toml-wheel-smoke/bin/python /tmp/toml_quickstart_smoke.py | tee /tmp/quickstart-native.txt
+          # The forced fallback must produce identical results.
+          TOML_MOJO_DISABLE_NATIVE=1 /tmp/toml-wheel-smoke/bin/python /tmp/toml_quickstart_smoke.py | tee /tmp/quickstart-fallback.txt
+          /tmp/toml-wheel-smoke/bin/python - <<'EOF'
+          import toml_mojo
+
+          info = toml_mojo.backend_info()
+          assert info["native_available"], f"wheel must carry the native kernel: {info}"
+
+          def checksum(path):
+              for line in open(path):
+                  if line.startswith("project checksum:"):
+                      return line.split(":", 1)[1].strip()
+              raise AssertionError(f"no checksum in {path}")
+
+          native = checksum("/tmp/quickstart-native.txt")
+          fallback = checksum("/tmp/quickstart-fallback.txt")
+          assert native == fallback, (native, fallback)
+          print("wheel smoke OK:", toml_mojo.__version__, info["native_source"])
+          EOF
+
+      - name: Upload wheel
+        uses: actions/upload-artifact@v4
+        with:
+          name: toml-mojo-wheel-${{ matrix.os }}
+          path: python/toml_mojo/dist/*.whl
+          retention-days: 14
