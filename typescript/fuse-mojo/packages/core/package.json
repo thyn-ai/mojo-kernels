@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "description": "Drop-in faster replacement for Fuse.js, powered by a Mojo kernel (pure-JS fallback included).",
   "license": "Apache-2.0",
-  "author": "Algenta, Inc.",
+  "author": "Algenta",
   "keywords": ["fuse", "fuzzy", "search", "bitap", "mojo", "fuse.js"],
   "type": "commonjs",
   "main": "index.cjs",

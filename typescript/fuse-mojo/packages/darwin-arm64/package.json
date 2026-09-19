@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "description": "Prebuilt fusemojo Mojo kernel for macOS Apple Silicon (used by @fuse-mojo/core).",
   "license": "Apache-2.0",
-  "author": "Algenta, Inc.",
+  "author": "Algenta",
   "os": ["darwin"],
   "cpu": ["arm64"],
   "files": ["lib/"],
