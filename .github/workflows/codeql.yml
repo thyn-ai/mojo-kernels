@@ -1,0 +1,63 @@
+# CodeQL (advanced setup) -- per pull request, on push to main, and weekly.
+#
+# Languages: the four CodeQL can analyse in this repository without a build --
+# python (the bm25_mojo / cclib_mojo wrappers, hatch build hooks, tests and
+# benchmarks), javascript-typescript (the fuse-mojo wrapper, its CJS/MJS sources
+# and tests), c-cpp (the single pthread shim kernels/fuse/src/shim.c) and
+# actions (these workflow files). Mojo is NOT a CodeQL language: the kernels
+# under kernels/*/src/*.mojo are covered by the differential test suites and
+# by the Opengrep/gitleaks/OSV gate in security.yml, not by CodeQL.
+#
+# Prerequisite: GitHub's CodeQL *default setup* must be switched off for this
+# repository. While it is on, GitHub rejects every SARIF upload from an
+# advanced configuration ("CodeQL analyses from advanced configurations
+# cannot be processed when the default setup is enabled").
+name: CodeQL
+
+"on":
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "23 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: codeql-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analyze:
+    name: CodeQL (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      actions: read
+      contents: read
+      packages: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [actions, c-cpp, javascript-typescript, python]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@1c5b675653bb5c22dbe9b12b556ec555138e09fd # v4.38.1
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: none
+          config-file: .github/codeql/codeql-config.yml
+
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@1c5b675653bb5c22dbe9b12b556ec555138e09fd # v4.38.1
+        with:
+          category: /language:${{ matrix.language }}

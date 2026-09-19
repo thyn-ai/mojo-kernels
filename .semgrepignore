@@ -1,0 +1,12 @@
+# Paths Opengrep skips in this repository (the thyn-ai/security-toolchain gate
+# already excludes node_modules/, build/, dist/, vendor/, .pixi/ and the other
+# org-wide directories; this file adds what is specific to mojo-kernels).
+
+# Mojo is a language Opengrep does not parse. The kernels under kernels/*/src
+# are covered by the differential test suites (native vs. reference backend),
+# not by a pattern scanner. The extension is excluded, not the directory:
+# kernels/*/build.sh are real shell scripts and stay in scope.
+*.mojo
+
+# Vendored Fuse.js fallback backend -- third-party code, scanned upstream.
+typescript/fuse-mojo/packages/core/vendor/
