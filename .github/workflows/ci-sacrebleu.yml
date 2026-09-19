@@ -1,0 +1,113 @@
+name: ci-sacrebleu
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Read-only token for every job: the workflow only builds, tests and uploads a
+# build artifact (artifact upload needs no write scope).
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: sacrebleu-mojo differential tests + wheel (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pixi
+        shell: bash
+        run: |
+          curl -fsSL https://pixi.sh/install.sh | bash
+          echo "$HOME/.pixi/bin" >> "$GITHUB_PATH"
+
+      - name: Build the sacrebleu Mojo kernel
+        run: pixi run bash kernels/sacrebleu/build.sh
+
+      - name: Install the sacrebleu oracle (test-only dependency)
+        run: pixi run python -m pip install "sacrebleu==2.5.1"
+
+      - name: Differential suite (native backend, then forced fallback)
+        shell: bash
+        run: |
+          export PYTHONPATH="python/sacrebleu_mojo"
+          export PYTHONNOUSERSITE=1
+          pixi run python -m pytest tests/test_sacrebleu_differential.py tests/test_sacrebleu_loader.py -q
+          SACREBLEU_MOJO_DISABLE_NATIVE=1 pixi run python -m pytest tests/test_sacrebleu_differential.py tests/test_sacrebleu_loader.py -q
+
+      - name: Build + repair the platform wheel (delocate/auditwheel)
+        shell: bash
+        run: |
+          cd python/sacrebleu_mojo
+          export MACOSX_DEPLOYMENT_TARGET="${MACOSX_DEPLOYMENT_TARGET:-14.0}"
+          rm -rf dist dist-repaired
+          pixi run python -m build --wheel --no-isolation --outdir dist .
+          raw="$(ls dist/*.whl)"
+          case "$(uname -s)" in
+            Darwin) pixi run delocate-wheel -v -w dist-repaired "$raw" ;;
+            Linux)  pixi run auditwheel repair "$raw" -w dist-repaired ;;
+          esac
+          rm -rf dist && mv dist-repaired dist
+          ls -la dist/
+
+      - name: Smoke-test the wheel in a clean venv
+        shell: bash
+        run: |
+          set -e
+          python3 -m venv /tmp/sacrebleu-wheel-smoke
+          /tmp/sacrebleu-wheel-smoke/bin/pip install --quiet python/sacrebleu_mojo/dist/*.whl
+          # Hide the pixi env for the smoke: an end user has no Mojo toolchain,
+          # so the wheel must load its kernel purely from its own vendored
+          # libraries (not via the build machine's absolute rpath).
+          repo_root="$PWD"
+          mv .pixi .pixi-hidden
+          trap 'mv "$repo_root/.pixi-hidden" "$repo_root/.pixi"' EXIT
+          cd /tmp
+          /tmp/sacrebleu-wheel-smoke/bin/python - <<'EOF'
+          import sacrebleu_mojo
+
+          hyps = ["the quick brown fox jumps over the lazy dog", "hello world"]
+          refs = [["the quick brown fox jumps over the lazy dog", "hello there world"]]
+
+          bleu = sacrebleu_mojo.corpus_bleu(hyps, refs)
+          chrf = sacrebleu_mojo.corpus_chrf(hyps, refs)
+          info = sacrebleu_mojo.backend_info()
+          assert info["native_available"], f"wheel must carry the native kernel: {info}"
+          assert bleu.backend == "native" and chrf.backend == "native"
+          # Reference values from the published oracle package (identical to
+          # all printed digits on both backends).
+          assert abs(bleu.score - 88.66057689902036) <= 1e-9, bleu.score
+          assert abs(chrf.score - 84.8339703264813) <= 1e-9, chrf.score
+          assert bleu.counts == [11, 8, 7, 6]
+          assert bleu.totals == [11, 9, 7, 6]
+          print(str(bleu))
+          print(str(chrf))
+          print("wheel smoke OK:", sacrebleu_mojo.__version__, info["native_source"])
+          EOF
+          # The forced fallback must produce the same scores (1e-9 tolerance).
+          SACREBLEU_MOJO_DISABLE_NATIVE=1 /tmp/sacrebleu-wheel-smoke/bin/python - <<'EOF'
+          import sacrebleu_mojo
+
+          hyps = ["the quick brown fox jumps over the lazy dog", "hello world"]
+          refs = [["the quick brown fox jumps over the lazy dog", "hello there world"]]
+          bleu = sacrebleu_mojo.corpus_bleu(hyps, refs)
+          chrf = sacrebleu_mojo.corpus_chrf(hyps, refs)
+          assert bleu.backend == "fallback" and chrf.backend == "fallback"
+          assert abs(bleu.score - 88.66057689902036) <= 1e-9, bleu.score
+          assert abs(chrf.score - 84.8339703264813) <= 1e-9, chrf.score
+          assert bleu.counts == [11, 8, 7, 6]
+          print("fallback smoke OK")
+          EOF
+
+      - name: Upload wheel
+        uses: actions/upload-artifact@v4
+        with:
+          name: sacrebleu-mojo-wheel-${{ matrix.os }}
+          path: python/sacrebleu_mojo/dist/*.whl
+          retention-days: 14

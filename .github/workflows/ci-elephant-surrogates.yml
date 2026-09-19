@@ -1,0 +1,82 @@
+name: ci-elephant-surrogates
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Read-only token for every job: the workflow only builds, tests and uploads a
+# build artifact (artifact upload needs no write scope).
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: elephant-mojo differential tests + wheel (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pixi
+        shell: bash
+        run: |
+          curl -fsSL https://pixi.sh/install.sh | bash
+          echo "$HOME/.pixi/bin" >> "$GITHUB_PATH"
+
+      - name: Build the elephant-surrogates Mojo kernel
+        run: pixi run bash kernels/elephant-surrogates/build.sh
+
+      - name: Differential suite (native backend, then forced fallback)
+        run: PYTHONPATH=python/elephant_mojo pixi run bash scripts/test_all_elephant_surrogates.sh
+
+      - name: Build + repair the platform wheel (delocate/auditwheel)
+        run: pixi run bash python/elephant_mojo/build_wheel.sh
+
+      - name: Smoke-test the wheel in a clean venv
+        shell: bash
+        run: |
+          set -e
+          python3 -m venv /tmp/elephant-wheel-smoke
+          /tmp/elephant-wheel-smoke/bin/pip install --quiet python/elephant_mojo/dist/*.whl
+          # Hide the pixi env for the smoke: an end user has no Mojo toolchain,
+          # so the wheel must load its kernel purely from its own vendored
+          # libraries (not via the build machine's absolute rpath).
+          repo_root="$PWD"
+          mv .pixi .pixi-hidden
+          trap 'mv "$repo_root/.pixi-hidden" "$repo_root/.pixi"' EXIT
+          cd /tmp
+          /tmp/elephant-wheel-smoke/bin/python "$repo_root/python/elephant_mojo/examples/quickstart.py" | tee /tmp/quickstart-native.txt
+          # The forced fallback must produce the same deterministic p-value
+          # spectrum checksum (the dither summary is stochastic by design
+          # and is not compared across backends).
+          ELEPHANT_MOJO_DISABLE_NATIVE=1 /tmp/elephant-wheel-smoke/bin/python "$repo_root/python/elephant_mojo/examples/quickstart.py" | tee /tmp/quickstart-fallback.txt
+          /tmp/elephant-wheel-smoke/bin/python - <<'EOF'
+          import re
+
+          import elephant_mojo
+
+          info = elephant_mojo.backend_info()
+          assert info["native_available"], f"wheel must carry the native kernel: {info}"
+
+          def checksum(path):
+              text = open(path).read()
+              m = re.search(r"spectrum checksum: ([0-9.eE+-]+)", text)
+              assert m, f"no checksum in {path}"
+              return m.group(1)
+
+          native = checksum("/tmp/quickstart-native.txt")
+          fallback = checksum("/tmp/quickstart-fallback.txt")
+          assert native == fallback, (native, fallback)  # deterministic function: exact
+          print("wheel smoke OK:", elephant_mojo.__version__, info["native_source"])
+          EOF
+
+      - name: Upload wheel
+        uses: actions/upload-artifact@v4
+        with:
+          name: elephant-mojo-wheel-${{ matrix.os }}
+          path: python/elephant_mojo/dist/*.whl
+          retention-days: 14

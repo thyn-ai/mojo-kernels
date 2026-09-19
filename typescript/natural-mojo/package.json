@@ -1,0 +1,18 @@
+{
+  "name": "natural-mojo-workspace",
+  "version": "0.1.0",
+  "private": true,
+  "description": "natural-mojo: drop-in faster replacement for natural's Levenshtein/Damerau-Levenshtein distance, powered by a Mojo kernel.",
+  "workspaces": [
+    "packages/core"
+  ],
+  "scripts": {
+    "test": "node --test tests/*.test.cjs",
+    "test:fallback": "NATURAL_MOJO_DISABLE_NATIVE=1 node --test tests/*.test.cjs",
+    "test:all": "bash scripts/test_all.sh",
+    "bench": "node ../../benchmarks/bench_natural.mjs"
+  },
+  "devDependencies": {
+    "natural": "8.1.1"
+  }
+}
