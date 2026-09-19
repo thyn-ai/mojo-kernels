@@ -33,5 +33,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   libraries vendored and load paths rewritten with `delocate` (macOS) and
   `auditwheel` / `patchelf` (Linux); an ABI-version handshake before every
   native call, falling back cleanly on mismatch.
+- Signed, SLSA-attested releases: every GitHub Release asset ships with a
+  keyless Sigstore signature bundle (`<asset>.sigstore.json`) and SLSA build
+  provenance (`multiple.intoto.jsonl`); registry publishing (PyPI, npm) uses
+  Trusted Publishing behind repository-variable gates. Verification steps in
+  [RELEASING.md](RELEASING.md).
 
 [Unreleased]: https://github.com/thyn-ai/mojo-kernels/commits/main

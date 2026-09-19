@@ -264,6 +264,14 @@ is `quickstart.py` at the repository root. Force the fallback with
 `CCLIB_MOJO_DISABLE_NATIVE=1`. Full integration guide:
 [`python/cclib_mojo/README.md`](python/cclib_mojo/README.md).
 
+### Verifying a download
+
+Every asset on a [GitHub Release](https://github.com/thyn-ai/mojo-kernels/releases)
+ships with a keyless Sigstore signature bundle (`<asset>.sigstore.json`) and
+is covered by SLSA build provenance (`multiple.intoto.jsonl`), both produced
+by the release workflow itself. [`RELEASING.md`](RELEASING.md#verify-a-release)
+has the `cosign verify-blob` and `slsa-verifier` commands.
+
 ## Fallback semantics (every package)
 
 There is no Windows Mojo toolchain today, and a shared library can always go
