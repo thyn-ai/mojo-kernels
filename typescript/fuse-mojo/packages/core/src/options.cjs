@@ -92,11 +92,14 @@ function validateOptions(options) {
   if (typeof options.distance !== 'number' || Number.isNaN(options.distance)) {
     throw new UnsupportedOptionError('non-numeric distance')
   }
-  if (!Number.isInteger(options.location)) {
-    throw new UnsupportedOptionError('non-integer location')
+  if (!Number.isInteger(options.location) || Math.abs(options.location) > 0x7fffffff) {
+    throw new UnsupportedOptionError('non-integer or out-of-range location')
   }
-  if (!Number.isInteger(options.minMatchCharLength)) {
-    throw new UnsupportedOptionError('non-integer minMatchCharLength')
+  if (
+    !Number.isInteger(options.minMatchCharLength) ||
+    options.minMatchCharLength > 0x7fffffff
+  ) {
+    throw new UnsupportedOptionError('non-integer or out-of-range minMatchCharLength')
   }
   for (const key of options.keys) {
     if (typeof key === 'object' && key !== null && !Array.isArray(key) && key.getFn) {
