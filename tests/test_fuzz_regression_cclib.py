@@ -3,10 +3,11 @@
 Each file under ``fuzz/corpus/cclib/`` is one scenario for
 ``fuzz/fuzz_cclib.py`` (see that module for what is compared). Run by
 ``scripts/test_all_cclib.sh`` on both backends: the native pass is the real
-differential; the forced-fallback pass still checks the fallback against
-the PyQuante oracle, the public-API contracts and the validation contract.
-The ``known-issue-*`` reproducers here are validation-path exceptions, so
-they reproduce on either backend.
+differential and requires every ``known-issue-*`` reproducer to still
+reproduce its issue; the forced-fallback pass checks the fallback against
+the PyQuante oracle, the public-API contracts and the validation contract
+on the same seeds (a native-vs-fallback divergence cannot reproduce
+without the kernel).
 """
 
 from __future__ import annotations

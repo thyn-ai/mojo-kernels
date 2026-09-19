@@ -80,7 +80,7 @@ generators.
 | Key | Harness | Issue |
 |---|---|---|
 | `degenerate-nan` | `fuzz_bm25.py` | [#15](https://github.com/thyn-ai/mojo-kernels/issues/15) -- kernel scores unposted documents 0 where `rank_bm25` yields NaN (`k1 == 0`, `b == 1` with empty documents, `b > 1`, non-finite parameters) |
-| `extreme-magnitude` | `fuzz_cclib.py` | [#16](https://github.com/thyn-ai/mojo-kernels/issues/16) -- exponents beyond ~1e68 or below ~1e-100, and atom coordinates beyond ~1e170 Angstrom, raise `OverflowError`/`ZeroDivisionError` instead of `BasisError` |
+| `extreme-magnitude` | `fuzz_cclib.py` | [#16](https://github.com/thyn-ai/mojo-kernels/issues/16) -- magnitudes are not validated: exponents beyond ~1e68 or below ~1e-100 and coordinates beyond ~1e170 Angstrom raise `OverflowError`/`ZeroDivisionError` instead of `BasisError`; a coefficient x norm x primitive-weight x r^L prefactor beyond the double range makes the kernel return inf x 0 = NaN where the fallback returns 0 |
 
 ## Layout
 

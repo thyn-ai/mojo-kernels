@@ -3,9 +3,10 @@
 Each file under ``fuzz/corpus/bm25/`` is one scenario for
 ``fuzz/fuzz_bm25.py`` (see that module for what is compared). Run by
 ``scripts/test_all.sh`` on both backends: the native pass is the real
-differential; the forced-fallback pass still checks the fallback against
-the ``rank_bm25`` oracle and the exception contracts, but skips the
-``known-issue-*`` reproducers, which need the kernel to reproduce.
+differential and requires every ``known-issue-*`` reproducer to still
+reproduce its issue; the forced-fallback pass checks the fallback against
+the ``rank_bm25`` oracle and the exception contracts on the same seeds
+(a native-vs-fallback divergence cannot reproduce without the kernel).
 """
 
 from __future__ import annotations
@@ -34,6 +35,4 @@ def test_seed_corpus_is_present():
 
 @pytest.mark.parametrize("seed", SEEDS, ids=lambda p: p.name)
 def test_seed_replays_without_divergence(seed: Path):
-    if expected_issue_key(seed) is not None and not harness.native_available():
-        pytest.skip("known-issue reproducers are native-vs-fallback divergences; needs the kernel")
     harness.replay_seed(seed)

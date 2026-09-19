@@ -283,13 +283,41 @@ def _extreme_magnitude(case: Case) -> bool:
     )
 
 
+def _prefactor_overflows(basis, axes, coeff2d: np.ndarray) -> bool:
+    """True when |c_b| * N_b * |w_p| * |x-cx|^l |y-cy|^m |z-cz|^n exceeds the
+    double range at some grid point for some basis function and primitive.
+
+    The kernel multiplies coefficient, contracted norm, polynomial and
+    primitive weight before the Gaussian factors; the fallback multiplies
+    polynomial and contraction (weight times exponential) first. When that
+    prefactor is inf and the exponential has underflowed to 0 the two orders
+    give inf * 0 = NaN versus 0. Unreachable for physical inputs (it needs
+    |c * N * w * r^L| beyond ~1e308) -- the third symptom of the missing
+    magnitude validation tracked in the issue above.
+    """
+    ax, ay, az = axes
+    with np.errstate(all="ignore"):
+        cmax = np.abs(coeff2d).max(axis=0)
+        for b in range(basis.n_bf):
+            o0, o1 = int(basis.offsets[b]), int(basis.offsets[b + 1])
+            wmax = np.abs(basis.prim_w[o0:o1]).max()
+            dx = np.abs(ax - basis.center_x[b]) ** basis.powers_l[b]
+            dy = np.abs(ay - basis.center_y[b]) ** basis.powers_m[b]
+            dz = np.abs(az - basis.center_z[b]) ** basis.powers_n[b]
+            poly = dx[:, None, None] * dy[None, :, None] * dz[None, None, :]
+            if not np.all(np.isfinite(cmax[b] * basis.bf_norm[b] * wmax * poly)):
+                return True
+    return False
+
+
 ISSUE_EXTREME_MAGNITUDE = KnownIssue(
     key="extreme-magnitude",
     url="https://github.com/thyn-ai/mojo-kernels/issues/16",
     title=(
-        "cclib-mojo: basis exponents beyond ~1e68 or below ~1e-100, and atom coordinates "
-        "beyond ~1e170 Angstrom, surface OverflowError/ZeroDivisionError from "
-        "normalisation instead of BasisError"
+        "cclib-mojo: extreme magnitudes are not validated: exponents beyond ~1e68 or "
+        "below ~1e-100 and coordinates beyond ~1e170 Angstrom raise OverflowError/"
+        "ZeroDivisionError instead of BasisError, and a coefficient*norm*weight*r^L prefactor "
+        "beyond the double range makes the kernel return inf*0 = NaN where the fallback returns 0"
     ),
     applies=_extreme_magnitude,
 )
@@ -378,19 +406,23 @@ def _conditioning(basis, axes, coeff2d: np.ndarray, mode: int) -> np.ndarray:
     return scale
 
 
-def _assert_close(what: str, actual: np.ndarray, expected: np.ndarray, scale: np.ndarray, case: Case) -> None:
+def _close_mask(actual: np.ndarray, expected: np.ndarray, scale: np.ndarray) -> np.ndarray:
     with np.errstate(all="ignore"):
         tol = ATOL + RTOL * np.maximum(np.abs(expected), scale)
-        ok = (
+        return (
             (np.abs(actual - expected) <= tol)
             | (actual == expected)
             | (np.isnan(actual) & np.isnan(expected))
         )
+
+
+def _assert_close(what: str, actual: np.ndarray, expected: np.ndarray, scale: np.ndarray, case: Case) -> None:
+    ok = _close_mask(actual, expected, scale)
     if not np.all(ok):
         bad = np.flatnonzero(~ok)
         raise Divergence(
-            f"{what} differ at grid points {bad.tolist()}: actual={actual[bad]} expected={expected[bad]} "
-            f"tolerance={tol[bad]}\n  case: {case.describe()}"
+            f"{what} differ at grid points {bad.tolist()}: actual={actual[bad]} expected={expected[bad]}"
+            f"\n  case: {case.describe()}"
         )
 
 
@@ -444,10 +476,19 @@ def evaluate(case: Case) -> str | None:
     fallback = _reference.eval_grid(basis, *axes, coeff2d, mode)
     scale = _conditioning(basis, axes, coeff2d, mode)
     flat = out.reshape(-1)
+    outcome: str | None = None
 
     if cclib_mojo.native_available():
         native = _native.eval_grid(basis, *axes, coeff2d, mode)
-        _assert_close("native kernel vs fallback", native, fallback, scale, case)
+        ok = _close_mask(native, fallback, scale)
+        if not np.all(ok):
+            # Known shape: every disagreement has a non-finite value on at
+            # least one side, and the prefactor really does overflow here.
+            non_finite = ~np.isfinite(native) | ~np.isfinite(fallback)
+            if np.all(ok | non_finite) and _prefactor_overflows(basis, axes, coeff2d):
+                outcome = ISSUE_EXTREME_MAGNITUDE.key
+            else:
+                _assert_close("native kernel vs fallback", native, fallback, scale, case)
         if not np.array_equal(flat, native, equal_nan=True):
             raise Divergence(
                 "public API result is not the native kernel's output bit-for-bit\n  case: "
@@ -472,7 +513,7 @@ def evaluate(case: Case) -> str | None:
                 tuple(args["origin"]), tuple(args["step"]), shape,
             )
         _assert_close("fallback vs PyQuante oracle", fallback, ref.reshape(-1), scale, case)
-    return None
+    return outcome
 
 
 def test_one_input(data: bytes) -> str | None:
@@ -500,8 +541,13 @@ def native_available() -> bool:
 
 
 def replay_seed(seed: Path) -> str | None:
-    """Replay one corpus file with the strict known-issue rules (pytest entry)."""
-    return _replay_seed(seed, test_one_input, KNOWN_ISSUES)
+    """Replay one corpus file (pytest entry point).
+
+    ``known-issue-*`` seeds must reproduce their issue whenever the native
+    kernel is loadable; without it a native-vs-fallback divergence cannot
+    reproduce, so the seed is only required to replay without a divergence.
+    """
+    return _replay_seed(seed, test_one_input, KNOWN_ISSUES, strict=native_available())
 
 
 def _banner() -> str:

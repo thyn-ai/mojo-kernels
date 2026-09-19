@@ -109,6 +109,29 @@ def _cclib_reproducers(harness) -> dict[str, bytes]:
         # centred at |x| ~ 1e292 Angstrom with a small exponent; the product
         # centre rounds away from the atom and (P - A)^2 overflows.
         "known-issue-extreme-magnitude-5.bin": case("D", 2.6571366763582966e-22, -1.941414049957967e292),
+        # Found by the third coverage-guided run: coefficient 1e150 on a P
+        # function evaluated 1e170 Angstrom away. |c N x| overflows to inf
+        # while exp(-alpha r^2) underflows to 0; the kernel's product order
+        # gives inf * 0 = NaN, the fallback's gives 0.
+        "known-issue-extreme-magnitude-6.bin": Case(
+            raw_numbers=True, defect=0,
+            gbasis=((("P", ((1.0, 1.0),)),),),
+            atomcoords=((0.0, 0.0, 0.0),),
+            coeff=((1e150, 0.0, 0.0),),
+            mo_index=None,
+            origin=(1e170, 0.0, 0.0), step=(1.0, 1.0, 1.0), shape=(1, 1, 1),
+        ),
+        # Same mechanism through the primitive weight (found by the first
+        # workflow run on the pull request): an S function (polynomial 1)
+        # with an in-window exponent whose c * N * w product overflows.
+        "known-issue-extreme-magnitude-7.bin": Case(
+            raw_numbers=True, defect=0,
+            gbasis=((("S", ((1e6, 1.0),)),),),
+            atomcoords=((0.0, 0.0, 0.0),),
+            coeff=((1e305,),),
+            mo_index=None,
+            origin=(1e170, 0.0, 0.0), step=(1.0, 1.0, 1.0), shape=(1, 1, 1),
+        ),
     }
     return {name: harness.encode(c) for name, c in cases.items()}
 

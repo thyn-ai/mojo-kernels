@@ -461,8 +461,13 @@ def native_available() -> bool:
 
 
 def replay_seed(seed: Path) -> str | None:
-    """Replay one corpus file with the strict known-issue rules (pytest entry)."""
-    return _replay_seed(seed, test_one_input, KNOWN_ISSUES)
+    """Replay one corpus file (pytest entry point).
+
+    ``known-issue-*`` seeds must reproduce their issue whenever the native
+    kernel is loadable; without it a native-vs-fallback divergence cannot
+    reproduce, so the seed is only required to replay without a divergence.
+    """
+    return _replay_seed(seed, test_one_input, KNOWN_ISSUES, strict=native_available())
 
 
 def _banner() -> str:
