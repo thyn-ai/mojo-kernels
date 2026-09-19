@@ -1,0 +1,16 @@
+NOTICE
+======
+
+@natural-mojo/core includes code vendored from natural v8.1.1
+(vendor/natural_distance.cjs), used as the pure-JavaScript fallback backend
+on platforms without a prebuilt native kernel, and as the reference oracle
+in the differential test suite.
+
+natural — Natural Language Toolkit for Node.js
+Copyright (c) 2011, 2012 Chris Umbel, Rob Ellis, Russell Mull
+distance module: Copyright (c) 2012, Sid Nallu, Chris Umbel
+Licensed under the MIT License
+https://github.com/NaturalNode/natural
+
+The remainder of this package is Copyright (c) 2026 Algenta,
+Apache License, Version 2.0.
