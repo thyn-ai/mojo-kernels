@@ -150,6 +150,15 @@ function threadCap() {
   return Math.min(cpus, 64)
 }
 
+function minChunk() {
+  const raw = process.env[ENV_MIN_CHUNK]
+  if (raw !== undefined) {
+    const n = Number.parseInt(raw, 10)
+    if (Number.isInteger(n) && n > 0) return n
+  }
+  return 2048
+}
+
 function load() {
   /** Resolve, dlopen, and ABI-handshake the native kernel. Never caches failure. */
   if (process.env[ENV_DISABLE] === '1') {
@@ -187,7 +196,7 @@ function load() {
           if (fs.existsSync(shimPath)) {
             const shimLib = koffi.load(shimPath)
             _shim = shimLib.func(
-              'int32_t fusemojo_search_parallel(void* ctx, int32_t n_texts, int32_t max_threads)'
+              'int32_t fusemojo_search_parallel(void* ctx, int32_t n_texts, int32_t max_threads, int32_t min_chunk)'
             )
           }
         } catch {
@@ -280,11 +289,12 @@ class NativeIndex {
     this._handle = handle
     this.nTexts = nTexts
     this._threads = threadCap()
+    this._minChunk = minChunk()
     // Reusable per-query buffers (single-threaded per instance).
     this._scores = new Float64Array(nTexts)
     this._isMatch = new Int32Array(nTexts)
     this._idxOffsets = new Int32Array(nTexts + 1)
-    registry.register(this, handle)
+    registry.register(this, handle, this)
   }
 
   /**
@@ -312,7 +322,7 @@ class NativeIndex {
     }
     let rc
     if (_shim) {
-      rc = _shim(ctx, this.nTexts, this._threads)
+      rc = _shim(ctx, this.nTexts, this._threads, this._minChunk)
     } else {
       rc = this._lib.search_range(ctx, 0, 0, this.nTexts)
     }
@@ -360,4 +370,5 @@ module.exports = {
   ENV_LIB,
   ENV_DISABLE,
   ENV_THREADS,
+  ENV_MIN_CHUNK,
 }

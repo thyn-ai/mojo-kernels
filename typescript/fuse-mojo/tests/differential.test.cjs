@@ -158,6 +158,32 @@ runCell('object nested path + number leaf', objectDocs, patterns, {
   threshold: 0.4,
 })
 
+// --- multi-job stress: force many tiny native jobs so the per-job stash
+// concatenation crosses job boundaries for almost every text ---
+test(`differential [${BACKEND}] multi-job stash concat`, { skip: BACKEND !== 'native' }, () => {
+  process.env.FUSE_MOJO_THREADS = '8'
+  process.env.FUSE_MOJO_MIN_CHUNK = '1'
+  let mojo
+  try {
+    mojo = new Fuse(corpus, { includeScore: true, includeMatches: true, threshold: 0.7 })
+  } finally {
+    delete process.env.FUSE_MOJO_THREADS
+    delete process.env.FUSE_MOJO_MIN_CHUNK
+  }
+  const ref = new ReferenceFuse(corpus, {
+    includeScore: true,
+    includeMatches: true,
+    threshold: 0.7,
+  })
+  const options = { includeScore: true, includeMatches: true }
+  for (const pattern of patterns.slice(0, 60)) {
+    const a = mojo.search(pattern)
+    const b = ref.search(pattern)
+    const problem = compareResults(a, b, options)
+    assert.equal(problem, null, `pattern=${JSON.stringify(pattern)}: ${problem}`)
+  }
+})
+
 // --- empty/edge collections ---
 test(`differential [${BACKEND}] edge collections`, () => {
   const edgeDocs = ['', '   ', 'a', 'ab', 'abc', 'x'.repeat(100), 'a😀b', 'z']

@@ -104,6 +104,32 @@ test('setCollection reindexes', () => {
   assert.equal(res[0].item, 'gamma')
 })
 
+test('explicit destroy + GC does not double-free the native index', { skip: !NATIVE_EXPECTED }, () => {
+  // Regression: FinalizationRegistry entries must be unregistered on explicit
+  // destroy (a no-token register() can never be unregistered per spec).
+  // A double free surfaces as a tcmalloc "Object was not in-use" complaint on
+  // the child's stderr; assert clean exit and clean stderr.
+  const { spawnSync } = require('node:child_process')
+  const script = `
+    const Fuse = require('@fuse-mojo/core')
+    const docs = Array.from({ length: 20000 }, (_, i) => 'tok' + i + ' alpha beta gamma')
+    for (let r = 0; r < 3; r++) {
+      const f = new Fuse(docs, { includeScore: true })
+      f.search('alpha')
+      f.destroy()
+    }
+    gc()
+    console.log('child done')
+  `
+  const res = spawnSync(process.execPath, ['--expose-gc', '-e', script], {
+    cwd: require('node:path').resolve(__dirname, '..'),
+    encoding: 'utf8',
+  })
+  assert.equal(res.status, 0, res.stderr)
+  assert.match(res.stdout, /child done/)
+  assert.doesNotMatch(res.stderr, /in-use|tcmalloc|double free/i)
+})
+
 test('config defaults are exposed and mutable like the reference', () => {
   assert.equal(Fuse.config.threshold, 0.6)
   assert.equal(Fuse.version, '0.1.0')

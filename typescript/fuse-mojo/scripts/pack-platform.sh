@@ -18,8 +18,8 @@ cd "$(dirname "$0")/.."
 repo_root="$(cd ../.. && pwd)"
 
 case "$(uname -s)-$(uname -m)" in
-  Darwin-arm64)  pkg_dir="packages/darwin-arm64"; lib="libfusemojo.dylib" ;;
-  Linux-x86_64)  pkg_dir="packages/linux-x64";  lib="libfusemojo.so" ;;
+  Darwin-arm64)  pkg_dir="packages/darwin-arm64"; lib="libfusemojo.dylib"; shim="libfusemojoshim.dylib" ;;
+  Linux-x86_64)  pkg_dir="packages/linux-x64";  lib="libfusemojo.so";  shim="libfusemojoshim.so" ;;
   *) echo "error: no platform package for $(uname -s)-$(uname -m)" >&2; exit 1 ;;
 esac
 
@@ -28,6 +28,9 @@ src="${FUSE_MOJO_NATIVE_SRC:-$repo_root/kernels/fuse/build/$lib}"
 
 mkdir -p "$pkg_dir/lib"
 cp "$src" "$pkg_dir/lib/$lib"
+shim_src="$(dirname "$src")/$shim"
+[ -f "$shim_src" ] || { echo "error: shim not built: $shim_src" >&2; exit 1; }
+cp "$shim_src" "$pkg_dir/lib/$shim"
 
 case "$(uname -s)" in
   Darwin)
