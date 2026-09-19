@@ -1,5 +1,12 @@
 # mojo-kernels
 
+[![ci](https://github.com/thyn-ai/mojo-kernels/actions/workflows/ci.yml/badge.svg)](https://github.com/thyn-ai/mojo-kernels/actions/workflows/ci.yml)
+[![ci-cclib](https://github.com/thyn-ai/mojo-kernels/actions/workflows/ci-cclib.yml/badge.svg)](https://github.com/thyn-ai/mojo-kernels/actions/workflows/ci-cclib.yml)
+[![ci-fuse](https://github.com/thyn-ai/mojo-kernels/actions/workflows/ci-fuse.yml/badge.svg)](https://github.com/thyn-ai/mojo-kernels/actions/workflows/ci-fuse.yml)
+[![CodeQL](https://github.com/thyn-ai/mojo-kernels/actions/workflows/codeql.yml/badge.svg)](https://github.com/thyn-ai/mojo-kernels/actions/workflows/codeql.yml)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/thyn-ai/mojo-kernels/badge)](https://scorecard.dev/viewer/?uri=github.com/thyn-ai/mojo-kernels)
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](./LICENSE)
+
 **Clean-room [Mojo](https://www.modular.com/mojo) kernels as drop-in
 accelerators for popular Python and TypeScript libraries.** Same API, same
 results — measured **70x–8,700x** speedups with bit-exact-to-last-ulp parity
@@ -274,6 +281,15 @@ and pure-JavaScript hot loops are landing on `main`, each with the same
 guarantees (differential parity, measured cold + warm benchmarks, self-
 contained packages, pure-language fallback everywhere). Watch the repo or
 check back here — the kernel table above grows as each one lands.
+
+## Contributing and security
+
+Contributions are welcome — [CONTRIBUTING.md](./CONTRIBUTING.md) maps each CI
+workflow to the `pixi run` task that reproduces it locally and describes what
+a kernel change needs (differential parity on both backends, clean-room only).
+Security reports are never public: see [SECURITY.md](./SECURITY.md) for the
+private channels and what is in scope. This project follows the
+[Contributor Covenant](./CODE_OF_CONDUCT.md).
 
 ## License
 
