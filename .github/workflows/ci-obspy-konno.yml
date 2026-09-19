@@ -1,0 +1,87 @@
+name: ci-obspy-konno
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    name: obspy-mojo differential tests + wheel (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pixi
+        shell: bash
+        run: |
+          curl -fsSL https://pixi.sh/install.sh | bash
+          echo "$HOME/.pixi/bin" >> "$GITHUB_PATH"
+
+      - name: Install uv (for the oracle package)
+        shell: bash
+        run: |
+          curl -fsSL https://astral.sh/uv/install.sh | sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Install the obspy oracle into .oracle-python
+        # obspy is the differential-test oracle only, never a runtime
+        # dependency of obspy-mojo. pixi.toml is shared by every kernel leg
+        # in this repo, so the oracle is installed imperatively into a
+        # --target directory that pixi never touches, and put on PYTHONPATH.
+        run: |
+          pixi install
+          uv pip install --python .pixi/envs/default/bin/python --target .oracle-python "obspy==1.5.1"
+
+      - name: Build the obspy-konno Mojo kernel
+        run: pixi run bash kernels/obspy-konno/build.sh
+
+      - name: Differential suite (native backend, then forced fallback)
+        run: pixi run bash scripts/test_all_obspy_konno.sh
+
+      - name: Build + repair the platform wheel (delocate/auditwheel)
+        run: pixi run bash python/obspy_mojo/build_wheel.sh
+
+      - name: Smoke-test the wheel in a clean venv
+        shell: bash
+        run: |
+          set -e
+          python3 -m venv /tmp/obspy-mojo-wheel-smoke
+          /tmp/obspy-mojo-wheel-smoke/bin/pip install --quiet python/obspy_mojo/dist/*.whl
+          # Hide the pixi env for the smoke: an end user has no Mojo toolchain,
+          # so the wheel must load its kernel purely from its own vendored
+          # libraries (not via the build machine's absolute rpath).
+          repo_root="$PWD"
+          mv .pixi .pixi-hidden
+          trap 'mv "$repo_root/.pixi-hidden" "$repo_root/.pixi"' EXIT
+          cd /tmp
+          /tmp/obspy-mojo-wheel-smoke/bin/python - <<'EOF'
+          import numpy as np
+
+          import obspy_mojo
+
+          info = obspy_mojo.backend_info()
+          assert info["native_available"], f"wheel must carry the native kernel: {info}"
+
+          freqs = np.logspace(-1, 2, 257)
+          spectra = np.random.default_rng(7).random(257) * 100.0
+          out_native = obspy_mojo.konno_ohmachi_smoothing(spectra, freqs, normalize=True)
+          import os
+          os.environ["OBSPY_MOJO_DISABLE_NATIVE"] = "1"
+          out_fallback = obspy_mojo.konno_ohmachi_smoothing(spectra, freqs, normalize=True)
+          # native and vendored fallback must agree (documented 1e-9 tolerance)
+          np.testing.assert_allclose(out_fallback, out_native, rtol=1e-9, atol=1e-12)
+          print("wheel smoke OK:", obspy_mojo.__version__, info["native_source"])
+          print("checksum:", float(out_native.sum()))
+          EOF
+
+      - name: Upload wheel
+        uses: actions/upload-artifact@v4
+        with:
+          name: obspy-mojo-wheel-${{ matrix.os }}
+          path: python/obspy_mojo/dist/*.whl
+          retention-days: 14
