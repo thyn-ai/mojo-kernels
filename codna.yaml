@@ -1,0 +1,8 @@
+# Codna (https://codna.ai) configuration for this repository.
+#
+# The differential suites only run inside the pixi environment (Mojo toolchain,
+# PYTHONPATH to the in-repo wrappers, pinned oracles), so plain `pytest` cannot
+# import them. This tells `codna fix --tests` -- and the Codna GitHub App's
+# CI-failure fixes -- to run the tests the way CONTRIBUTING.md does.
+fix:
+  test_command: pixi run test
