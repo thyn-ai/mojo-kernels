@@ -1,0 +1,13 @@
+name: mojo-kernels source
+
+# Generated, installed and vendored trees hold no first-party code worth an
+# alert. The vendored Fuse.js fallback backend is third-party code that is
+# scanned upstream (fusejs.io), not here.
+paths-ignore:
+  - "**/node_modules/**"
+  - "**/dist/**"
+  - "**/build/**"
+  - "**/.pixi/**"
+  - "**/.venv/**"
+  - "**/*.egg-info/**"
+  - "typescript/fuse-mojo/packages/core/vendor/**"

@@ -1,0 +1,20 @@
+{
+  "projectName": "mojo-kernels",
+  "projectOwner": "thyn-ai",
+  "imageSize": 100,
+  "contributorsPerLine": 7,
+  "contributors": [
+    {
+      "login": "0xamlab",
+      "name": "0xamlab",
+      "avatar_url": "https://avatars.githubusercontent.com/u/79715912?v=4",
+      "profile": "https://github.com/0xamlab",
+      "contributions": [
+        "code",
+        "doc",
+        "infra",
+        "maintenance"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,41 @@
+# Marks issues stale after 60 days of inactivity and closes them 14 days
+# later. PRs may be marked stale but are never auto-closed
+# (days-before-pr-close: -1). Issues labeled pinned, security or
+# good first issue are exempt.
+name: Stale
+
+"on":
+  schedule:
+    - cron: "41 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  stale:
+    name: Mark and close stale issues
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      pull-requests: write
+    steps:
+      - uses: actions/stale@4391f3da665fdf50b6810c1a66712fb9ba21aa93 # v11.0.0
+        with:
+          days-before-stale: 60
+          days-before-close: 14
+          days-before-pr-close: -1
+          stale-issue-label: stale
+          stale-pr-label: stale
+          exempt-issue-labels: "pinned,security,good first issue"
+          stale-issue-message: >-
+            This issue has been inactive for 60 days and has been marked as
+            stale. It will be closed in 14 days if there is no further
+            activity. If it is still relevant, please leave a comment.
+          close-issue-message: >-
+            This issue was closed because it has been stale for 14 days. If
+            it is still relevant, please comment and it can be reopened.
+          stale-pr-message: >-
+            This pull request has been inactive for 60 days and has been
+            marked as stale. It will not be closed automatically, but please
+            update it or it may be closed by a maintainer.

@@ -1,0 +1,79 @@
+# Dependabot configuration.
+#
+# Every entry carries `cooldown: default-days: 7`: a version bump is proposed only once the
+# release is a week old, so a compromised or hastily-yanked upload is caught upstream before it
+# reaches a PR here (Dependabot's own default is 3 days). Security updates are never delayed by
+# cooldown.
+#
+# What Dependabot can and cannot see in this repository:
+#   * pixi.toml / pixi.lock (the Mojo compiler, Python, numpy, pytest, the test oracles rank_bm25 /
+#     cclib / pyquante2, build / hatchling / delocate / auditwheel) -- NOT supported. Dependabot has
+#     no pixi ecosystem and does not read pixi.lock, so the toolchain is refreshed by hand with
+#     `pixi update` (pixi.lock is committed; CI installs from it).
+#   * python/*/pyproject.toml -- the published wrappers' runtime dependency (numpy) and build
+#     backend (hatchling): the two `pip` entries below.
+#   * typescript/fuse-mojo/package-lock.json -- the npm workspace (koffi, and the Fuse.js oracle as
+#     a dev dependency): the `npm` entry below, pointed at the workspace root so the lockfile is
+#     updated together with packages/core.
+#   * .github/workflows/*.yml -- the SHA-pinned actions: the `github-actions` entry below.
+version: 2
+updates:
+  # GitHub Actions: weekly, grouped into one PR -- the same action is pinned by SHA at several call
+  # sites, and one grouped bump is reviewable where a handful of single-action PRs would not be.
+  # thyn-ai/security-toolchain is excluded: its own propagate.py is the one bumper for that pin
+  # (it moves the CI pin and the pre-commit `rev` together and carries required caller
+  # `permissions:` forward when a release adds one; a routine digest bump would not). Dependabot
+  # names a reusable-workflow dependency by its full path, hence the wildcard.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      actions:
+        patterns:
+          - "*"
+    ignore:
+      - dependency-name: "thyn-ai/security-toolchain*"
+    commit-message:
+      prefix: chore(ci)
+
+  - package-ecosystem: npm
+    directory: /typescript/fuse-mojo
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      deps:
+        patterns:
+          - "*"
+    commit-message:
+      prefix: chore(fuse-mojo)
+
+  - package-ecosystem: pip
+    directory: /python/bm25_mojo
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      deps:
+        patterns:
+          - "*"
+    commit-message:
+      prefix: chore(bm25-mojo)
+
+  - package-ecosystem: pip
+    directory: /python/cclib_mojo
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      deps:
+        patterns:
+          - "*"
+    commit-message:
+      prefix: chore(cclib-mojo)
