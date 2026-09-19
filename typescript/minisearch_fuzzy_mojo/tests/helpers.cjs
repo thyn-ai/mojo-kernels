@@ -208,25 +208,39 @@ function compareSearch(a, b) {
 }
 
 /**
- * Compare two autoSuggest result arrays element-wise: identical suggestion
- * strings and terms, scores within 1e-9. Returns null when equal.
+ * Compare two autoSuggest result arrays: same suggestion set, identical
+ * terms per suggestion, scores within 1e-9, and consistent ranking. As with
+ * compareSearch, ranking is asserted for every adjacent reference pair whose
+ * scores differ by more than 1e-12; nearer ties are genuine float ties (the
+ * suggestion score is a mean of per-document scores, so 1-2 ulp of
+ * accumulation-order noise can flip their order). Returns null when
+ * consistent, else a diagnostic string.
  */
 function compareSuggest(a, b) {
   if (a.length !== b.length) {
     return `suggestion count differs: ${a.length} vs ${b.length}\n  mojo: ${JSON.stringify(a.slice(0, 5))}\n  mini: ${JSON.stringify(b.slice(0, 5))}`
   }
-  for (let i = 0; i < a.length; i += 1) {
-    if (a[i].suggestion !== b[i].suggestion) {
-      return `suggestion differs at rank ${i}:\n  mojo: ${JSON.stringify(a[i])}\n  mini: ${JSON.stringify(b[i])}`
+  const TIE_EPS = 1e-12
+  const byTextA = new Map(a.map((s) => [s.suggestion, s]))
+  const rankA = new Map(a.map((s, i) => [s.suggestion, i]))
+  for (let i = 0; i < b.length; i += 1) {
+    const sa = byTextA.get(b[i].suggestion)
+    if (sa === undefined) {
+      return `suggestion missing from candidate at rank ${i}:\n  mini: ${JSON.stringify(b[i])}`
     }
-    const aj = JSON.stringify(a[i].terms)
+    const aj = JSON.stringify(sa.terms)
     const bj = JSON.stringify(b[i].terms)
     if (aj !== bj) {
-      return `suggestion terms differ at rank ${i} (${a[i].suggestion}):\n  mojo: ${aj}\n  mini: ${bj}`
+      return `suggestion terms differ for ${b[i].suggestion}:\n  mojo: ${aj}\n  mini: ${bj}`
     }
-    const diff = Math.abs(a[i].score - b[i].score)
+    const diff = Math.abs(sa.score - b[i].score)
     if (!(diff <= 1e-9)) {
-      return `suggestion score differs at rank ${i} (${a[i].suggestion}): ${a[i].score} vs ${b[i].score}`
+      return `suggestion score differs for ${b[i].suggestion}: ${sa.score} vs ${b[i].score}`
+    }
+  }
+  for (let i = 0; i + 1 < b.length; i += 1) {
+    if (b[i].score - b[i + 1].score > TIE_EPS && !(rankA.get(b[i].suggestion) < rankA.get(b[i + 1].suggestion))) {
+      return `suggestion rank inverted near rank ${i}: ${b[i].suggestion} (${b[i].score}) before ${b[i + 1].suggestion} (${b[i + 1].score}), candidate reverses them`
     }
   }
   return null

@@ -229,3 +229,38 @@ test(`differential [${BACKEND}] id types`, () => {
     }
   }
 })
+
+// --- case-duplicated tokens: field lengths count unique RAW tokens
+// ('The' and 'the' are two entries), postings stay lowercased ---
+test(`differential [${BACKEND}] case-duplicated tokens`, () => {
+  const docs = [
+    { id: 1, t: 'The quick THE brown fox jumps over THE lazy dog' },
+    { id: 2, t: 'the THE Quick Brown Fox' },
+    { id: 3, t: 'Apples APPLES apples aPPles' },
+    { id: 4, t: 'trailing words here...' },
+    { id: 5, t: '...leading dots the THE' },
+  ]
+  const queries = ['the', 'THE', 'The quick', 'apples', 'trailing', 'the apples', 'lazy THE']
+  for (const options of [
+    {},
+    { combineWith: 'AND' },
+    { fuzzy: 0.2 },
+    { fuzzy: 0.5, prefix: true },
+    { prefix: true },
+  ]) {
+    const mojo = new MiniSearchMojo({ fields: ['t'] })
+    const ref = new MiniSearchRef({ fields: ['t'] })
+    mojo.addAll(docs)
+    ref.addAll(docs)
+    for (const query of queries) {
+      const a = mojo.search(query, options)
+      const b = ref.search(query, options)
+      const problem = compareSearch(a, b)
+      assert.equal(problem, null, `opts=${JSON.stringify(options)} query=${JSON.stringify(query)}: ${problem}`)
+      const sa = mojo.autoSuggest(query, options)
+      const sb = ref.autoSuggest(query, options)
+      const sproblem = compareSuggest(sa, sb)
+      assert.equal(sproblem, null, `suggest opts=${JSON.stringify(options)} query=${JSON.stringify(query)}: ${sproblem}`)
+    }
+  }
+})

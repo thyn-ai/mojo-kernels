@@ -218,16 +218,17 @@ class Engine {
       // separator runs (it has no postings and never matches queries, but it
       // inflates the document field length). Absent fields contribute the
       // running average to the field-length average instead.
-      const tokens =
-        value === undefined || value === null
-          ? null
-          : tokenizeRaw(String(value)).map(processTermDefault)
+      const rawTokens =
+        value === undefined || value === null ? null : tokenizeRaw(String(value))
+      const tokens = rawTokens === null ? null : rawTokens.map(processTermDefault)
       const tfMap = new Map()
       let uniqueWithEmpty = 0
       if (tokens !== null) {
-        const uniqueSet = new Set()
+        // The document field length counts unique RAW tokens (before
+        // lowercasing — 'The' and 'the' are two distinct entries there),
+        // including the empty token from leading/trailing separators.
+        const uniqueSet = new Set(rawTokens)
         for (const term of tokens) {
-          uniqueSet.add(term)
           if (term.length === 0) {
             continue // the empty term affects field length only, never postings
           }

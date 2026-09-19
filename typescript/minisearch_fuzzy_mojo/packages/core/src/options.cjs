@@ -178,9 +178,10 @@ function resolvePrefix(prefix, term) {
   return Boolean(prefix)
 }
 
-/** Fuzzy match weight: 9*len / (20 * (len + distance)), len = variant length. */
+/** Fuzzy match weight: 0.45*len / (len + distance), len = variant length.
+ *  (Operation order matches the reference's observable float behavior.) */
 function fuzzyWeight(termLen, distance) {
-  return (9 * termLen) / (20 * (termLen + distance))
+  return (0.45 * termLen) / (termLen + distance)
 }
 
 /** Prefix match weight: 15*len / (52*len - 12*qlen), len = variant length. */
