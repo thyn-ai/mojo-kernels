@@ -30,18 +30,27 @@
 #
 # Triggers:
 #   * push of a `v*` tag: the release path for every planned release.
-#   * workflow_dispatch with `tag`: re-runs the pipeline for an existing tag
-#     (the run itself sits on the dispatched branch; every job checks out the
-#     tag). Idempotent: existing assets are replaced, existing registry
-#     versions are skipped.
-#   * workflow_dispatch with `dry_run`: builds, signs and attests the
-#     dispatched ref and keeps the results as workflow artifacts. No Release,
-#     no registry. This is how the pipeline is exercised on a branch.
+#   * workflow_dispatch ON THE TAG (`gh workflow run release.yml --ref vX.Y.Z
+#     -f tag=vX.Y.Z`): re-runs the pipeline for an existing tag. Idempotent:
+#     existing assets are replaced, existing registry versions are skipped.
+#     The `tag` input is a confirmation and must equal the ref the run was
+#     dispatched on; a dispatch on a branch without `dry_run` is refused.
+#   * workflow_dispatch with `dry_run` on any branch: builds, signs and
+#     attests the branch tip and keeps the results as workflow artifacts. No
+#     Release, no registry. This is how the pipeline is exercised on a branch.
+#
+# Every job builds the commit the run was started for (`github.sha`): the
+# tag's commit on both release paths, the branch tip on a dry run. No job
+# ever checks out a ref chosen by an input, so nothing that runs here can be
+# steered at a tree other than the one the run is for. The price is that a
+# re-run always executes the tag's own copy of this file: a fix to the
+# pipeline made after a tag ships with the next tag, not with a re-run.
 #
 # Every job holds the least privilege it needs; the workflow default is
 # read-only. Third-party actions are pinned to full commit SHAs. The one
 # tag-pinned reference is the SLSA generator, which its verifiers require to
-# be called by tag (see the `provenance` job).
+# be called by tag (see the `provenance` job). No job restores or writes an
+# Actions cache: a release is built from scratch, from the lockfile.
 
 name: release
 
@@ -51,12 +60,12 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Existing tag to release or re-run, e.g. v0.1.0. Leave empty for a dry run."
+        description: "Re-run: the tag being re-released, e.g. v0.1.0. Must equal the ref the workflow is dispatched on (--ref v0.1.0). Leave empty for a dry run."
         required: false
         type: string
         default: ""
       dry_run:
-        description: "Build, sign and attest the dispatched ref; keep the results as workflow artifacts only (no GitHub Release, no PyPI, no npm)."
+        description: "Build, sign and attest the dispatched branch tip; keep the results as workflow artifacts only (no GitHub Release, no PyPI, no npm)."
         required: false
         type: boolean
         default: false
@@ -64,10 +73,10 @@ on:
 permissions:
   contents: read
 
-# One pipeline per tag. Runs are never cancelled: a half-published release is
+# One pipeline per ref. Runs are never cancelled: a half-published release is
 # worse than a slow one, and every step is idempotent so a re-run is safe.
 concurrency:
-  group: release-${{ github.ref }}-${{ inputs.tag }}
+  group: release-${{ github.ref }}
   cancel-in-progress: false
 
 defaults:
@@ -80,24 +89,22 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     outputs:
-      # The exact commit every later job builds from and that provenance
-      # records. Never github.sha: on a workflow_dispatch that is the tip of
-      # the dispatched branch, not the tag.
-      sha: ${{ steps.resolve.outputs.sha }}
       # vX.Y.Z on a release; v<tree version> on a dry run (naming only).
       tag: ${{ steps.resolve.outputs.tag }}
       version: ${{ steps.resolve.outputs.version }}
       prerelease: ${{ steps.resolve.outputs.prerelease }}
       dry_run: ${{ steps.resolve.outputs.dry_run }}
     steps:
-      # Dispatch-only pre-flight, before any checkout: a bad input must fail
-      # here, never steer the run at some tree.
+      # Dispatch-only pre-flight, before any checkout. A re-run must be
+      # dispatched on the tag itself and name it again in `tag`; the input
+      # never chooses what is built, it confirms it.
       - name: Validate the dispatch inputs
         if: github.event_name == 'workflow_dispatch'
         env:
-          GH_TOKEN: ${{ github.token }}
           INPUT_TAG: ${{ inputs.tag }}
           INPUT_DRY_RUN: ${{ inputs.dry_run }}
+          REF: ${{ github.ref }}
+          REF_NAME: ${{ github.ref_name }}
         run: |
           set -euo pipefail
           if [ "$INPUT_DRY_RUN" = "true" ]; then
@@ -105,27 +112,21 @@ jobs:
               echo "::error::A dry run builds the dispatched ref; leave 'tag' empty (got '$INPUT_TAG')." >&2
               exit 1
             fi
-            echo "Dry run: building the dispatched ref ($GITHUB_REF)."
+            echo "Dry run: building $REF at $GITHUB_SHA."
             exit 0
           fi
-          if [ -z "$INPUT_TAG" ]; then
-            echo "::error::'tag' is required unless dry_run is true." >&2
+          case "$REF" in
+            refs/tags/*) ;;
+            *) echo "::error::A release re-run must be dispatched on the tag: gh workflow run release.yml --ref vX.Y.Z -f tag=vX.Y.Z (this run is on '$REF'). Set dry_run to exercise a branch." >&2; exit 1 ;;
+          esac
+          if [ "$INPUT_TAG" != "$REF_NAME" ]; then
+            echo "::error::'tag' must confirm the dispatched ref: got '$INPUT_TAG', the run is on '$REF_NAME'." >&2
             exit 1
           fi
-          if ! printf '%s' "$INPUT_TAG" | LC_ALL=C grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+[A-Za-z0-9.+-]*$'; then
-            echo "::error::Invalid tag '$INPUT_TAG': expected vMAJOR.MINOR.PATCH with an optional pre-release suffix." >&2
-            exit 1
-          fi
-          if ! gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${INPUT_TAG}" --silent; then
-            echo "::error::Tag '$INPUT_TAG' does not exist on ${GITHUB_REPOSITORY}; push the tag first." >&2
-            exit 1
-          fi
+          echo "Re-running the release of $REF_NAME at $GITHUB_SHA."
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          # tag push: github.ref IS the tag; dispatch with a tag: check the
-          # tag out explicitly; dry run: the dispatched ref.
-          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag != '' && format('refs/tags/{0}', inputs.tag) || github.ref }}
           persist-credentials: false
 
       # Every published unit carries the same version and it must be the one
@@ -135,16 +136,15 @@ jobs:
         id: resolve
         env:
           EVENT_NAME: ${{ github.event_name }}
-          INPUT_TAG: ${{ inputs.tag }}
           INPUT_DRY_RUN: ${{ inputs.dry_run }}
           REF_NAME: ${{ github.ref_name }}
         run: |
           set -euo pipefail
           if [ "$EVENT_NAME" = "workflow_dispatch" ] && [ "$INPUT_DRY_RUN" = "true" ]; then
             DRY_RUN=true; TAG=""
-          elif [ "$EVENT_NAME" = "workflow_dispatch" ]; then
-            DRY_RUN=false; TAG="$INPUT_TAG"
           else
+            # A tag push, or a re-run dispatched on the tag (checked above):
+            # either way the ref name is the tag.
             DRY_RUN=false; TAG="$REF_NAME"
           fi
           if [ -n "$TAG" ] && ! printf '%s' "$TAG" | LC_ALL=C grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+[A-Za-z0-9.+-]*$'; then
@@ -194,7 +194,6 @@ jobs:
           print(version)
           PYEOF
           )"
-          SHA="$(git rev-parse HEAD)"
           if [ -z "$TAG" ]; then
             TAG="v${VERSION}"
           fi
@@ -204,13 +203,12 @@ jobs:
             PRERELEASE=true
           fi
           {
-            echo "sha=$SHA"
             echo "tag=$TAG"
             echo "version=$VERSION"
             echo "prerelease=$PRERELEASE"
             echo "dry_run=$DRY_RUN"
           } >> "$GITHUB_OUTPUT"
-          echo "Releasing $TAG (version $VERSION) from $SHA; dry_run=$DRY_RUN prerelease=$PRERELEASE"
+          echo "Releasing $TAG (version $VERSION) from $(git rev-parse HEAD); dry_run=$DRY_RUN prerelease=$PRERELEASE"
 
   # Same steps as ci.yml, ci-cclib.yml and ci-fuse.yml, on the same runners:
   # build the kernels, run every differential suite (native, then forced
@@ -230,7 +228,6 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ needs.preflight.outputs.sha }}
           persist-credentials: false
 
       - name: Install pixi
@@ -239,6 +236,10 @@ jobs:
           # Binary only; the tasks install the locked environment on first
           # `pixi run`, exactly as CI does.
           run-install: false
+          # setup-pixi caches the environment by default whenever pixi.lock
+          # is present. Not on the release path: the environment is resolved
+          # from the lockfile on every run and no cache is read or written.
+          cache: false
 
       - name: Install Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -479,7 +480,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           TAG: ${{ needs.preflight.outputs.tag }}
-          SHA: ${{ needs.preflight.outputs.sha }}
+          SHA: ${{ github.sha }}
           PRERELEASE: ${{ needs.preflight.outputs.prerelease }}
         run: |
           set -euo pipefail

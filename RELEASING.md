@@ -81,7 +81,7 @@ Connect): no long-lived registry token lives in this repository.
 
    | Job | Runs when | What it does |
    | --- | --- | --- |
-   | `preflight` | always | validates the tag, checks that every package version equals the tag's, records the commit |
+   | `preflight` | always | validates the tag (and, on a re-run, that the run was dispatched on it), checks that every package version equals the tag's |
    | `build` (ubuntu, macos) | always | kernels, differential suites, wheels, npm tarballs, smoke tests; each runner keeps the assets it can vouch for |
    | `sign` | always | `SHA256SUMS`; `cosign sign-blob` per asset with the job's OIDC identity; verifies every bundle; computes the provenance subjects |
    | `release` | not on a dry run | finds / adopts / creates the GitHub Release, uploads assets and bundles |
@@ -95,16 +95,19 @@ Connect): no long-lived registry token lives in this repository.
 
 Every step is idempotent (assets are replaced, registry versions already
 present are skipped), so a failed or partial run is repeated by dispatching
-the workflow against the existing tag:
+the workflow **on the tag itself**, naming the tag again as confirmation:
 
 ```bash
-gh workflow run release.yml -R thyn-ai/mojo-kernels --ref main -f tag=vX.Y.Z
+gh workflow run release.yml -R thyn-ai/mojo-kernels --ref vX.Y.Z -f tag=vX.Y.Z
 ```
 
-A dispatched run resolves the workflow file from `main` and checks out the
-tag in every job, so a fix to `release.yml` merged after the tag still
-applies. The signing identity of such a run ends in `@refs/heads/main`
-rather than `@refs/tags/vX.Y.Z` (see [Verify a release](#verify-a-release)).
+A re-run builds the tag's commit with the tag's own copy of `release.yml`,
+exactly like the original tag push, and signs with the same
+`@refs/tags/vX.Y.Z` identity. No job ever checks out a ref chosen by an
+input: a dispatch on a branch without `dry_run`, or a `tag` that differs
+from the dispatched ref, is refused in `preflight`. The trade-off is that a
+fix to the pipeline made after a tag ships with the next tag, not with a
+re-run.
 
 ### Dry run
 
@@ -124,9 +127,10 @@ Download them with `gh run download <run-id>` and verify them as below, with
 
 ### What the pipeline refuses
 
-- A dispatched `tag` that does not exist, or is not `vMAJOR.MINOR.PATCH`
-  (an optional pre-release suffix is allowed and marks the Release as a
-  pre-release).
+- A tag that is not `vMAJOR.MINOR.PATCH` (an optional pre-release suffix
+  is allowed and marks the Release as a pre-release); a re-run dispatched
+  on a branch, or whose `tag` input differs from the ref it was dispatched
+  on.
 - A tag whose version differs from any package version in the tree, or a
   tree whose packages disagree with each other.
 - An asset set that is not exactly four wheels and three tarballs, all
@@ -261,11 +265,11 @@ the `buildDefinition` records the workflow, the exact commit and, for a
 
 Two details of the identity string:
 
-- A release produced through the `workflow_dispatch` path (a re-run) was
-  signed from `main`, so its certificate identity ends in
-  `@refs/heads/main` instead of `@refs/tags/vX.Y.Z`, and `slsa-verifier`
-  takes `--source-branch main` instead of `--source-tag`. The bundle and
-  the provenance both record which.
+- Both release paths (a pushed tag and a re-run dispatched on the tag) run
+  on `refs/tags/vX.Y.Z`, so every release asset carries the identity
+  above. Only a [dry run](#dry-run) is signed from a branch; its identity
+  ends in `@refs/heads/<branch>` and `slsa-verifier` takes
+  `--source-branch <branch>` instead of `--source-tag`.
 - `multiple.intoto.jsonl` is signed by the SLSA generator's own identity
   (`slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@refs/tags/v2.1.0`),
   not by this repository; `slsa-verifier` checks that for you.
