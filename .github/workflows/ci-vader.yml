@@ -1,0 +1,79 @@
+name: ci-vader
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    name: vader-mojo differential tests + wheel (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pixi
+        shell: bash
+        run: |
+          curl -fsSL https://pixi.sh/install.sh | bash
+          echo "$HOME/.pixi/bin" >> "$GITHUB_PATH"
+
+      - name: Build the VADER Mojo kernel
+        run: pixi run bash kernels/vader/build.sh
+
+      - name: Differential suite (native backend, then forced fallback)
+        run: pixi run bash scripts/test_all_vader.sh
+
+      - name: Build + repair the platform wheel (delocate/auditwheel)
+        run: pixi run bash python/vader_mojo/build_wheel.sh
+
+      - name: Smoke-test the wheel in a clean venv
+        shell: bash
+        run: |
+          set -e
+          python3 -m venv /tmp/vader-wheel-smoke
+          /tmp/vader-wheel-smoke/bin/pip install --quiet python/vader_mojo/dist/*.whl
+          # Hide the pixi env for the smoke: an end user has no Mojo toolchain,
+          # so the wheel must load its kernel purely from its own vendored
+          # libraries (not via the build machine's absolute rpath).
+          repo_root="$PWD"
+          mv .pixi .pixi-hidden
+          trap 'mv "$repo_root/.pixi-hidden" "$repo_root/.pixi"' EXIT
+          cd /tmp
+          /tmp/vader-wheel-smoke/bin/python - <<'EOF'
+          import vader_mojo
+
+          info = vader_mojo.backend_info()
+          assert info["native_available"], f"wheel must carry the native kernel: {info}"
+
+          # expected dicts produced by vaderSentiment 3.3.2 (the oracle)
+          expected = {
+              "VADER is smart, handsome, and funny!": {"neg": 0.0, "neu": 0.248, "pos": 0.752, "compound": 0.8439},
+              "Today SUX!": {"neg": 0.779, "neu": 0.221, "pos": 0.0, "compound": -0.5461},
+              "VADER is not smart, handsome, nor funny.": {"neg": 0.646, "neu": 0.354, "pos": 0.0, "compound": -0.7424},
+              "Catch utf-8 emoji such as 💘 and 💋 and 😁": {"neg": 0.0, "neu": 0.583, "pos": 0.417, "compound": 0.875},
+          }
+          for text, exp in expected.items():
+              got = vader_mojo.polarity_scores(text)
+              assert got == exp, (text, got, exp)
+          print("native quickstart parity OK")
+
+          import os
+          os.environ["VADER_MOJO_DISABLE_NATIVE"] = "1"
+          for text, exp in expected.items():
+              got = vader_mojo.SentimentIntensityAnalyzer().polarity_scores(text)
+              assert got == exp, (text, got, exp)
+          print("forced-fallback quickstart parity OK")
+          print("wheel smoke OK:", vader_mojo.__version__, info["native_source"])
+          EOF
+
+      - name: Upload wheel
+        uses: actions/upload-artifact@v4
+        with:
+          name: vader-mojo-wheel-${{ matrix.os }}
+          path: python/vader_mojo/dist/*.whl
+          retention-days: 14
