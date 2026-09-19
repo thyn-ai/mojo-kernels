@@ -15,6 +15,13 @@ wavefunction-on-grid evaluator for [cclib](https://cclib.github.io/)'s
 in `.github/workflows/ci-cclib.yml`; tasks are `pixi run build-kernel-gaussgrid
 / test-cclib / bench-cclib / wheel-cclib`.
 
+TypeScript flagship: **`fuse-mojo`**, a drop-in faster replacement for
+[Fuse.js](https://fusejs.io) fuzzy search — clean-room Bitap kernel, koffi
+wrapper, vendored Fuse.js fallback, 7-32x measured speedups on 10k-100k
+document corpora — see [`typescript/fuse-mojo/README.md`](typescript/fuse-mojo/README.md).
+CI lives in `.github/workflows/ci-fuse.yml`; tasks are `pixi run
+build-kernel-fuse / test-fuse / bench-fuse / pack-fuse / smoke-fuse`.
+
 ```python
 # pip install bm25-mojo   →   then use it exactly like rank_bm25
 from bm25_mojo import BM25Okapi
@@ -168,11 +175,13 @@ kernels/<name>/src/<name>.mojo   # clean-room Mojo kernel, exported C ABI
 kernels/<name>/build.sh          # mojo build --emit shared-lib → build/
 python/<name>_mojo/              # wrapper package (pyproject + hatch hook)
 python/<name>_mojo/<name>_mojo/  #   __init__ / core / _native.py / _reference.py
+typescript/<name>-mojo/          # TS wrapper workspace (npm packages + platform tarballs)
 tests/                           # differential suite vs the reference library
 benchmarks/                      # seeded, reproducible benchmark scripts
 pixi.toml                        # pinned Mojo + Python toolchain, all tasks
 .github/workflows/ci.yml         # bm25: ubuntu + macOS: build → test → wheel repair → hermetic smoke
 .github/workflows/ci-cclib.yml   # cclib-mojo: same factory flow, separate workflow
+.github/workflows/ci-fuse.yml    # fuse-mojo: TS factory flow, separate workflow
 ```
 
 Adding a new kernel means: write the kernel with the same ABI shape
