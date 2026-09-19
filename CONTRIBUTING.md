@@ -123,6 +123,9 @@ ci(fuse): pin patchelf
   automatically on every PR. Review follows [`CODEOWNERS`](./.github/CODEOWNERS):
   changes to `pixi.lock`, the packaging scripts or anything under `.github/`
   always get deliberate maintainer review.
+- Releases are cut by maintainers from a `vX.Y.Z` tag;
+  [RELEASING.md](./RELEASING.md) describes the pipeline, the version-bump
+  checklist, the registry gates and how anyone verifies a published asset.
 
 ## Reporting issues and getting help
 
