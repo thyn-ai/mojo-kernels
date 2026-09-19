@@ -26,9 +26,13 @@ name: CodeQL
 permissions:
   contents: read
 
+# One run per ref. Only pull-request runs are cancelled by a newer push to the
+# same PR; runs on main (push, weekly schedule, dispatch) always complete, so a
+# push that lands during the scheduled scan can never leave a language without
+# a fresh SARIF upload.
 concurrency:
   group: codeql-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   analyze:
