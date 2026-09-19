@@ -112,8 +112,11 @@ pre-commit install            # installs both the pre-commit and pre-push hooks
   tolerance documented for that kernel (`bm25` 1e-8 absolute, `gaussgrid`
   1e-10 relative, `fuse` scores within 1e-9 with identical match spans). A
   change that widens a tolerance needs to say why in the PR. The fuzz
-  harnesses assert the same tolerances on generated input; a change that
-  makes the seed-corpus replay fail is a parity break until proven otherwise.
+  harnesses assert the same tolerances on generated input (the `bm25`
+  harness adds a 1e-13 relative term for out-of-domain parameters that push
+  scores past ~1e5, where 1e-8 is below one ulp; see `fuzz/README.md`); a
+  change that makes the seed-corpus replay fail is a parity break until
+  proven otherwise.
 - **Both backends, both platforms.** CI runs every suite on `ubuntu-latest`
   and `macos-latest`, native then fallback. Windows has no Mojo toolchain;
   the wrappers' fallback is the Windows path and the fuse smoke simulates it.

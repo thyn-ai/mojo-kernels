@@ -228,7 +228,7 @@ def run_regression(
     for seed in seeds:
         try:
             outcome = replay_seed(seed, test_one_input, known_issues, strict=strict)
-        except Exception as exc:  # noqa: BLE001 -- report, then fail the run
+        except Exception as exc:  # report, then fail the run
             print(f"FAIL {seed}: {type(exc).__name__}: {exc}", file=sys.stderr)
             return 1
         if outcome is not None:

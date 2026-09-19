@@ -12,16 +12,12 @@ without the kernel).
 
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 
 import pytest
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(REPO_ROOT / "fuzz"))
-
-import fuzz_cclib as harness  # noqa: E402
-from _harness import expected_issue_key  # noqa: E402
+import fuzz_cclib as harness  # fuzz/ is on sys.path via tests/conftest.py
+from _harness import expected_issue_key
 
 SEEDS = sorted(harness.CORPUS_DIR.glob("*.bin"))
 

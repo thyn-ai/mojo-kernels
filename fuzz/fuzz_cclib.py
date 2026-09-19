@@ -507,7 +507,7 @@ def evaluate(case: Case) -> str | None:
         mode = _reference.MODE_WAVEFUNCTION
     else:
         mode = _reference.MODE_DENSITY
-    axes = core._grid_axes(  # noqa: SLF001 -- the same axes the public API builds
+    axes = core._grid_axes(  # the same axes the public API builds
         np.asarray(args["origin"], dtype=np.float64), np.asarray(args["step"], dtype=np.float64), shape
     )
     fallback = _reference.eval_grid(basis, *axes, coeff2d, mode)

@@ -11,7 +11,7 @@ the normal test suites.
 
 | Harness | Compares | Contract |
 |---|---|---|
-| `fuzz_bm25.py` | `bm25_mojo` native kernel vs `BM25._reference_scores` vs `rank_bm25` 0.2.2 | scores within 1e-8 absolute (`tests/conftest.py`), fallback bit-identical to `rank_bm25`, `get_top_n` order equal up to ties, construction raises `ZeroDivisionError` exactly when `rank_bm25` does (empty corpus; all-empty documents under Okapi), wrong-length `documents` asserts |
+| `fuzz_bm25.py` | `bm25_mojo` native kernel vs `BM25._reference_scores` vs `rank_bm25` 0.2.2 | kernel vs fallback scores within 1e-8 absolute (`tests/conftest.py`) plus 1e-13 relative (the relative term only matters once out-of-domain parameters push scores past ~1e5, where 1e-8 is below one ulp), fallback bit-identical to `rank_bm25`, `get_top_n` order equal up to ties, construction raises `ZeroDivisionError` exactly when `rank_bm25` does (empty corpus; all-empty documents under Okapi), wrong-length `documents` asserts |
 | `fuzz_cclib.py` | `cclib_mojo` native kernel vs `_reference.eval_grid` vs the PyQuante 1.6.5 transcription in `tests/pyquante1_oracle.py` | grids within 1e-10 relative / 1e-12 absolute (`tests/test_gaussgrid_differential.py`) measured against the conditioning of the sum, public API bit-identical to the active backend, malformed input raises `BasisError`/`GridError` and nothing else |
 | `typescript/fuse-mojo/tests/parity.property.test.js` | `@fuse-mojo/core` vs published Fuse.js 7.1.0 ([fast-check](https://fast-check.dev)) | identical `refIndex` order, scores within 1e-9, identical match spans (`tests/helpers.cjs` `compareResults`) |
 

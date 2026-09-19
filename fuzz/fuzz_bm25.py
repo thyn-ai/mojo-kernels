@@ -11,7 +11,9 @@ scored three ways:
   environment).
 
 The kernel and the fallback must agree within the documented parity
-tolerance (1e-8 absolute, ``tests/conftest.py``); the fallback must be
+tolerance (1e-8 absolute, ``tests/conftest.py``) plus a 1e-13 relative
+term (``SCORE_RTOL``), which only matters once out-of-domain parameters
+push scores past ~1e5, where 1e-8 is below one ulp; the fallback must be
 bit-identical to rank_bm25; ``get_top_n`` must rank the same documents up
 to ties inside that tolerance. Two flavours of parameters are generated:
 in-domain values (``k1`` in [0, 5], ``b`` in [0, 1], ``epsilon``/``delta``
@@ -397,7 +399,7 @@ def evaluate(case: Case) -> str | None:
         query = list(query_t)
         native = ours.get_scores(query)
         _check_score_array(native, n_docs, "get_scores")
-        fallback = ours._reference_scores(query)  # noqa: SLF001 -- same index, fallback scorer
+        fallback = ours._reference_scores(query)  # same index, fallback scorer
         _check_score_array(fallback, n_docs, "_reference_scores")
         hit = _compare_backends(case, query, native, fallback)
         outcome = outcome or hit
