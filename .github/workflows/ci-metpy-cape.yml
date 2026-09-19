@@ -1,0 +1,89 @@
+name: ci-metpy-cape
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    name: metpy-mojo differential tests + wheel (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pixi
+        shell: bash
+        run: |
+          curl -fsSL https://pixi.sh/install.sh | bash
+          echo "$HOME/.pixi/bin" >> "$GITHUB_PATH"
+
+      - name: Install the metpy oracle (test/benchmark only)
+        shell: bash
+        run: |
+          pixi run python -m ensurepip || true
+          pixi run python -m pip install metpy==1.7.1
+
+      - name: Build the metpy-cape Mojo kernel
+        run: pixi run bash kernels/metpy-cape/build.sh
+
+      - name: Differential suite (native backend, then forced fallback)
+        shell: bash
+        run: |
+          export PYTHONPATH="python/metpy_mojo"
+          export PYTHONNOUSERSITE=1
+          pixi run bash scripts/test_all_metpy_cape.sh
+
+      - name: Build + repair the platform wheel (delocate/auditwheel)
+        run: pixi run bash python/metpy_mojo/build_wheel.sh
+
+      - name: Smoke-test the wheel in a clean venv
+        shell: bash
+        run: |
+          set -e
+          python3 -m venv /tmp/metpy-wheel-smoke
+          /tmp/metpy-wheel-smoke/bin/pip install --quiet python/metpy_mojo/dist/*.whl
+          # Hide the pixi env for the smoke: an end user has no Mojo toolchain,
+          # so the wheel must load its kernel purely from its own vendored
+          # libraries (not via the build machine's absolute rpath).
+          repo_root="$PWD"
+          mv .pixi .pixi-hidden
+          trap 'mv "$repo_root/.pixi-hidden" "$repo_root/.pixi"' EXIT
+          cd /tmp
+          # Copy the quickstart out of the repo so sys.path[0] cannot shadow
+          # the installed wheel with the in-repo package.
+          cp "$repo_root/python/metpy_mojo/quickstart.py" /tmp/qs_metpy_mojo.py
+          /tmp/metpy-wheel-smoke/bin/python /tmp/qs_metpy_mojo.py | tee /tmp/quickstart-native.txt
+          # The forced fallback must produce the same results (identical to
+          # all printed digits here).
+          METPY_MOJO_DISABLE_NATIVE=1 /tmp/metpy-wheel-smoke/bin/python /tmp/qs_metpy_mojo.py | tee /tmp/quickstart-fallback.txt
+          /tmp/metpy-wheel-smoke/bin/python - <<'EOF'
+          import re
+
+          import metpy_mojo
+
+          info = metpy_mojo.backend_info()
+          assert info["native_available"], f"wheel must carry the native kernel: {info}"
+
+          def checksum(path):
+              text = open(path).read()
+              m = re.search(r"cape checksum: ([0-9.eE+-]+)", text)
+              assert m, f"no checksum in {path}"
+              return float(m.group(1))
+
+          native = checksum("/tmp/quickstart-native.txt")
+          fallback = checksum("/tmp/quickstart-fallback.txt")
+          assert abs(native - fallback) <= 1e-9 * abs(native), (native, fallback)
+          print("wheel smoke OK:", metpy_mojo.__version__, info["native_source"])
+          EOF
+
+      - name: Upload wheel
+        uses: actions/upload-artifact@v4
+        with:
+          name: metpy-mojo-wheel-${{ matrix.os }}
+          path: python/metpy_mojo/dist/*.whl
+          retention-days: 14
