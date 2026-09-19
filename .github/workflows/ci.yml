@@ -38,13 +38,24 @@ jobs:
           /tmp/bm25-wheel-smoke/bin/pip install --quiet python/bm25_mojo/dist/*.whl
           cd /tmp && /tmp/bm25-wheel-smoke/bin/python - <<'EOF'
           import bm25_mojo
-          bm25 = bm25_mojo.BM25Okapi([["hello", "world"], ["hello", "mojo"]])
-          scores = bm25.get_scores(["hello"])
-          assert scores.shape == (2,) and scores[0] > 0 and scores[1] > 0
+          # "world" appears in 1 of 3 docs, so its Okapi idf is positive and
+          # only doc 0 may score > 0 (deterministic on both backends).
+          bm25 = bm25_mojo.BM25Okapi([["hello", "world"], ["hello", "mojo"], ["goodbye", "sun"]])
+          scores = bm25.get_scores(["world"])
+          assert scores.shape == (3,), f"bad scores shape: {scores!r}"
+          assert scores[0] > 0 and scores[1] == 0 and scores[2] == 0, f"bad scores: {scores!r}"
           info = bm25_mojo.backend_info()
           assert info["native_available"], f"wheel must carry the native kernel: {info}"
           print("wheel smoke OK:", bm25_mojo.__version__, info["native_source"])
           EOF
+
+      - name: Audit the Linux wheel (advisory)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          python3 -m pip install --quiet auditwheel
+          python3 -m auditwheel show python/bm25_mojo/dist/*.whl || \
+            echo "::warning::auditwheel reports the wheel does not satisfy its manylinux_2_35 tag (advisory only)"
 
       - name: Upload wheel
         uses: actions/upload-artifact@v4

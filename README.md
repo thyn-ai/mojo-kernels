@@ -159,7 +159,7 @@ python/<name>_mojo/<name>_mojo/  #   __init__ / core / _native.py / _reference.p
 tests/                           # differential suite vs the reference library
 benchmarks/                      # seeded, reproducible benchmark scripts
 pixi.toml                        # pinned Mojo + Python toolchain, all tasks
-.github/workflows/ci.yml         # ubuntu + macOS: build → test → wheel → smoke
+.github/workflows/ci.yml         # ubuntu + macOS: build → test → wheel → smoke (+ advisory auditwheel)
 ```
 
 Adding a new kernel means: write the kernel with the same ABI shape
