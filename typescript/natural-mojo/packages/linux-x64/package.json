@@ -1,0 +1,14 @@
+{
+  "name": "@natural-mojo/linux-x64",
+  "version": "0.1.0",
+  "description": "Prebuilt naturalmojo Mojo kernel for Linux x86_64 (used by @natural-mojo/core).",
+  "license": "Apache-2.0",
+  "author": "Algenta",
+  "os": ["linux"],
+  "cpu": ["x64"],
+  "files": ["lib/"],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/thyn-ai/mojo-kernels"
+  }
+}

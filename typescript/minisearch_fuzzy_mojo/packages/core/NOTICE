@@ -1,0 +1,7 @@
+minisearch-mojo is based on MiniSearch (https://github.com/lucaong/minisearch)
+by Luca Ongaro. The vendored fallback implementation in vendor/ is
+MiniSearch v7.2.0, distributed under the MIT license (see
+vendor/minisearch.LICENSE.txt).
+
+The Mojo kernel, the JS wrapper, and all original code in this package are
+Copyright Algenta and distributed under the Apache-2.0 license.

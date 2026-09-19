@@ -1,0 +1,66 @@
+name: ci-minisearch_fuzzy
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Read-only token for every job: the workflow only builds, tests and uploads a
+# build artifact (artifact upload needs no write scope).
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: minisearch-mojo differential tests + npm packages (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pixi
+        shell: bash
+        run: |
+          curl -fsSL https://pixi.sh/install.sh | bash
+          echo "$HOME/.pixi/bin" >> "$GITHUB_PATH"
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Build the MiniSearch fuzzy/BM25 Mojo kernel
+        run: pixi run mojo build --emit shared-lib -o kernels/minisearch_fuzzy/build/libmsmojo.$( [ "$(uname -s)" = "Darwin" ] && echo dylib || echo so ) kernels/minisearch_fuzzy/src/msmojo.mojo
+        shell: bash
+
+      - name: Differential + unit suite (native backend, then forced fallback)
+        shell: bash
+        run: bash typescript/minisearch_fuzzy_mojo/scripts/test_all.sh
+
+      - name: Pack + repair the platform package (delocate/patchelf)
+        shell: bash
+        run: bash typescript/minisearch_fuzzy_mojo/scripts/pack-platform.sh
+
+      - name: End-user smoke (fresh npm project; native + simulated-Windows fallback)
+        shell: bash
+        env:
+          MINISEARCH_MOJO_DIST: typescript/minisearch_fuzzy_mojo/dist
+        run: |
+          set -e
+          # Hide the pixi env for the smoke: an end user has no Mojo toolchain,
+          # so the platform package must load its kernel purely from its own
+          # vendored libraries (not via the build machine's absolute rpath).
+          repo_root="$PWD"
+          mv .pixi .pixi-hidden
+          trap 'mv "$repo_root/.pixi-hidden" "$repo_root/.pixi"' EXIT
+          bash typescript/minisearch_fuzzy_mojo/scripts/smoke.sh
+
+      - name: Upload npm tarballs
+        uses: actions/upload-artifact@v4
+        with:
+          name: minisearch-mojo-npm-${{ matrix.os }}
+          path: typescript/minisearch_fuzzy_mojo/dist/*.tgz
+          retention-days: 14

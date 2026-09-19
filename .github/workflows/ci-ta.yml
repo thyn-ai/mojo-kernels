@@ -1,0 +1,112 @@
+name: ci-ta
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Read-only token for every job: the workflow only builds, tests and uploads a
+# build artifact (artifact upload needs no write scope).
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: ta-mojo differential tests + wheel (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pixi
+        shell: bash
+        run: |
+          curl -fsSL https://pixi.sh/install.sh | bash
+          echo "$HOME/.pixi/bin" >> "$GITHUB_PATH"
+
+      - name: Install the pinned oracle into .oracle-ta/
+        # pandas-ta-classic is a test/benchmark oracle only (the differential
+        # suite compares ta_mojo against it element-wise); it is not a runtime
+        # dependency of the published wrapper. Installed with `pip --target`
+        # into an unmanaged directory because `pixi run` prunes pip-installed
+        # packages from the pixi env. Pinned: the oracle must be the published
+        # PyPI release these numbers were measured against.
+        run: |
+          pixi run python -m ensurepip --upgrade
+          pixi run python -m pip install --target .oracle-ta "pandas==3.0.6" "pandas-ta-classic==0.8.32"
+
+      - name: Build the ta Mojo kernel
+        run: pixi run bash kernels/ta/build.sh
+
+      - name: Differential suite (native backend, then forced fallback)
+        run: |
+          PYTHONPATH="python/ta_mojo:.oracle-ta" PYTHONNOUSERSITE=1 pixi run python -m pytest tests/test_ta_differential.py tests/test_ta_loader.py -q
+          PYTHONPATH="python/ta_mojo:.oracle-ta" PYTHONNOUSERSITE=1 TA_MOJO_DISABLE_NATIVE=1 pixi run python -m pytest tests/test_ta_differential.py tests/test_ta_loader.py -q
+
+      - name: Build + repair the platform wheel (delocate/auditwheel)
+        run: PYTHONNOUSERSITE=1 pixi run bash python/ta_mojo/build_wheel.sh
+
+      - name: Smoke-test the wheel in a clean venv
+        shell: bash
+        run: |
+          set -e
+          python3 -m venv /tmp/ta-wheel-smoke
+          /tmp/ta-wheel-smoke/bin/pip install --quiet python/ta_mojo/dist/*.whl
+          # Hide the pixi env for the smoke: an end user has no Mojo toolchain,
+          # so the wheel must load its kernel purely from its own vendored
+          # libraries (not via the build machine's absolute rpath).
+          repo_root="$PWD"
+          mv .pixi .pixi-hidden
+          trap 'mv "$repo_root/.pixi-hidden" "$repo_root/.pixi"' EXIT
+          cd /tmp && /tmp/ta-wheel-smoke/bin/python - <<'EOF'
+          import numpy as np
+
+          import ta_mojo
+
+          # Deterministic quickstart values (same on both backends).
+          close = 100.0 + np.cumsum(np.random.default_rng(7).normal(0.0, 1.0, 300))
+          e = ta_mojo.ema(close, 10)
+          r = ta_mojo.rsi(close, 14)
+          m = ta_mojo.macd(close, 12, 26, 9)
+          assert e.shape == (300,) and np.isnan(e[:9]).all() and np.isfinite(e[9:]).all()
+          assert np.isnan(r[:14]).all() and np.isfinite(r[14:]).all()
+          assert 0.0 <= float(np.nanmin(r)) and float(np.nanmax(r)) <= 100.0
+          assert np.isnan(m.macd[:25]).all() and np.isfinite(m.macd[25:]).all()
+          np.testing.assert_allclose(m.macd - m.signal, m.histogram, rtol=0, atol=1e-12)
+          # First EMA value is the SMA seed of the first 10 closes.
+          np.testing.assert_allclose(e[9], close[:10].mean(), rtol=0, atol=1e-12)
+          info = ta_mojo.backend_info()
+          assert info["native_available"], f"wheel must carry the native kernel: {info}"
+          print("wheel smoke OK:", ta_mojo.__version__, info["native_source"])
+          EOF
+
+      - name: Smoke-test the pure wheel (fallback-only) in a clean venv
+        shell: bash
+        run: |
+          set -e
+          cd python/ta_mojo
+          TA_MOJO_ALLOW_PURE_WHEEL=1 pixi run python -m build --wheel --no-isolation --outdir dist-pure .
+          python3 -m venv /tmp/ta-pure-wheel-smoke
+          /tmp/ta-pure-wheel-smoke/bin/pip install --quiet dist-pure/*.whl
+          cd /tmp && /tmp/ta-pure-wheel-smoke/bin/python - <<'EOF'
+          import numpy as np
+
+          import ta_mojo
+
+          close = 100.0 + np.cumsum(np.random.default_rng(7).normal(0.0, 1.0, 300))
+          e = ta_mojo.ema(close, 10)
+          np.testing.assert_allclose(e[9], close[:10].mean(), rtol=0, atol=1e-12)
+          info = ta_mojo.backend_info()
+          assert not info["native_available"], f"pure wheel must use the fallback: {info}"
+          print("pure-wheel smoke OK:", ta_mojo.__version__)
+          EOF
+
+      - name: Upload wheel
+        uses: actions/upload-artifact@v4
+        with:
+          name: ta-mojo-wheel-${{ matrix.os }}
+          path: python/ta_mojo/dist/*.whl
+          retention-days: 14
