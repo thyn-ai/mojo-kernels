@@ -1,0 +1,93 @@
+name: ci-dynesty
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    name: dynesty-mojo differential tests + wheel (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pixi
+        shell: bash
+        run: |
+          curl -fsSL https://pixi.sh/install.sh | bash
+          echo "$HOME/.pixi/bin" >> "$GITHUB_PATH"
+
+      - name: Build the dynesty Mojo kernel
+        run: pixi run bash kernels/dynesty/build.sh
+
+      - name: Create the oracle environment (pip dynesty, pinned)
+        shell: bash
+        run: |
+          python3 -m venv /tmp/dynesty-venv
+          /tmp/dynesty-venv/bin/pip install --quiet "dynesty==3.1.0" numpy pytest
+
+      - name: Differential suite (native backend, then forced fallback)
+        shell: bash
+        run: |
+          PYTHONPATH=python/dynesty_mojo PYTHONNOUSERSITE=1 \
+            PATH=/tmp/dynesty-venv/bin:$PATH \
+            bash scripts/test_all_dynesty.sh
+
+      - name: Build + repair the platform wheel (delocate/auditwheel)
+        run: pixi run bash python/dynesty_mojo/build_wheel.sh
+
+      - name: Smoke-test the wheel in a clean venv
+        shell: bash
+        run: |
+          set -e
+          python3 -m venv /tmp/dynesty-wheel-smoke
+          /tmp/dynesty-wheel-smoke/bin/pip install --quiet python/dynesty_mojo/dist/*.whl
+          # Hide the pixi env for the smoke: an end user has no Mojo toolchain,
+          # so the wheel must load its kernel purely from its own vendored
+          # libraries (not via the build machine's absolute rpath).
+          repo_root="$PWD"
+          mv .pixi .pixi-hidden
+          trap 'mv "$repo_root/.pixi-hidden" "$repo_root/.pixi"' EXIT
+          cd /tmp
+          # Running a script puts ITS directory on sys.path[0]; the
+          # quickstart lives next to the dynesty_mojo/ source tree, so copy
+          # it away first — otherwise the source tree (without the bundled
+          # native library) shadows the installed wheel.
+          cp "$repo_root/python/dynesty_mojo/quickstart.py" /tmp/dynesty-quickstart.py
+          /tmp/dynesty-wheel-smoke/bin/python /tmp/dynesty-quickstart.py | tee /tmp/quickstart-native.txt
+          # The forced fallback must agree within MC error (different RNG
+          # stream by design): both within 4 sigma + 0.15 of the analytic
+          # logz, checked inside the quickstart itself.
+          DYNESTY_MOJO_DISABLE_NATIVE=1 /tmp/dynesty-wheel-smoke/bin/python /tmp/dynesty-quickstart.py | tee /tmp/quickstart-fallback.txt
+          /tmp/dynesty-wheel-smoke/bin/python - <<'EOF'
+          import re
+
+          import dynesty_mojo
+
+          info = dynesty_mojo.backend_info()
+          assert info["native_available"], f"wheel must carry the native kernel: {info}"
+
+          def checksum(path):
+              text = open(path).read()
+              m = re.search(r"evidence checksum:  (-?[0-9.]+)", text)
+              assert m, f"no checksum in {path}"
+              return float(m.group(1))
+
+          native = checksum("/tmp/quickstart-native.txt")
+          fallback = checksum("/tmp/quickstart-fallback.txt")
+          # Different seeded streams, nlive=200: ~3.5 combined MC sigma.
+          assert abs(native - fallback) <= 1.25, (native, fallback)
+          print("wheel smoke OK:", dynesty_mojo.__version__, info["native_source"])
+          EOF
+
+      - name: Upload wheel
+        uses: actions/upload-artifact@v4
+        with:
+          name: dynesty-mojo-wheel-${{ matrix.os }}
+          path: python/dynesty_mojo/dist/*.whl
+          retention-days: 14
