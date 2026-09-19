@@ -130,7 +130,7 @@ Download them with `gh run download <run-id>` and verify them as below, with
 - A tag that is not `vMAJOR.MINOR.PATCH` (an optional pre-release suffix
   is allowed and marks the Release as a pre-release); a re-run dispatched
   on a branch, or whose `tag` input differs from the ref it was dispatched
-  on.
+  on; a dry run dispatched on a tag.
 - A tag whose version differs from any package version in the tree, or a
   tree whose packages disagree with each other.
 - An asset set that is not exactly four wheels and three tarballs, all

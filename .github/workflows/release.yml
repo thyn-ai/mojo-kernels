@@ -112,6 +112,13 @@ jobs:
               echo "::error::A dry run builds the dispatched ref; leave 'tag' empty (got '$INPUT_TAG')." >&2
               exit 1
             fi
+            case "$REF" in
+              refs/tags/*)
+                # A dry run on a tag would look like a release and publish
+                # nothing; make the operator say which one they meant.
+                echo "::error::dry_run is for branches; this run is on '$REF'. To re-run the release, dispatch without dry_run and pass tag=$REF_NAME." >&2
+                exit 1 ;;
+            esac
             echo "Dry run: building $REF at $GITHUB_SHA."
             exit 0
           fi
@@ -485,7 +492,9 @@ jobs:
         run: |
           set -euo pipefail
           api="repos/${GH_REPO}/releases"
-          releases="$(gh api --paginate --slurp "${api}?per_page=100" | jq 'add')"
+          # --slurp yields one array per page; `add` flattens them and `// []`
+          # keeps the result an array even if no page came back.
+          releases="$(gh api --paginate --slurp "${api}?per_page=100" | jq 'add // []')"
 
           existing="$(jq -r --arg tag "$TAG" '[.[] | select(.tag_name == $tag)] | first | .id // empty' <<<"$releases")"
           if [ -n "$existing" ]; then
@@ -653,7 +662,12 @@ jobs:
           # so they must be resolvable the moment core is.
           for pkg in linux-x64 darwin-arm64 core; do
             name="@fuse-mojo/${pkg}"
-            tarball="$(ls release-assets/fuse-mojo-"${pkg}"-*.tgz)"
+            matches=(release-assets/fuse-mojo-"${pkg}"-*.tgz)
+            if [ "${#matches[@]}" -ne 1 ] || [ ! -f "${matches[0]}" ]; then
+              echo "::error::Expected exactly one tarball for ${name}, found: ${matches[*]}" >&2
+              exit 1
+            fi
+            tarball="${matches[0]}"
             published="$(npm view "${name}@${VERSION}" version 2>/dev/null || true)"
             if [ "$published" = "$VERSION" ]; then
               echo "${name}@${VERSION} is already on the registry; skipping."
