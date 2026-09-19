@@ -125,15 +125,16 @@ def check_parity(doc) -> None:
 
 def bench(doc, oracle_find, our_find) -> dict:
     """Cold (first-call) and warm (median-of-5 battery) timings per backend."""
-    # Guard the native timing pass against a stray fallback override leaked
-    # from the surrounding environment (or a prior failed parity check).
-    os.environ.pop("JSONPATH_MOJO_DISABLE_NATIVE", None)
-    results = {}
-    for name, fn in (("oracle", oracle_find), ("mojo-native", our_find), ("mojo-fallback", None)):
-        if fn is None:
-            os.environ["JSONPATH_MOJO_DISABLE_NATIVE"] = "1"
-            fn = our_find
-        try:
+    # The benchmark must control the backend explicitly: set aside any
+    # caller-set fallback override so the native pass is really native,
+    # then restore the caller's environment on the way out.
+    prev_override = os.environ.pop("JSONPATH_MOJO_DISABLE_NATIVE", None)
+    try:
+        results = {}
+        for name, fn in (("oracle", oracle_find), ("mojo-native", our_find), ("mojo-fallback", None)):
+            if fn is None:
+                os.environ["JSONPATH_MOJO_DISABLE_NATIVE"] = "1"
+                fn = our_find
             t0 = time.perf_counter()
             for expr in QUERIES:
                 fn(expr, doc)
@@ -145,10 +146,11 @@ def bench(doc, oracle_find, our_find) -> dict:
                     fn(expr, doc)
                 samples.append(time.perf_counter() - t0)
             results[name] = (cold, statistics.median(samples))
-        finally:
-            if name == "mojo-fallback":
-                del os.environ["JSONPATH_MOJO_DISABLE_NATIVE"]
-    return results
+        return results
+    finally:
+        os.environ.pop("JSONPATH_MOJO_DISABLE_NATIVE", None)
+        if prev_override is not None:
+            os.environ["JSONPATH_MOJO_DISABLE_NATIVE"] = prev_override
 
 
 def main() -> None:
