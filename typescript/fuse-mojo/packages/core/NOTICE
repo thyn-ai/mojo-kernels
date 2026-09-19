@@ -1,0 +1,16 @@
+NOTICE
+======
+
+@fuse-mojo/core includes a vendored copy of Fuse.js v7.1.0
+(vendor/fuse.basic.cjs), used as the pure-JavaScript fallback backend on
+platforms without a prebuilt native kernel, and as the reference oracle in
+the differential test suite.
+
+Fuse.js — Lightweight fuzzy-search
+Copyright (c) Kiro Risk (http://kiro.me)
+Licensed under the Apache License, Version 2.0
+http://www.apache.org/licenses/LICENSE-2.0
+https://github.com/krisk/Fuse
+
+The remainder of this package is Copyright (c) 2026 Algenta, Inc.,
+Apache License, Version 2.0.

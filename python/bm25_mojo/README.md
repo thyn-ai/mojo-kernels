@@ -26,4 +26,4 @@ top = bm25.get_top_n(tokenized_query, documents, n=5)
 
 Source, benchmarks, and development: <https://github.com/thyn-ai/mojo-kernels>
 
-License: Apache-2.0, © 2026 Algenta, Inc.
+License: Apache-2.0, © 2026 Algenta

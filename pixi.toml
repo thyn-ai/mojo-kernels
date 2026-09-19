@@ -34,6 +34,12 @@ numpy = ">=1.26,<3"
 # the reference rank_bm25 package element-wise. Not a runtime dependency of the
 # published wrapper. Pinned: the oracle must be the published PyPI release.
 rank_bm25 = "==0.2.2"
+# Test/benchmark oracles for cclib-mojo only: cclib's volume functions run
+# against our integration helpers, and pyquante2 (the pip-installable
+# PyQuante successor) is an independent Gaussian-amplitude oracle. Neither
+# is a runtime dependency of the published wrapper. Pinned like rank_bm25.
+cclib = "==1.8.1"
+pyquante2 = "==0.2.0"
 pytest = ">=8"
 build = ">=1"
 hatchling = ">=1.21"
@@ -50,9 +56,21 @@ build-kernel-bm25 = "bash kernels/bm25/build.sh"
 # PYTHONPATH makes the in-repo wrapper importable; PYTHONNOUSERSITE keeps
 # stray user site-packages out of the toolchain.
 test = { cmd = "bash scripts/test_all.sh", env = { PYTHONPATH = "python/bm25_mojo", PYTHONNOUSERSITE = "1" }, depends-on = ["build-kernel-bm25"] }
-test-native = { cmd = "pytest tests -q", env = { PYTHONPATH = "python/bm25_mojo", PYTHONNOUSERSITE = "1" }, depends-on = ["build-kernel-bm25"] }
-test-fallback = { cmd = "pytest tests -q", env = { PYTHONPATH = "python/bm25_mojo", PYTHONNOUSERSITE = "1", BM25_MOJO_DISABLE_NATIVE = "1" } }
+test-native = { cmd = "pytest tests/test_differential.py tests/test_loader.py -q", env = { PYTHONPATH = "python/bm25_mojo", PYTHONNOUSERSITE = "1" }, depends-on = ["build-kernel-bm25"] }
+test-fallback = { cmd = "pytest tests/test_differential.py tests/test_loader.py -q", env = { PYTHONPATH = "python/bm25_mojo", PYTHONNOUSERSITE = "1", BM25_MOJO_DISABLE_NATIVE = "1" } }
 # Reproducible benchmark: rank_bm25 vs bm25_mojo (median of 5 runs).
 bench = { cmd = "python benchmarks/bench_bm25.py", env = { PYTHONPATH = "python/bm25_mojo", PYTHONNOUSERSITE = "1" }, depends-on = ["build-kernel-bm25"] }
 # Build the platform wheel for bm25_mojo (wheel-only; no sdist).
 wheel-bm25 = { cmd = "bash python/bm25_mojo/build_wheel.sh", env = { PYTHONNOUSERSITE = "1" }, depends-on = ["build-kernel-bm25"] }
+
+# --- cclib-mojo (academic flagship) ---
+# Compile the gaussgrid kernel into a shared library under kernels/gaussgrid/build/.
+build-kernel-gaussgrid = "bash kernels/gaussgrid/build.sh"
+# cclib-mojo differential suite: native path, then forced fallback.
+test-cclib = { cmd = "bash scripts/test_all_cclib.sh", env = { PYTHONPATH = "python/cclib_mojo", PYTHONNOUSERSITE = "1" }, depends-on = ["build-kernel-gaussgrid"] }
+test-cclib-native = { cmd = "pytest tests/test_gaussgrid_differential.py tests/test_gaussgrid_loader.py -q", env = { PYTHONPATH = "python/cclib_mojo", PYTHONNOUSERSITE = "1" }, depends-on = ["build-kernel-gaussgrid"] }
+test-cclib-fallback = { cmd = "pytest tests/test_gaussgrid_differential.py tests/test_gaussgrid_loader.py -q", env = { PYTHONPATH = "python/cclib_mojo", PYTHONNOUSERSITE = "1", CCLIB_MOJO_DISABLE_NATIVE = "1" } }
+# Reproducible benchmark: PyQuante1-path vs cclib_mojo (median of 5 runs).
+bench-cclib = { cmd = "python benchmarks/bench_gaussgrid.py", env = { PYTHONPATH = "python/cclib_mojo", PYTHONNOUSERSITE = "1" }, depends-on = ["build-kernel-gaussgrid"] }
+# Build the platform wheel for cclib_mojo (wheel-only; no sdist).
+wheel-cclib = { cmd = "bash python/cclib_mojo/build_wheel.sh", env = { PYTHONNOUSERSITE = "1" }, depends-on = ["build-kernel-gaussgrid"] }
