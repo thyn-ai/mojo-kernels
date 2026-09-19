@@ -8,6 +8,13 @@ Raw Mojo source lives open in this repo.
 First flagship kernel: **`bm25-mojo`**, a drop-in faster replacement for the
 [`rank_bm25`](https://pypi.org/project/rank_bm25/) package.
 
+First academic flagship: **`cclib-mojo`**, a fast electron-density /
+wavefunction-on-grid evaluator for [cclib](https://cclib.github.io/)'s
+`cclib.method.volume` path (plus a standalone API) — see
+[`python/cclib_mojo/README.md`](python/cclib_mojo/README.md). CI for it lives
+in `.github/workflows/ci-cclib.yml`; tasks are `pixi run build-kernel-gaussgrid
+/ test-cclib / bench-cclib / wheel-cclib`.
+
 ```python
 # pip install bm25-mojo   →   then use it exactly like rank_bm25
 from bm25_mojo import BM25Okapi
@@ -164,7 +171,8 @@ python/<name>_mojo/<name>_mojo/  #   __init__ / core / _native.py / _reference.p
 tests/                           # differential suite vs the reference library
 benchmarks/                      # seeded, reproducible benchmark scripts
 pixi.toml                        # pinned Mojo + Python toolchain, all tasks
-.github/workflows/ci.yml         # ubuntu + macOS: build → test → wheel repair → hermetic smoke
+.github/workflows/ci.yml         # bm25: ubuntu + macOS: build → test → wheel repair → hermetic smoke
+.github/workflows/ci-cclib.yml   # cclib-mojo: same factory flow, separate workflow
 ```
 
 Adding a new kernel means: write the kernel with the same ABI shape
@@ -186,6 +194,6 @@ pixi run wheel-bm25          # → python/bm25_mojo/dist/*.whl (platform wheel)
 
 ## License
 
-Apache-2.0, © 2026 Algenta, Inc. All kernels in this repo are clean-room
+Apache-2.0, © 2026 Algenta All kernels in this repo are clean-room
 implementations of published textbook algorithms. `rank_bm25` itself is used
 only as the test/benchmark oracle, never as a runtime dependency.

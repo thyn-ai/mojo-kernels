@@ -1,0 +1,41 @@
+{
+  "name": "@fuse-mojo/core",
+  "version": "0.1.0",
+  "description": "Drop-in faster replacement for Fuse.js, powered by a Mojo kernel (pure-JS fallback included).",
+  "license": "Apache-2.0",
+  "author": "Algenta, Inc.",
+  "keywords": ["fuse", "fuzzy", "search", "bitap", "mojo", "fuse.js"],
+  "type": "commonjs",
+  "main": "index.cjs",
+  "types": "index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "import": "./index.mjs",
+      "require": "./index.cjs"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "index.cjs",
+    "index.mjs",
+    "index.d.ts",
+    "src/",
+    "vendor/",
+    "NOTICE"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "koffi": "^3.3.1"
+  },
+  "optionalDependencies": {
+    "@fuse-mojo/darwin-arm64": "0.1.0",
+    "@fuse-mojo/linux-x64": "0.1.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/thyn-ai/mojo-kernels"
+  }
+}

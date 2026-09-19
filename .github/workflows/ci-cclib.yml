@@ -1,0 +1,76 @@
+name: ci-cclib
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    name: cclib-mojo differential tests + wheel (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pixi
+        shell: bash
+        run: |
+          curl -fsSL https://pixi.sh/install.sh | bash
+          echo "$HOME/.pixi/bin" >> "$GITHUB_PATH"
+
+      - name: Build the gaussgrid Mojo kernel
+        run: pixi run build-kernel-gaussgrid
+
+      - name: Differential suite (native backend, then forced fallback)
+        run: pixi run test-cclib
+
+      - name: Build + repair the platform wheel (delocate/auditwheel)
+        run: pixi run wheel-cclib
+
+      - name: Smoke-test the wheel in a clean venv
+        shell: bash
+        run: |
+          set -e
+          python3 -m venv /tmp/cclib-wheel-smoke
+          /tmp/cclib-wheel-smoke/bin/pip install --quiet python/cclib_mojo/dist/*.whl
+          # Hide the pixi env for the smoke: an end user has no Mojo toolchain,
+          # so the wheel must load its kernel purely from its own vendored
+          # libraries (not via the build machine's absolute rpath).
+          repo_root="$PWD"
+          mv .pixi .pixi-hidden
+          trap 'mv "$repo_root/.pixi-hidden" "$repo_root/.pixi"' EXIT
+          cd /tmp
+          /tmp/cclib-wheel-smoke/bin/python "$repo_root/python/cclib_mojo/quickstart.py" | tee /tmp/quickstart-native.txt
+          # The forced fallback must produce the same results (documented
+          # 1e-10 tolerance; identical to all printed digits here).
+          CCLIB_MOJO_DISABLE_NATIVE=1 /tmp/cclib-wheel-smoke/bin/python "$repo_root/python/cclib_mojo/quickstart.py" | tee /tmp/quickstart-fallback.txt
+          /tmp/cclib-wheel-smoke/bin/python - <<'EOF'
+          import re
+
+          import cclib_mojo
+
+          info = cclib_mojo.backend_info()
+          assert info["native_available"], f"wheel must carry the native kernel: {info}"
+
+          def checksum(path):
+              text = open(path).read()
+              m = re.search(r"density checksum: ([0-9.eE+-]+)", text)
+              assert m, f"no checksum in {path}"
+              return float(m.group(1))
+
+          native = checksum("/tmp/quickstart-native.txt")
+          fallback = checksum("/tmp/quickstart-fallback.txt")
+          assert abs(native - fallback) <= 1e-9 * abs(native), (native, fallback)
+          print("wheel smoke OK:", cclib_mojo.__version__, info["native_source"])
+          EOF
+
+      - name: Upload wheel
+        uses: actions/upload-artifact@v4
+        with:
+          name: cclib-mojo-wheel-${{ matrix.os }}
+          path: python/cclib_mojo/dist/*.whl
+          retention-days: 14

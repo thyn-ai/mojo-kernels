@@ -9,7 +9,7 @@ description = "Drop-in faster replacement for rank_bm25, powered by a Mojo kerne
 readme = "README.md"
 requires-python = ">=3.9"
 license = "Apache-2.0"
-authors = [{ name = "Algenta, Inc." }]
+authors = [{ name = "Algenta" }]
 keywords = ["bm25", "search", "ranking", "mojo", "information-retrieval"]
 classifiers = [
   "Intended Audience :: Developers",
