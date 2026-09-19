@@ -1,50 +1,31 @@
 # mojo-kernels
 
-**Mojo kernels as drop-in accelerators for popular Python libraries** — prebuilt
-per-platform binaries, a thin `ctypes` wrapper, and a vendored pure-Python
-fallback. Users `pip install` a faster library and never see a Mojo toolchain.
-Raw Mojo source lives open in this repo.
+**Clean-room [Mojo](https://www.modular.com/mojo) kernels as drop-in
+accelerators for popular Python and TypeScript libraries.** Same API, same
+results — measured **70x–8,700x** speedups with bit-exact-to-last-ulp parity
+against the reference packages, asserted by differential test suites that run
+on both backends. Prebuilt per-platform binaries mean **no Mojo toolchain is
+ever required** on an end user's machine, and every package ships a vendored
+pure-language (Python / JavaScript) fallback, so unsupported platforms —
+including Windows — get silently correct behavior. Raw Mojo source lives open
+in this repo; the reference libraries are used only as test and benchmark
+oracles, never as runtime dependencies.
 
-First flagship kernel: **`bm25-mojo`**, a drop-in faster replacement for the
-[`rank_bm25`](https://pypi.org/project/rank_bm25/) package.
+## The kernels
 
-First academic flagship: **`cclib-mojo`**, a fast electron-density /
-wavefunction-on-grid evaluator for [cclib](https://cclib.github.io/)'s
-`cclib.method.volume` path (plus a standalone API) — see
-[`python/cclib_mojo/README.md`](python/cclib_mojo/README.md). CI for it lives
-in `.github/workflows/ci-cclib.yml`; tasks are `pixi run build-kernel-gaussgrid
-/ test-cclib / bench-cclib / wheel-cclib`.
+| package | accelerates | kernel | measured speedup | parity |
+|---|---|---|---|---:|
+| [`bm25-mojo`](python/bm25_mojo/README.md) | [`rank_bm25`](https://pypi.org/project/rank_bm25/) (Python) | [`kernels/bm25`](kernels/bm25) | 116x–8,769x | max abs diff 3.6e-15 |
+| [`fuse-mojo`](typescript/fuse-mojo/README.md) | [Fuse.js](https://fusejs.io) fuzzy search (TypeScript/Node) | [`kernels/fuse`](kernels/fuse) | 8.8x–38.7x warm, 13x cold | bit-identical (0 diff) |
+| [`cclib-mojo`](python/cclib_mojo/README.md) | [cclib](https://cclib.github.io/) electron-density grids (Python) | [`kernels/gaussgrid`](kernels/gaussgrid) | 72x–7,033x | max abs diff 1.5e-12 |
 
-TypeScript flagship: **`fuse-mojo`**, a drop-in faster replacement for
-[Fuse.js](https://fusejs.io) fuzzy search — clean-room Bitap kernel, koffi
-wrapper, vendored Fuse.js fallback, 7-32x measured speedups on 10k-100k
-document corpora — see [`typescript/fuse-mojo/README.md`](typescript/fuse-mojo/README.md).
-CI lives in `.github/workflows/ci-fuse.yml`; tasks are `pixi run
-build-kernel-fuse / test-fuse / bench-fuse / pack-fuse / smoke-fuse`.
+All numbers below are measured on this machine (Apple M4 Max), median of 5
+runs, with a correctness gate asserted before every timing pass — reproduce
+them with `pixi run bench`, `pixi run bench-fuse`, and `pixi run bench-cclib`.
 
-```python
-# pip install bm25-mojo   →   then use it exactly like rank_bm25
-from bm25_mojo import BM25Okapi
+## Benchmarks
 
-corpus = [
-    "Hello there good man!",
-    "It is quite windy in London",
-    "How is the weather today?",
-]
-tokenized_corpus = [doc.split(" ") for doc in corpus]
-
-bm25 = BM25Okapi(tokenized_corpus)                 # same call shape as rank_bm25
-scores = bm25.get_scores(["windy", "in", "London"]) # np.ndarray, one score per doc
-top = bm25.get_top_n(["windy", "in", "London"], corpus, n=2)
-```
-
-`BM25Okapi`, `BM25L`, and `BM25Plus` are all provided with the same constructor
-arguments, index attributes (`corpus_size`, `avgdl`, `doc_freqs`, `idf`,
-`doc_len`, `average_idf`, ...), and methods (`get_scores`, `get_batch_scores`,
-`get_top_n`) as their `rank_bm25` counterparts. Like `rank_bm25`, the
-tokenizer defaults to none and **no lowercasing** is applied.
-
-## Benchmark
+### bm25-mojo — BM25 scoring (`rank_bm25` drop-in)
 
 Measured with `benchmarks/bench_bm25.py` (run `pixi run bench` to reproduce).
 Corpora are generated locally from fixed seeds: 1k / 10k / 100k documents of
@@ -68,127 +49,206 @@ Correctness gate (asserted before every timing run, element-wise vs
 `rank_bm25`): max abs diff **3.6e-15** at 100k docs — the scores are the same
 numbers, not approximations.
 
-Index build is one-time; ours is currently ~3x slower than `rank_bm25`'s
-(postings construction in Python — a candidate for a future kernel), and pays
-for itself after a handful of queries:
+### fuse-mojo — fuzzy search (Fuse.js drop-in)
 
-| corpus | rank_bm25 build (s) | bm25_mojo build (s) |
-|---:|---:|---:|
-| 1,000 | 0.006 | 0.016 |
-| 10,000 | 0.045 | 0.123 |
-| 100,000 | 0.499 | 1.540 |
+Measured with `benchmarks/bench_fuse.mjs` (run `pixi run bench-fuse` to
+reproduce; a correctness gate asserting identical `refIndex` order and scores
+within 1e-9 runs before every timing pass — measured agreement here is
+**exactly 0**, the scores are bit-identical, not approximations). Corpora are
+generated locally from fixed seeds: 10k / 50k / 100k documents of 5-15
+word-like tokens (~3000-word vocabulary, a unicode token in every 11th
+document); patterns of length 3 / 8 / 16 code units drawn from corpus tokens,
+half with 1-2 seeded typos; 15 patterns per cell; median of 5 runs after a
+warmup round. **Cold** is the first-call experience: a fresh instance (index
+build included) plus its first query, median of 5 runs × 3 patterns.
+Environment: **Apple M4 Max (16 threads), macOS arm64, Node v23.10.0,
+fuse.js 7.1.0 (npm), Mojo 1.1.0**, 2026-09-19.
 
-Why the gap is so large: `rank_bm25.get_scores` walks a Python dict
-(`doc.get(q)`) for **every** (query term × document) pair — O(|Q|·N) of
-interpreted work. `bm25-mojo` walks only each query term's postings list in a
-compiled Mojo kernel with SIMD arithmetic — work proportional to the number of
-matching documents, not the corpus.
+Search — warm steady state (median of 5 runs):
 
-## How it works
+| corpus | pattern len | Fuse.js ms/query | fuse-mojo ms/query | Fuse.js q/s | fuse-mojo q/s | speedup |
+|---:|---:|---:|---:|---:|---:|---:|
+| 10,000 | 3 | 14.813 | 1.629 | 67.5 | 613.9 | 9.1x |
+| 10,000 | 8 | 34.502 | 1.584 | 29.0 | 631.2 | 21.8x |
+| 10,000 | 16 | 75.916 | 3.080 | 13.2 | 324.7 | 24.6x |
+| 50,000 | 3 | 72.545 | 8.270 | 13.8 | 120.9 | 8.8x |
+| 50,000 | 8 | 184.715 | 5.731 | 5.4 | 174.5 | 32.2x |
+| 50,000 | 16 | 414.061 | 13.077 | 2.4 | 76.5 | 31.7x |
+| 100,000 | 3 | 168.540 | 18.851 | 5.9 | 53.0 | 8.9x |
+| 100,000 | 8 | 419.301 | 16.232 | 2.4 | 61.6 | 25.8x |
+| 100,000 | 16 | 1,239.508 | 32.003 | 0.8 | 31.2 | 38.7x |
+
+Search — cold first call (fresh index build + first query, median of 5 runs ×
+3 patterns):
+
+| corpus | pattern len | Fuse.js cold (ms) | fuse-mojo cold (ms) | speedup |
+|---:|---:|---:|---:|---:|
+| 10,000 | 3 | 18.9 | 6.6 | 2.9x |
+| 10,000 | 8 | 37.5 | 6.1 | 6.2x |
+| 10,000 | 16 | 75.3 | 6.7 | 11.2x |
+| 50,000 | 3 | 84.8 | 29.5 | 2.9x |
+| 50,000 | 8 | 195.7 | 27.3 | 7.2x |
+| 50,000 | 16 | 402.6 | 30.4 | 13.3x |
+| 100,000 | 3 | 171.4 | 55.5 | 3.1x |
+| 100,000 | 8 | 417.7 | 60.5 | 6.9x |
+| 100,000 | 16 | 945.4 | 70.3 | 13.4x |
+
+### cclib-mojo — electron-density / wavefunction grids (cclib `method.volume`)
+
+Measured with `benchmarks/bench_gaussgrid.py` in this repository (run
+`pixi run bench-cclib` to reproduce). Workload: **benzene, 6-31G\*** (12
+atoms, 102 contracted Cartesian basis functions, 192 primitives — basis data
+from PyQuante 1.6.5's basis library), seeded MO coefficients, median of 5
+runs, single-threaded. Environment: **Apple M4 Max, macOS 26.6.2 arm64,
+Python 3.12.14, numpy 2.5.3, Mojo 1.1.0**, 2026-09-19.
+
+| workload | PyQuante1 path (s) | cclib-mojo (s) | speedup |
+|---|---:|---:|---:|
+| wavefunction 1 MO, 50³ | 32.23 | 0.0126 | 2567x |
+| wavefunction 1 MO, 100³ | 345.37 | 0.0491 | 7033x |
+| density 3 MOs, 50³ | 63.59 | 0.0335 | 1898x |
+| wavefunction 1 MO, 50³ — NumPy fallback | 32.23 | 0.1691 | 191x |
+
+Correctness gate (asserted before every timing run, element-wise vs the
+PyQuante1 reference): max abs diff **1.5e-12** — the values are the same
+numbers, not approximations. Against cclib's fastest shipping backend
+(pyquante2, NumPy-vectorized): **72x** on the same 50³ single-MO workload
+(0.689 s vs 0.0095 s, max abs diff 8.4e-13). Full methodology and the honest
+two-baseline framing are in the
+[package README](python/cclib_mojo/README.md).
+
+## Install & quickstart
+
+### bm25-mojo (Python)
 
 ```
 pip install bm25-mojo
-        │
-        ▼
-bm25_mojo (thin Python wrapper, ~500 lines)
-        │  builds vocab, idf, doc lengths, CSR postings — once, in Python
-        ▼
-libbm25mojo.dylib / .so          (Mojo kernel, C ABI v1)
-        │  bm25mojo_index_create / bm25mojo_score / bm25mojo_index_destroy
-        ▼
-postings lists + SIMD float64 scoring, one lane per posting
 ```
 
-- **Batch-shaped C ABI**: the index is built once (`bm25mojo_index_create`,
-  CSR postings copied into native memory), then each `get_scores` call passes
-  one whole token-id query and receives all N document scores. FFI overhead
-  is per-call, not per-document.
-- **Bit-matching arithmetic**: idf values are computed in Python with
-  `math.log` exactly as the reference does, and the kernel evaluates the
-  per-term contribution in the same IEEE-754 float64 operation order as the
-  reference's NumPy expressions, one SIMD lane per posting. The differential
-  suite asserts element-wise agreement within 1e-8; measured agreement is at
-  the last-ulp level.
-- **ABI handshake**: the wrapper checks `bm25mojo_abi_version()` against its
-  own expected version before scoring; a mismatch falls back cleanly.
-- **BM25Plus delta floor**: the reference gives every document a constant
-  `idf·delta` per query term (even documents without the term); the kernel
-  applies that floor with a dense SIMD pass and adds only the excess for
-  posted documents.
+```python
+# then use it exactly like rank_bm25
+from bm25_mojo import BM25Okapi
 
-## Fallback semantics
+corpus = [
+    "Hello there good man!",
+    "It is quite windy in London",
+    "How is the weather today?",
+]
+tokenized_corpus = [doc.split(" ") for doc in corpus]
+
+bm25 = BM25Okapi(tokenized_corpus)                  # same call shape as rank_bm25
+scores = bm25.get_scores(["windy", "in", "London"]) # np.ndarray, one score per doc
+top = bm25.get_top_n(["windy", "in", "London"], corpus, n=2)
+```
+
+`BM25Okapi`, `BM25L`, and `BM25Plus` are all provided with the same
+constructor arguments, index attributes, and methods as their `rank_bm25`
+counterparts. Force the fallback with `BM25_MOJO_DISABLE_NATIVE=1`; inspect
+the active backend with `bm25_mojo.backend_info()`. Full API parity notes:
+[`python/bm25_mojo/README.md`](python/bm25_mojo/README.md).
+
+### fuse-mojo (TypeScript / Node)
+
+```
+npm install @fuse-mojo/core
+```
+
+```js
+// then use it exactly like fuse.js
+import Fuse from '@fuse-mojo/core'
+
+const books = [
+  { title: "Old Man's War", author: { firstName: 'John', lastName: 'Scalzi' } },
+  { title: 'The Lock Artist', author: { firstName: 'Steve', lastName: 'Hamilton' } },
+]
+
+const fuse = new Fuse(books, { keys: ['title', 'author.firstName'] })
+fuse.search('lock')
+// → [{ item: {...}, refIndex: 1 }]
+```
+
+CommonJS works too: `const Fuse = require('@fuse-mojo/core')`. The 90% option
+surface (`keys`, `threshold`, `location`, `distance`, `minMatchCharLength`,
+`includeScore`, `includeMatches`, ...) is bit-exact vs Fuse.js 7.1.0;
+unsupported options throw `UnsupportedOptionError` on both backends. Force the
+fallback with `FUSE_MOJO_DISABLE_NATIVE=1`; inspect with `Fuse.backendInfo()`.
+Full option matrix: [`typescript/fuse-mojo/README.md`](typescript/fuse-mojo/README.md).
+
+### cclib-mojo (Python, computational chemistry)
+
+```
+pip install cclib-mojo
+```
+
+```python
+import numpy as np
+from cclib_mojo import density_on_grid, wavefunction_on_grid
+
+# Inputs exactly as cclib parses them from a logfile:
+#   gbasis     -- per-atom list of (shell, [(exponent, coefficient), ...])
+#   atomcoords -- (n_atoms, 3) in Angstrom
+#   mocoeffs   -- (n_mo, n_bf) MO coefficients, e.g. ccdata.mocoeffs[0]
+psi = wavefunction_on_grid(gbasis, atomcoords, mocoeffs[3],
+                           origin=(-5, -5, -5), step=(0.2, 0.2, 0.2),
+                           shape=(51, 51, 51))
+rho = density_on_grid(gbasis, atomcoords, mocoeffs[:nocc],
+                      origin=(-5, -5, -5), step=(0.2, 0.2, 0.2),
+                      shape=(51, 51, 51))
+```
+
+Also works alongside cclib (`cclib_mojo.cclib_integration` mirrors
+`cclib.method.volume`'s functions — parse with cclib, evaluate with
+cclib-mojo, write cube files with cclib). A runnable example (water, STO-3G)
+is `quickstart.py` at the repository root. Force the fallback with
+`CCLIB_MOJO_DISABLE_NATIVE=1`. Full integration guide:
+[`python/cclib_mojo/README.md`](python/cclib_mojo/README.md).
+
+## Fallback semantics (every package)
 
 There is no Windows Mojo toolchain today, and a shared library can always go
-missing — so the wrapper **falls back to a vendored pure-Python reference
-implementation** (`bm25_mojo/_reference.py`, clean-room, NumPy-only):
+missing — so every package **falls back to a vendored pure-language reference
+implementation**, silently and correctly:
 
-- Resolution order: `$BM25_MOJO_NATIVE_LIB` → the library bundled in the
-  wheel → the repo development build output.
-- `BM25_MOJO_DISABLE_NATIVE=1` forces the fallback (the test suite runs this
-  way as its second pass).
-- Both backends share index construction and idf calculation in
-  `bm25_mojo/core.py`, so they cannot disagree about the index; the
-  differential suite asserts both against `rank_bm25`.
-- Inspect what's active: `bm25_mojo.backend_info()` and
-  `bm25_mojo.native_available()`.
-- Wheels are **per-platform** (`py3-none-macosx_*_arm64`,
-  `py3-none-manylinux_*_x86_64`) and **wheel-only** — no sdist, because a
-  source tarball cannot rebuild the native library. Each wheel is
-  **self-contained**: `delocate` (macOS) / `auditwheel repair` (Linux) vendor
-  the Mojo runtime libraries into the wheel and rewrite the kernel library's
-  load paths to be wheel-relative, so no Mojo toolchain is needed at install
-  time. (Redistribution terms for Modular's runtime binaries should be
-  confirmed with Modular before any public release.) A pure `py3-none-any`
-  fallback wheel can be produced with `BM25_MOJO_ALLOW_PURE_WHEEL=1` (e.g.
-  for Windows).
+- Resolution order: `$<NAME>_MOJO_NATIVE_LIB` → the library bundled in the
+  wheel / platform package → the repo development build output.
+- `<NAME>_MOJO_DISABLE_NATIVE=1` forces the fallback; each differential suite
+  runs twice — once native, once forced-fallback — and asserts both against
+  the real reference package.
+- The wrapper checks an `<name>mojo_abi_version()` handshake before any
+  native call; a mismatch falls back cleanly.
+- Wheels and platform packages are **per-platform and self-contained**:
+  `delocate` (macOS) / `auditwheel repair` / `patchelf` (Linux) vendor the
+  Mojo runtime libraries and rewrite load paths to be package-relative.
+  (Redistribution terms for Modular's runtime binaries should be confirmed
+  with Modular before any public release.)
 
-## API parity notes
+## The kernel factory
 
-- Tokenizer path: `rank_bm25` maps the tokenizer with a
-  `multiprocessing.Pool`; `bm25-mojo` uses a sequential map, which returns
-  element-for-element identical results without spawning processes.
-- `rank_bm25` does not lowercase tokens; neither does `bm25-mojo`.
-- **BM25L follows the published PyPI `rank_bm25` 0.2.2** (the oracle is pinned
-  in `pixi.toml`). Upstream's GitHub master changed the BM25L formula after
-  0.2.2 (dropping a leading `q_freq` factor); if a future PyPI release adopts
-  it, `BM25L` will be revisited. `BM25Okapi` and `BM25Plus` are identical in
-  both.
-
-## Differential tests
+Every kernel in this repo is laid out the same way — the factory template:
 
 ```
-pixi run test    # builds the kernel, then runs the suite twice:
-                 # once native, once with BM25_MOJO_DISABLE_NATIVE=1
-```
-
-`tests/` compares `bm25_mojo` against `rank_bm25` (pinned `==0.2.2`) on
-deterministic seeded corpora: medium and 10k-document corpora, empty
-documents, unseen query terms, repeated terms, single-document corpora, custom
-`k1`/`b`/`epsilon`/`delta` parameters, the tokenizer path, `get_batch_scores`
-(including negative indices), and `get_top_n` ordering including exact ties —
-for all three variants, on both backends. 34 tests per backend pass.
-
-## Repository layout (the kernel factory)
-
-```
-kernels/<name>/src/<name>.mojo   # clean-room Mojo kernel, exported C ABI
+kernels/<name>/src/<name>.mojo   # clean-room Mojo kernel, exported batch C ABI
 kernels/<name>/build.sh          # mojo build --emit shared-lib → build/
-python/<name>_mojo/              # wrapper package (pyproject + hatch hook)
+python/<name>_mojo/              # Python wrapper (pyproject + hatch build hook)
 python/<name>_mojo/<name>_mojo/  #   __init__ / core / _native.py / _reference.py
-typescript/<name>-mojo/          # TS wrapper workspace (npm packages + platform tarballs)
-tests/                           # differential suite vs the reference library
-benchmarks/                      # seeded, reproducible benchmark scripts
+typescript/<name>-mojo/          # TS wrapper workspace (npm core + platform
+                                 #   optionalDependencies + koffi + vendored fallback)
+tests/                           # differential suite vs the reference library,
+                                 #   run on both backends (native + forced fallback)
+benchmarks/                      # seeded, reproducible benchmark scripts with a
+                                 #   correctness gate before every timing pass
 pixi.toml                        # pinned Mojo + Python toolchain, all tasks
-.github/workflows/ci.yml         # bm25: ubuntu + macOS: build → test → wheel repair → hermetic smoke
-.github/workflows/ci-cclib.yml   # cclib-mojo: same factory flow, separate workflow
-.github/workflows/ci-fuse.yml    # fuse-mojo: TS factory flow, separate workflow
+.github/workflows/ci-*.yml       # per-kernel: build → test → wheel/pack repair
+                                 #   → hermetic install smoke, ubuntu + macOS
 ```
 
-Adding a new kernel means: write the kernel with the same ABI shape
-(`<name>mojo_abi_version` / create / score / destroy), copy the wrapper
-template (`_native.py` loader + `_reference.py` fallback), point the hatch
-hook at the new library, add differential tests against the reference library
-and a seeded benchmark. CI and packaging follow automatically.
+Adding a new kernel means: write the kernel with the same batch-shaped ABI
+(`<name>mojo_abi_version` / create / score / destroy — FFI cost per call, not
+per item), copy the wrapper template (`_native.py` loader with ABI handshake +
+`_reference.py` vendored fallback, or the koffi + optionalDependencies TS
+equivalent), point the build hook at the new library, and add differential
+tests against the real reference package plus a seeded benchmark with cold and
+warm numbers. CI and packaging follow automatically.
 
 ### Build from source
 
@@ -197,12 +257,29 @@ curl -fsSL https://pixi.sh/install.sh | bash   # if you don't have pixi
 pixi install
 pixi run build-kernel-bm25   # → kernels/bm25/build/libbm25mojo.{dylib,so}
 pixi run test                # differential suite, both backends
-pixi run bench               # reproduce the numbers above
+pixi run bench               # reproduce the bm25 numbers above
 pixi run wheel-bm25          # → python/bm25_mojo/dist/*.whl (platform wheel)
 ```
 
+Equivalents for the other kernels: `build-kernel-fuse / test-fuse /
+bench-fuse / pack-fuse / smoke-fuse` and `build-kernel-gaussgrid /
+test-cclib / bench-cclib / wheel-cclib`.
+
+## Roadmap
+
+This repo now covers three domains — text retrieval (bm25), fuzzy search
+(Fuse.js), and computational chemistry (cclib grids) — and the factory is
+built for repetition: more clean-room kernels targeting popular pure-Python
+and pure-JavaScript hot loops are landing on `main`, each with the same
+guarantees (differential parity, measured cold + warm benchmarks, self-
+contained packages, pure-language fallback everywhere). Watch the repo or
+check back here — the kernel table above grows as each one lands.
+
 ## License
 
-Apache-2.0, © 2026 Algenta All kernels in this repo are clean-room
-implementations of published textbook algorithms. `rank_bm25` itself is used
-only as the test/benchmark oracle, never as a runtime dependency.
+Apache-2.0, © 2026 Algenta. All kernels in this repo are clean-room
+implementations of published textbook algorithms. The reference packages
+(`rank_bm25`, Fuse.js, cclib/PyQuante) are used only as test and benchmark
+oracles, never as runtime dependencies; Fuse.js is additionally vendored as
+fuse-mojo's fallback backend under its own Apache-2.0 license (see
+[`typescript/fuse-mojo/packages/core/NOTICE`](typescript/fuse-mojo/packages/core/NOTICE)).
