@@ -19,7 +19,8 @@ one follows.
 | `python/bm25_mojo/`, `python/cclib_mojo/` | The Python wrapper packages (`hatchling` builds, `hatch_build.py` vendors the kernel into the wheel, `build_wheel.sh` repairs it with `delocate` / `auditwheel`) |
 | `typescript/fuse-mojo/` | An npm workspace: `packages/core` (wrapper + vendored Fuse.js fallback) and the per-platform binary packages `packages/darwin-arm64`, `packages/linux-x64` |
 | `tests/` | The Python differential suites — every kernel is asserted element-wise against its reference package, once on the native backend and once with the fallback forced |
-| `typescript/fuse-mojo/tests/` | The same for fuse-mojo (`node --test`), driven by `typescript/fuse-mojo/scripts/test_all.sh` |
+| `typescript/fuse-mojo/tests/` | The same for fuse-mojo (`node --test`), driven by `typescript/fuse-mojo/scripts/test_all.sh`; `parity.property.test.js` adds fast-check properties over generated corpora and options |
+| `fuzz/` | Differential fuzz harnesses (atheris, with a fuzzer-free regression mode) and their seed corpora; see [`fuzz/README.md`](./fuzz/README.md) |
 | `benchmarks/` | Reproducible benchmarks (median of 5 runs, correctness gate before every timing pass) |
 | `scripts/` | `test_all.sh` / `test_all_cclib.sh`, the two-pass (native, then forced-fallback) suite runners |
 | `pixi.toml`, `pixi.lock` | The one reproducible toolchain: the Mojo compiler (from Modular's `max` channel), Python, numpy, pytest and the test oracles |
@@ -49,6 +50,7 @@ locally means green in CI. Each task builds its kernel first (`depends-on`):
 | `ci.yml` | bm25 differential suite, both backends; wheel build + repair; wheel smoke in a clean venv | `pixi run test` then `pixi run wheel-bm25` |
 | `ci-cclib.yml` | gaussgrid / cclib-mojo differential suite, both backends; wheel build + repair; `quickstart.py` smoke, native vs. fallback checksum | `pixi run test-cclib` then `pixi run wheel-cclib` |
 | `ci-fuse.yml` | fuse-mojo differential + unit tests, both backends; npm platform package pack + repair; end-user smoke from the packed tarballs | `pixi run test-fuse` then `pixi run pack-fuse` and `pixi run smoke-fuse` |
+| `fuzz.yml` | coverage-guided atheris runs of the bm25 and cclib differential harnesses (60 s each on a PR, 20 min nightly) plus the seed-corpus replay; fast-check parity properties for fuse-mojo on both backends (2,000 scenarios per property on a PR, 50,000 nightly) | `pixi run -e fuzz fuzz-bm25 -- -max_total_time=60` (Linux x86_64), `pixi run fuzz-regression`, `FC_NUM_RUNS=2000 pixi run fuzz-fuse` |
 
 Single passes, when iterating:
 
@@ -63,6 +65,29 @@ cd typescript/fuse-mojo && npm test  # and npm run test:fallback (FUSE_MOJO_DISA
 Benchmarks: `pixi run bench`, `pixi run bench-cclib`, `pixi run bench-fuse`.
 The README tables are regenerated from these; please do not edit numbers by
 hand.
+
+### Fuzzing
+
+Every kernel also has a differential fuzz harness ([`fuzz/`](./fuzz/README.md)):
+`fuzz/fuzz_bm25.py` and `fuzz/fuzz_cclib.py` decode arbitrary bytes into a
+corpus/query or basis/grid scenario and compare the native kernel, the
+vendored fallback and the reference package at the documented tolerance,
+including the validation paths (NaN and infinite parameters, empty
+documents, malformed basis sets must raise the documented exceptions and
+nothing else). `typescript/fuse-mojo/tests/parity.property.test.js` does the
+same for fuse-mojo with [fast-check](https://fast-check.dev) properties.
+
+```bash
+pixi run fuzz-regression                           # replay fuzz/corpus/ (any platform; also in `pixi run test*`)
+pixi run -e fuzz fuzz-bm25 -- -max_total_time=60   # coverage-guided (Linux x86_64: atheris has no macOS wheel)
+FC_NUM_RUNS=5000 pixi run fuzz-fuse                # fast-check, native then forced fallback
+```
+
+A divergence the fuzzer finds is a bug, not noise: minimise it, check the
+input in under `fuzz/corpus/<name>/` so it is replayed forever, and either
+fix it or open an issue and register it as a `KnownIssue` in the harness
+(the replay then insists the seed keeps reproducing until the fix removes
+both). Never narrow a generator to avoid a finding.
 
 ### Pre-commit and the security gate
 
@@ -86,7 +111,12 @@ pre-commit install            # installs both the pre-commit and pre-push hooks
   forced fallback against the reference package element-wise, at the
   tolerance documented for that kernel (`bm25` 1e-8 absolute, `gaussgrid`
   1e-10 relative, `fuse` scores within 1e-9 with identical match spans). A
-  change that widens a tolerance needs to say why in the PR.
+  change that widens a tolerance needs to say why in the PR. The fuzz
+  harnesses assert the same tolerances on generated input (the `bm25`
+  harness adds a 1e-13 relative term for out-of-domain parameters that push
+  scores past ~1e5, where 1e-8 is below one ulp; see `fuzz/README.md`); a
+  change that makes the seed-corpus replay fail is a parity break until
+  proven otherwise.
 - **Both backends, both platforms.** CI runs every suite on `ubuntu-latest`
   and `macos-latest`, native then fallback. Windows has no Mojo toolchain;
   the wrappers' fallback is the Windows path and the fuse smoke simulates it.

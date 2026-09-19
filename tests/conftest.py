@@ -8,9 +8,16 @@ on any machine.
 from __future__ import annotations
 
 import random
+import sys
+from pathlib import Path
 
 import numpy as np
 import pytest
+
+# The fuzzing harnesses (fuzz/fuzz_bm25.py, fuzz/fuzz_cclib.py) are scripts,
+# not a package; tests/test_fuzz_regression_*.py import them to replay the
+# seed corpora, so fuzz/ goes on sys.path before those modules are collected.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "fuzz"))
 
 SCORE_ATOL = 1e-8  # documented tolerance; results are typically bit-identical
 

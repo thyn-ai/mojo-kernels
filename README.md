@@ -304,11 +304,14 @@ typescript/<name>-mojo/          # TS wrapper workspace (npm core + platform
                                  #   optionalDependencies + koffi + vendored fallback)
 tests/                           # differential suite vs the reference library,
                                  #   run on both backends (native + forced fallback)
+fuzz/                            # differential fuzz harness (atheris + seed-corpus
+                                 #   replay) comparing kernel, fallback and reference
 benchmarks/                      # seeded, reproducible benchmark scripts with a
                                  #   correctness gate before every timing pass
 pixi.toml                        # pinned Mojo + Python toolchain, all tasks
 .github/workflows/ci-*.yml       # per-kernel: build → test → wheel/pack repair
                                  #   → hermetic install smoke, ubuntu + macOS
+.github/workflows/fuzz.yml       # bounded fuzzing per PR, longer nightly
 ```
 
 Adding a new kernel means: write the kernel with the same batch-shaped ABI
@@ -316,7 +319,8 @@ Adding a new kernel means: write the kernel with the same batch-shaped ABI
 per item), copy the wrapper template (`_native.py` loader with ABI handshake +
 `_reference.py` vendored fallback, or the koffi + optionalDependencies TS
 equivalent), point the build hook at the new library, and add differential
-tests against the real reference package plus a seeded benchmark with cold and
+tests against the real reference package, a differential fuzz harness (see
+[`fuzz/README.md`](./fuzz/README.md)) and a seeded benchmark with cold and
 warm numbers. CI and packaging follow automatically.
 
 ### Build from source
@@ -326,6 +330,7 @@ curl -fsSL https://pixi.sh/install.sh | bash   # if you don't have pixi
 pixi install
 pixi run build-kernel-bm25   # → kernels/bm25/build/libbm25mojo.{dylib,so}
 pixi run test                # differential suite, both backends
+pixi run fuzz-regression     # replay the fuzzing seed corpora (fuzz/README.md)
 pixi run bench               # reproduce the bm25 numbers above
 pixi run wheel-bm25          # → python/bm25_mojo/dist/*.whl (platform wheel)
 ```

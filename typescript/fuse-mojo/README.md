@@ -222,8 +222,19 @@ total order over (score, idx), so ties cannot reorder), scores within 1e-9,
 and structurally identical match spans — plus a forced-multi-job cell that
 exercises the threaded stash concatenation, edge collections (blank docs,
 empty pattern, single chars), the `limit` parameter, and unit tests for the
-error surfaces. 39 tests pass on the native backend and 37 on the
+error surfaces. 42 tests pass on the native backend and 40 on the
 forced-fallback backend (the 2 native-only cells skip there by design).
+
+`tests/parity.property.test.js` adds property-based parity with
+[fast-check](https://fast-check.dev): the collection (string lists, and
+object lists with nested arrays, missing and blank values), the patterns
+(corpus words, substrings, typos, joins, free Unicode text, chunk-boundary
+lengths), every supported option and the `limit` parameter are drawn at
+random, and each search is held to the same contract as above. A failure
+shrinks to a minimal counterexample and prints the seed and path that replay
+it (`FC_SEED` / `FC_PATH`). `npm test` runs 200 scenarios per property;
+`npm run test:property` (or `pixi run fuzz-fuse` for both backends) honours
+`FC_NUM_RUNS`, which the nightly `fuzz` workflow raises to 50,000.
 
 ## Repository layout (this kernel)
 

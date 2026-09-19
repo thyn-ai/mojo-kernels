@@ -38,5 +38,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   provenance (`multiple.intoto.jsonl`); registry publishing (PyPI, npm) uses
   Trusted Publishing behind repository-variable gates. Verification steps in
   [RELEASING.md](RELEASING.md).
+- Differential fuzzing (`fuzz/`): atheris harnesses for `bm25-mojo` and
+  `cclib-mojo` that compare the native kernel, the vendored fallback and the
+  reference package on generated corpora, parameters, basis sets and grids
+  (including NaN/infinite parameters, empty documents and malformed input,
+  which must raise the documented exceptions), with a fuzzer-free regression
+  mode over checked-in seed corpora that runs inside the normal test suites;
+  fast-check parity properties for `@fuse-mojo/core` against Fuse.js 7.1.0;
+  a `fuzz` workflow (bounded budget per pull request, larger nightly).
+
+### Known issues
+
+- `bm25-mojo`: for degenerate parameters (`k1 == 0`, `b == 1` with an empty
+  document, `b > 1`, non-finite `k1`/`b`) the native kernel scores documents
+  that do not contain a query term as 0 where `rank_bm25` and the fallback
+  yield NaN ([#15](https://github.com/thyn-ai/mojo-kernels/issues/15)).
+- `cclib-mojo`: extreme magnitudes are not validated. Gaussian exponents
+  beyond ~1e68 or below ~1e-100 bohr^-2 and atom coordinates beyond ~1e170
+  Angstrom raise `OverflowError` / `ZeroDivisionError` from basis
+  normalisation instead of `BasisError`, and intermediates at the edge of
+  the double range make the kernel's and the NumPy fallback's evaluation
+  orders disagree (inf x 0 = NaN on one side, 0 on the other)
+  ([#16](https://github.com/thyn-ai/mojo-kernels/issues/16)).
 
 [Unreleased]: https://github.com/thyn-ai/mojo-kernels/commits/main
