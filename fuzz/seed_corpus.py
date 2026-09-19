@@ -132,6 +132,17 @@ def _cclib_reproducers(harness) -> dict[str, bytes]:
             mo_index=None,
             origin=(1e170, 0.0, 0.0), step=(1.0, 1.0, 1.0), shape=(1, 1, 1),
         ),
+        # Order matters for IEEE overflow (found by the fifth Linux run): with
+        # a tiny primitive weight (alpha ~ 1e-77) c * N * x overflows first,
+        # so the kernel's ((c N) x) w is inf while (c N w) x would be finite.
+        "known-issue-extreme-magnitude-8.bin": Case(
+            raw_numbers=True, defect=0,
+            gbasis=((("P", ((1e-77, 1.0),)),),),
+            atomcoords=((0.0, 0.0, 0.0),),
+            coeff=((1e150, 0.0, 0.0),),
+            mo_index=None,
+            origin=(1e170, 0.0, 0.0), step=(1.0, 1.0, 1.0), shape=(1, 1, 1),
+        ),
     }
     return {name: harness.encode(c) for name, c in cases.items()}
 

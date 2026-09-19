@@ -284,29 +284,34 @@ def _extreme_magnitude(case: Case) -> bool:
 
 
 def _prefactor_overflows(basis, axes, coeff2d: np.ndarray) -> bool:
-    """True when |c_b| * N_b * |w_p| * |x-cx|^l |y-cy|^m |z-cz|^n exceeds the
-    double range at some grid point for some basis function and primitive.
+    """True when the kernel's prefactor overflows the double range at some
+    grid point for some basis function, MO row and primitive.
 
-    The kernel multiplies coefficient, contracted norm, polynomial and
-    primitive weight before the Gaussian factors; the fallback multiplies
-    polynomial and contraction (weight times exponential) first. When that
-    prefactor is inf and the exponential has underflowed to 0 the two orders
-    give inf * 0 = NaN versus 0. Unreachable for physical inputs (it needs
-    |c * N * w * r^L| beyond ~1e308) -- the third symptom of the missing
-    magnitude validation tracked in the issue above.
+    The kernel evaluates ``pre = ((c * N) * (x-cx)^l) * (y-cy)^m`` and then
+    ``s = pre * w_p`` before the per-axis Gaussian factors; the fallback
+    multiplies polynomial and contraction (weight times exponential) first.
+    When ``pre`` or ``s`` is inf and the exponential has underflowed to 0 the
+    two orders give inf * 0 = NaN versus 0. IEEE overflow depends on the
+    association order, so this mirrors the kernel's order exactly rather
+    than testing a rearranged product. Unreachable for physical inputs (it
+    needs |c * N * r^L| or |c * N * r^L * w| beyond ~1e308) -- the third
+    symptom of the missing magnitude validation tracked in the issue above.
     """
-    ax, ay, az = axes
+    ax, ay, _ = axes
     with np.errstate(all="ignore"):
-        cmax = np.abs(coeff2d).max(axis=0)
         for b in range(basis.n_bf):
             o0, o1 = int(basis.offsets[b]), int(basis.offsets[b + 1])
-            wmax = np.abs(basis.prim_w[o0:o1]).max()
-            dx = np.abs(ax - basis.center_x[b]) ** basis.powers_l[b]
-            dy = np.abs(ay - basis.center_y[b]) ** basis.powers_m[b]
-            dz = np.abs(az - basis.center_z[b]) ** basis.powers_n[b]
-            poly = dx[:, None, None] * dy[None, :, None] * dz[None, None, :]
-            if not np.all(np.isfinite(cmax[b] * basis.bf_norm[b] * wmax * poly)):
-                return True
+            dxl = (ax - basis.center_x[b]) ** basis.powers_l[b]
+            dym = (ay - basis.center_y[b]) ** basis.powers_m[b]
+            for row in coeff2d:
+                if row[b] == 0.0:
+                    continue  # the kernel skips exactly-zero coefficients
+                pre = ((row[b] * basis.bf_norm[b]) * dxl[:, None]) * dym[None, :]
+                if np.isinf(pre).any():
+                    return True
+                for p in range(o0, o1):
+                    if np.isinf(pre * basis.prim_w[p]).any():
+                        return True
     return False
 
 
