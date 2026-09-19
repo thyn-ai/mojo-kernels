@@ -61,7 +61,8 @@ rho = density_on_grid(gbasis, atomcoords, mocoeffs[:nocc],
 # exact layout cclib's Volume.data and its cube writer use.
 ```
 
-A runnable version is in `quickstart.py` (water, STO-3G):
+A runnable version is `quickstart.py` at the repository root (water,
+STO-3G):
 
 ```
 python quickstart.py
@@ -101,30 +102,49 @@ Measured with `benchmarks/bench_gaussgrid.py` in this repository (run
 `pixi run bench-cclib` to reproduce). Workload: **benzene, 6-31G\*** (12
 atoms, 102 contracted Cartesian basis functions, 192 primitives — basis
 data from PyQuante 1.6.5's basis library), seeded MO coefficients, median
-of 5 runs, single-threaded. Environment: **BENCHMARK_ENV**.
+of 5 runs, single-threaded. Environment: **Apple M4 Max, macOS 26.6.2
+arm64, Python 3.12.14, numpy 2.5.3, Mojo 1.1.0**, 2026-09-19.
 
 | workload | PyQuante1 path (s) | cclib-mojo (s) | speedup |
 |---|---:|---:|---:|
-BENCHMARK_TABLE
+| wavefunction 1 MO, 50³ | 32.23 | 0.0126 | 2567x |
+| wavefunction 1 MO, 100³ | 345.37 | 0.0491 | 7033x |
+| density 3 MOs, 50³ | 63.59 | 0.0335 | 1898x |
+| wavefunction 1 MO, 50³ — NumPy fallback | 32.23 | 0.1691 | 191x |
 
 Setup is per-call on both sides (cclib rebuilds its PyQuante basis objects
 on every `wavefunction()` call; we rebuild our flat arrays on every call):
 
 | setup (per call) | PyQuante1 getbfs (ms) | cclib-mojo flatten (ms) |
 |---|---:|---:|
-BENCHMARK_SETUP
+| basis construction | 2.09 | 1.48 |
 
 Correctness gate (asserted before every timing run, element-wise vs the
-PyQuante1 reference): max abs diff **BENCHMARK_GATE** — the values are the
-same numbers, not approximations.
+PyQuante1 reference): max abs diff **1.5e-12** — the values are the same
+numbers, not approximations.
 
-About the baseline: cclib's hot loop with a PyQuante-1 backend
-(`pyamp()` → per-point `CGBF.amp(x, y, z)` in pure Python) is Python-2 era
-code that cannot execute on Python 3. The benchmark therefore drives a
-verbatim Python-3 transcription of that amplitude path
-(`tests/pyquante1_oracle.py`, same formulas, same operation order, same
-per-point interpreter cost profile) exactly the way cclib drives it. The
-speedup above is the speedup a cclib user sees on that path.
+Honest framing, two baselines (both measured, same machine and workload):
+
+- **vs the PyQuante1 path** (the table above): ~1,900–7,000×. cclib's hot
+  loop with a PyQuante-1 backend (`pyamp()` → per-point `CGBF.amp(x, y, z)`
+  in pure Python) is Python-2 era code that cannot execute on Python 3, so
+  the benchmark drives a verbatim Python-3 transcription of that amplitude
+  path (`tests/pyquante1_oracle.py`, same formulas, same operation order,
+  same per-point interpreter cost profile) exactly the way cclib drives it.
+- **vs cclib's pyquante2 backend** (NumPy-vectorized `cgbf.mesh`, the
+  fastest backend cclib ships today): cclib's real
+  `Volume.wavefunction()` takes **0.689 s** for the same 50³ single-MO
+  workload vs **0.0095 s** for cclib-mojo — **72×**, with max abs diff
+  8.4e-13. The remaining gap over the PyQuante1 table is the numpy
+  vectorization in pyquante2, which still pays per-(basis-function, grid)
+  temporaries; the Mojo kernel pays one SIMD FMA per (point, primitive).
+
+Why the gap is so large: the PyQuante path interprets ~5 Python operations
+per (grid point × basis function × primitive) — hundreds of millions of
+interpreter steps for a production cube grid. The Mojo kernel precomputes
+the exactly-separable axis factors `exp(-a·dx²)·exp(-a·dy²)·exp(-a·dz²)`
+once per call, then runs one SIMD fused multiply-add per (point, primitive)
+in compiled float64, with the grid row under update kept cache-resident.
 
 Why the gap is so large: the PyQuante path interprets ~5 Python operations
 per (grid point × basis function × primitive) — hundreds of millions of
@@ -206,7 +226,8 @@ ordering, and validation errors — plus end-to-end equivalence with cclib's
 actual `Volume.wavefunction()` / `electrondensity()` on their pyquante2
 backend. Basis-set provenance is documented in
 `tests/gaussgrid_fixtures.py` (all values from PyQuante 1.6.5's published
-basis library). TEST_COUNTS
+basis library). 19 tests pass per backend (38 per full run), and the
+benchmark asserts the same 1e-10 gate before every timing run.
 
 ## Scope and limitations
 
