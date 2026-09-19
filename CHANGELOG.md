@@ -56,8 +56,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - `cclib-mojo`: extreme magnitudes are not validated. Gaussian exponents
   beyond ~1e68 or below ~1e-100 bohr^-2 and atom coordinates beyond ~1e170
   Angstrom raise `OverflowError` / `ZeroDivisionError` from basis
-  normalisation instead of `BasisError`, and a coefficient x norm x
-  primitive-weight x r^L prefactor beyond the double range makes the kernel
-  return NaN (inf x 0) where the NumPy fallback returns 0 ([#16](https://github.com/thyn-ai/mojo-kernels/issues/16)).
+  normalisation instead of `BasisError`, and intermediates at the edge of
+  the double range make the kernel's and the NumPy fallback's evaluation
+  orders disagree (inf x 0 = NaN on one side, 0 on the other)
+  ([#16](https://github.com/thyn-ai/mojo-kernels/issues/16)).
 
 [Unreleased]: https://github.com/thyn-ai/mojo-kernels/commits/main

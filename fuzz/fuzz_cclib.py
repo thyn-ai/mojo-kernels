@@ -285,46 +285,65 @@ def _extreme_magnitude(case: Case) -> bool:
     )
 
 
-def _overflows_in_either_order(basis, axes, coeff2d: np.ndarray) -> bool:
-    """True when an intermediate product overflows the double range in the
-    kernel's or the fallback's evaluation order at some grid point.
+# Any intermediate within eight orders of magnitude of the double range: at
+# that scale the product order and the summation order decide between a
+# finite value, inf and NaN, and no physical amplitude comes anywhere near
+# (Gaussian basis amplitudes are O(1e2) in atomic units).
+IEEE_EXTREME = 1e300
 
-    The two backends associate the same factors differently:
 
-    * kernel:   ``pre = ((c * N) * (x-cx)^l) * (y-cy)^m``, ``s = pre * w_p``,
-      then the per-axis Gaussian factors;
-    * fallback: ``poly = (x-cx)^l * (y-cy)^m * (z-cz)^n``, times the
-      contraction (weights times one exponential), then ``c * N``.
+def _ieee_extreme_intermediate(basis, axes, coeff2d: np.ndarray) -> bool:
+    """True when either backend meets an intermediate that is non-finite or
+    beyond ``IEEE_EXTREME`` at some grid point.
 
-    IEEE overflow depends on that order: a huge coefficient makes the kernel's
-    ``pre`` inf while the fallback's ``poly`` is finite; a huge grid distance
-    with a tiny coefficient makes ``poly`` inf while ``pre`` is finite. Where
-    the exponential has underflowed to 0 the overflowing side then evaluates
-    inf * 0 = NaN and the other side 0. This mirrors both orders exactly
-    (IEEE multiplication is deterministic). Unreachable for physical inputs
-    -- the third symptom of the missing magnitude validation tracked in the
-    issue above.
+    Replicates both evaluation chains stage by stage, in their own
+    association order (IEEE multiplication is deterministic, so this is
+    exact for the kernel's scalar and SIMD paths alike):
+
+    * kernel: ``pre = ((c N) x^l) y^m``; ``s = ((pre w_p) EX) EY``;
+      ``GEZ = EZ z^n``; ``term = s GEZ``;
+    * fallback: ``poly = x^l y^m z^n``; ``contraction = sum_p w_p exp(-a r^2)``;
+      ``poly * contraction``; ``(c N) (poly * contraction)``.
+
+    Where the two orders overflow at different stages, one side evaluates
+    inf * 0 = NaN (or inf) while the other stays finite -- the third symptom
+    of the missing magnitude validation tracked in the issue above.
     """
     ax, ay, az = axes
+
+    def extreme(x) -> bool:
+        return not np.all(np.abs(x) < IEEE_EXTREME)
+
     with np.errstate(all="ignore"):
         for b in range(basis.n_bf):
-            if not np.any(coeff2d[:, b] != 0.0):
-                continue  # both backends skip exactly-zero coefficients
+            coeffs = [c for c in coeff2d[:, b] if c != 0.0]  # both backends skip exact zeros
+            if not coeffs:
+                continue
             o0, o1 = int(basis.offsets[b]), int(basis.offsets[b + 1])
-            dxl = (ax - basis.center_x[b]) ** basis.powers_l[b]
-            dym = (ay - basis.center_y[b]) ** basis.powers_m[b]
-            dzn = (az - basis.center_z[b]) ** basis.powers_n[b]
+            dx, dy, dz = ax - basis.center_x[b], ay - basis.center_y[b], az - basis.center_z[b]
+            dxl, dym, dzn = dx ** basis.powers_l[b], dy ** basis.powers_m[b], dz ** basis.powers_n[b]
+            # fallback order
             poly = dxl[:, None, None] * dym[None, :, None] * dzn[None, None, :]
-            if np.isinf(poly).any():
-                return True  # fallback order
-            for c in coeff2d[:, b]:
-                if c == 0.0:
-                    continue
+            r2 = dx[:, None, None] ** 2 + dy[None, :, None] ** 2 + dz[None, None, :] ** 2
+            contraction = np.zeros_like(poly)
+            for p in range(o0, o1):
+                contraction += basis.prim_w[p] * np.exp(-basis.prim_alpha[p] * r2)
+            if extreme(poly) or extreme(contraction) or extreme(poly * contraction):
+                return True
+            for c in coeffs:
+                if extreme((c * basis.bf_norm[b]) * (poly * contraction)):
+                    return True
+                # kernel order
                 pre = ((c * basis.bf_norm[b]) * dxl[:, None]) * dym[None, :]
-                if np.isinf(pre).any() or any(
-                    np.isinf(pre * basis.prim_w[p]).any() for p in range(o0, o1)
-                ):
-                    return True  # kernel order
+                if extreme(pre):
+                    return True
+                for p in range(o0, o1):
+                    a = basis.prim_alpha[p]
+                    ex, ey, ez = np.exp(-a * dx * dx), np.exp(-a * dy * dy), np.exp(-a * dz * dz)
+                    s_ = ((pre * basis.prim_w[p]) * ex[:, None]) * ey[None, :]
+                    gez = ez * dzn
+                    if extreme(s_) or extreme(gez) or extreme(s_[:, :, None] * gez[None, None, :]):
+                        return True
     return False
 
 
@@ -334,8 +353,8 @@ ISSUE_EXTREME_MAGNITUDE = KnownIssue(
     title=(
         "cclib-mojo: extreme magnitudes are not validated: exponents beyond ~1e68 or "
         "below ~1e-100 and coordinates beyond ~1e170 Angstrom raise OverflowError/"
-        "ZeroDivisionError instead of BasisError, and a coefficient*norm*weight*r^L prefactor "
-        "beyond the double range makes the kernel return inf*0 = NaN where the fallback returns 0"
+        "ZeroDivisionError instead of BasisError, and intermediates at the edge of the double "
+        "range make the two evaluation orders disagree (inf*0 = NaN on one side, 0 on the other)"
     ),
     applies=_extreme_magnitude,
 )
@@ -501,10 +520,10 @@ def evaluate(case: Case) -> str | None:
         ok = _close_mask(native, fallback, scale)
         if not np.all(ok):
             # Known shape: every disagreement has a non-finite value on at
-            # least one side, and an intermediate product really does
-            # overflow in one backend's evaluation order here.
+            # least one side, and one backend really does meet an intermediate
+            # at the edge of the double range here.
             non_finite = ~np.isfinite(native) | ~np.isfinite(fallback)
-            if np.all(ok | non_finite) and _overflows_in_either_order(basis, axes, coeff2d):
+            if np.all(ok | non_finite) and _ieee_extreme_intermediate(basis, axes, coeff2d):
                 outcome = ISSUE_EXTREME_MAGNITUDE.key
             else:
                 _assert_close("native kernel vs fallback", native, fallback, scale, case)
