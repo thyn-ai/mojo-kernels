@@ -1,0 +1,74 @@
+name: ci-pypdf-filters
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    name: pypdf-filters-mojo differential tests + wheel (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pixi
+        shell: bash
+        run: |
+          curl -fsSL https://pixi.sh/install.sh | bash
+          echo "$HOME/.pixi/bin" >> "$GITHUB_PATH"
+
+      - name: Build the pypdf-filters Mojo kernel
+        run: pixi run bash kernels/pypdf-filters/build.sh
+
+      - name: Differential suite (native backend, then forced fallback)
+        # The script pip-installs the pinned pypdf oracle OUTSIDE the pixi
+        # env (pixi.toml is shared repo infrastructure and stays untouched).
+        run: |
+          PYTHONPATH=python/pypdf_filters_mojo PYTHONNOUSERSITE=1 \
+            pixi run bash scripts/test_all_pypdf_filters.sh
+
+      - name: Build + repair the platform wheel (delocate/auditwheel)
+        run: pixi run bash python/pypdf_filters_mojo/build_wheel.sh
+
+      - name: Smoke-test the wheel in a clean venv
+        shell: bash
+        run: |
+          set -e
+          python3 -m venv /tmp/pypdf-filters-wheel-smoke
+          /tmp/pypdf-filters-wheel-smoke/bin/pip install --quiet python/pypdf_filters_mojo/dist/*.whl
+          # Hide the pixi env for the smoke: an end user has no Mojo toolchain,
+          # so the wheel must load its kernel purely from its own vendored
+          # libraries (not via the build machine's absolute rpath).
+          repo_root="$PWD"
+          mv .pixi .pixi-hidden
+          trap 'mv "$repo_root/.pixi-hidden" "$repo_root/.pixi"' EXIT
+          cd /tmp
+          # quickstart lives under examples/ so its directory contains no
+          # pdf_mojo/ package: sys.path[0] cannot shadow the installed wheel.
+          /tmp/pypdf-filters-wheel-smoke/bin/python "$repo_root/python/pypdf_filters_mojo/examples/quickstart.py" | tee /tmp/quickstart-native.txt
+          # The forced fallback must produce identical output.
+          PDF_MOJO_DISABLE_NATIVE=1 /tmp/pypdf-filters-wheel-smoke/bin/python "$repo_root/python/pypdf_filters_mojo/examples/quickstart.py" | tee /tmp/quickstart-fallback.txt
+          /tmp/pypdf-filters-wheel-smoke/bin/python - <<'EOF'
+          import pdf_mojo
+
+          info = pdf_mojo.backend_info()
+          assert info["native_available"], f"wheel must carry the native kernel: {info}"
+
+          native = open("/tmp/quickstart-native.txt").read()
+          fallback = open("/tmp/quickstart-fallback.txt").read()
+          strip = lambda t: "\n".join(l for l in t.splitlines() if not l.startswith("pypdf-filters-mojo"))
+          assert strip(native) == strip(fallback), (native, fallback)
+          print("wheel smoke OK:", pdf_mojo.__version__, info["native_source"])
+          EOF
+
+      - name: Upload wheel
+        uses: actions/upload-artifact@v4
+        with:
+          name: pypdf-filters-mojo-wheel-${{ matrix.os }}
+          path: python/pypdf_filters_mojo/dist/*.whl
+          retention-days: 14
