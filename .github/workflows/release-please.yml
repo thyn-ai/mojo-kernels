@@ -74,11 +74,16 @@ jobs:
       - name: Check whether the release App credentials are configured
         id: creds
         env:
-          APP_ID: ${{ secrets.ALGENTA_SDK_SYNC_APP_ID }}
-          APP_PRIVATE_KEY: ${{ secrets.ALGENTA_SDK_SYNC_APP_PRIVATE_KEY }}
+          # Booleans, never the credentials themselves: Actions evaluates the
+          # comparison and only "true"/"false" reaches the environment, so the
+          # PEM private key is not readable by this step or anything it spawns.
+          # Both are checked, so a half-configured repository reports "not
+          # configured" instead of failing later in the token step.
+          APP_ID_SET: ${{ secrets.ALGENTA_SDK_SYNC_APP_ID != '' }}
+          APP_PRIVATE_KEY_SET: ${{ secrets.ALGENTA_SDK_SYNC_APP_PRIVATE_KEY != '' }}
         run: |
           set -euo pipefail
-          if [ -n "${APP_ID:-}" ] && [ -n "${APP_PRIVATE_KEY:-}" ]; then
+          if [ "$APP_ID_SET" = "true" ] && [ "$APP_PRIVATE_KEY_SET" = "true" ]; then
             echo "configured=true" >> "$GITHUB_OUTPUT"
           else
             echo "configured=false" >> "$GITHUB_OUTPUT"
