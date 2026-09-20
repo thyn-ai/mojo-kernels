@@ -14,17 +14,23 @@ CHANGELOG entry as its notes, before ``release.yml`` runs, and those notes
 are kept. This composer supplies the body everywhere there are no such
 notes -- a Release whose body is blank, a same-tag draft, a hand-pushed tag
 with no release -- so a draft's body is never what gets published. The
-composed body must contain the entry's heading, or the workflow fails before
-it touches the Release: that is the check both subcommands make.
+composed body contains the entry's heading whenever there is an entry to
+compose from: that is what both subcommands check.
 
     release_notes.py check   --changelog CHANGELOG.md --version 0.1.0
     release_notes.py compose --changelog CHANGELOG.md --version 0.1.0 \\
-        [--generated generated.md] --out notes.md
+        [--generated generated.md] [--allow-missing-section] --out notes.md
 
-``check`` prints the heading it found (``preflight`` runs it before anything
-is built); ``compose`` writes the body (the ``release`` job runs it). Both
-exit 1 with a message on stderr when CHANGELOG.md has no section for the
-version or the section is empty. Standard library only, Python 3.9+.
+``check`` prints the heading it found and exits 1 with a message on stderr
+when there is no entry for the version or the entry is empty; ``preflight``
+runs it before anything is built. ``compose`` writes the body and the
+``release`` job runs it with ``--allow-missing-section``: a release is not
+worth blocking on a changelog, because release-please publishes the Release
+*before* this workflow runs, so refusing to build would leave an
+already-published Release without its assets, signatures and provenance --
+permanently, since a re-run builds the tag's own tree and would refuse
+again. With that flag a missing or empty entry degrades to the generated
+notes alone and says so on stderr. Standard library only, Python 3.9+.
 
 Run the tests with ``python3 -m unittest discover -s tests -p test_release_notes.py``.
 """
@@ -106,15 +112,40 @@ def _drop_trailing_link_definitions(body: list[str]) -> list[str]:
     return body[:end]
 
 
-def compose(changelog: str, version: str, generated: str | None = None) -> str:
-    """Compose the Release body: the CHANGELOG section, then the generated notes.
+def compose(
+    changelog: str,
+    version: str,
+    generated: str | None = None,
+    require_section: bool = True,
+) -> str:
+    """Compose the Release body: the CHANGELOG entry, then the generated notes.
 
     `generated` is the body GitHub's generate-notes API returned (or None /
-    blank, in which case the section stands alone). The result always
-    contains the section heading; that invariant is asserted here so a
-    caller cannot publish a body without it.
+    blank, in which case the entry stands alone). When the entry is present
+    the result always contains its heading; that invariant is asserted here
+    so a caller cannot publish a body without it.
+
+    `require_section=False` (the `release` job) turns a missing or empty
+    entry into the generated notes alone rather than an error, so a release
+    is never blocked on the changelog. ChangelogError is still raised when
+    that would leave nothing at all to publish.
     """
-    section = extract_section(changelog, version)
+    try:
+        section = extract_section(changelog, version)
+    except ChangelogError:
+        if require_section:
+            raise
+        if not (generated and generated.strip()):
+            raise ChangelogError(
+                f"CHANGELOG.md has no usable `## [{version}]` entry and there are no "
+                "generated notes either; nothing to compose"
+            ) from None
+        print(
+            f"release_notes: warning: CHANGELOG.md has no usable `## [{version}]` entry; "
+            "composing from the generated notes alone",
+            file=sys.stderr,
+        )
+        return generated.strip("\n") + "\n"
     parts = [section.rstrip("\n")]
     if generated and generated.strip():
         parts.append(generated.strip("\n"))
@@ -137,6 +168,12 @@ def main(argv: list[str] | None = None) -> int:
     comp.add_argument("--changelog", type=Path, required=True)
     comp.add_argument("--version", required=True, help="X.Y.Z, without the leading v")
     comp.add_argument("--generated", type=Path, help="file holding GitHub's generated notes (optional)")
+    comp.add_argument(
+        "--allow-missing-section",
+        action="store_true",
+        help="compose from the generated notes alone instead of failing when CHANGELOG.md "
+             "has no entry for the version (what the release job passes)",
+    )
     comp.add_argument("--out", type=Path, required=True)
 
     args = parser.parse_args(argv)
@@ -146,7 +183,10 @@ def main(argv: list[str] | None = None) -> int:
             print(find_heading(changelog, args.version))
         else:
             generated = args.generated.read_text(encoding="utf-8") if args.generated else None
-            body = compose(changelog, args.version, generated)
+            body = compose(
+                changelog, args.version, generated,
+                require_section=not args.allow_missing_section,
+            )
             args.out.write_text(body, encoding="utf-8")
             print(f"wrote {args.out} ({len(body.splitlines())} lines; heading: {body.splitlines()[0]})")
     except ChangelogError as error:

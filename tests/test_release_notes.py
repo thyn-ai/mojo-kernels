@@ -64,10 +64,11 @@ GENERATED = """\
 **Full Changelog**: https://github.com/thyn-ai/mojo-kernels/compare/v0.1.0...v0.2.0
 """
 
-# What release-drafter writes when no pull request has landed since its
-# last run: the body the v0.1.0 release ended up with before it was repaired
-# by hand. It must never be what the composer produces.
-DRAFTER_PLACEHOLDER = "## What's Changed\n\n* No changes\n"
+# The body the v0.1.0 release ended up with before it was repaired by hand:
+# a placeholder generated when no pull request had landed since the notes
+# were last written. It is the regression this composer exists to prevent,
+# and it must never be what the composer produces.
+PLACEHOLDER_BODY = "## What's Changed\n\n* No changes\n"
 
 
 class ExtractSection(unittest.TestCase):
@@ -208,17 +209,35 @@ class Compose(unittest.TestCase):
             body = release_notes.compose(CHANGELOG, "0.2.0", generated)
             self.assertEqual(body, release_notes.extract_section(CHANGELOG, "0.2.0"))
 
-    def test_body_is_never_the_drafter_placeholder(self):
-        # Even if the "generated" input were the drafter's placeholder, the
-        # CHANGELOG section leads the body, so the placeholder can never be
+    def test_body_is_never_a_placeholder(self):
+        # Even if the "generated" input were the placeholder body, the
+        # CHANGELOG entry leads the body, so the placeholder can never be
         # the whole of it.
-        body = release_notes.compose(CHANGELOG, "0.2.0", DRAFTER_PLACEHOLDER)
-        self.assertNotEqual(body.strip(), DRAFTER_PLACEHOLDER.strip())
+        body = release_notes.compose(CHANGELOG, "0.2.0", PLACEHOLDER_BODY)
+        self.assertNotEqual(body.strip(), PLACEHOLDER_BODY.strip())
         self.assertTrue(body.startswith("## [0.2.0] - 2026-10-01\n"))
 
     def test_missing_section_fails_before_anything_is_composed(self):
         with self.assertRaises(release_notes.ChangelogError):
             release_notes.compose(CHANGELOG, "9.9.9", GENERATED)
+
+    def test_missing_section_degrades_to_the_generated_notes_when_allowed(self):
+        # The release job's mode: a release must never be blocked on the
+        # changelog, because the Release is already published by then.
+        body = release_notes.compose(CHANGELOG, "9.9.9", GENERATED, require_section=False)
+        self.assertEqual(body, GENERATED.strip("\n") + "\n")
+
+    def test_empty_section_degrades_to_the_generated_notes_when_allowed(self):
+        # `Release-As: X.Y.Z` can force a release whose commits are all
+        # hidden types, leaving a heading with no body under it.
+        changelog = "## [1.0.0] - 2026-01-01\n\n\n## [0.9.0] - 2025-12-01\n\n- old\n"
+        body = release_notes.compose(changelog, "1.0.0", GENERATED, require_section=False)
+        self.assertEqual(body, GENERATED.strip("\n") + "\n")
+
+    def test_nothing_to_compose_fails_even_when_a_missing_section_is_allowed(self):
+        for generated in (None, "", "  \n"):
+            with self.assertRaises(release_notes.ChangelogError):
+                release_notes.compose(CHANGELOG, "9.9.9", generated, require_section=False)
 
 
 class CommandLine(unittest.TestCase):
@@ -274,6 +293,26 @@ class CommandLine(unittest.TestCase):
         )
         self.assertEqual(code, 1)
         self.assertIn("no `## [0.3.0]` section", err)
+        self.assertFalse(self.out.exists())
+
+    def test_compose_with_allow_missing_section_writes_the_generated_notes(self):
+        code, out, err = self.run_main(
+            "compose", "--changelog", str(self.changelog), "--version", "0.3.0",
+            "--generated", str(self.generated), "--allow-missing-section", "--out", str(self.out),
+        )
+        self.assertEqual(code, 0)
+        self.assertIn("warning", err)
+        self.assertIn("no usable `## [0.3.0]` entry", err)
+        self.assertIn("heading: ## What's Changed", out)
+        self.assertEqual(self.out.read_text(encoding="utf-8"), GENERATED.strip("\n") + "\n")
+
+    def test_compose_with_allow_missing_section_still_fails_with_nothing_to_write(self):
+        code, _, err = self.run_main(
+            "compose", "--changelog", str(self.changelog), "--version", "0.3.0",
+            "--allow-missing-section", "--out", str(self.out),
+        )
+        self.assertEqual(code, 1)
+        self.assertIn("nothing to compose", err)
         self.assertFalse(self.out.exists())
 
 

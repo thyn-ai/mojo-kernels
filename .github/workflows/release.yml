@@ -24,8 +24,10 @@
 # a hand-pushed tag, which is not a supported path) the body is composed by
 # scripts/release_notes.py from the tagged commit's CHANGELOG.md, the
 # `## [X.Y.Z]` entry followed by GitHub's generated "What's Changed" list,
-# never from a draft body. `preflight` refuses a tree whose CHANGELOG.md has
-# no entry for the version before anything is built.
+# never from a draft body. `preflight` reports a tree whose CHANGELOG.md has
+# no entry for the version: fatal on a dry run, a warning on a real release,
+# where the composed body degrades to the generated list alone rather than
+# leaving an already-published Release without its assets.
 #
 # Registries are gated. Wheels go to PyPI (Trusted Publishing, PEP 740
 # attestations) and tarballs to npm (Trusted Publishing, `--provenance`) only
@@ -258,18 +260,37 @@ jobs:
           echo "Releasing $TAG (version $VERSION) from $(git rev-parse HEAD); dry_run=$DRY_RUN prerelease=$PRERELEASE"
 
       # The release notes are the CHANGELOG.md entry for the version (written
-      # by release-please in the release pull request), so a tree without a
-      # `## [X.Y.Z]` entry is refused here, before anything is built; a dry
-      # run checks the tree's own version. The composer's unit tests run
-      # first, with the interpreter the runner provides (standard library
-      # only), so the `release` job never runs an untested composer.
+      # by release-please in the release pull request). The composer's unit
+      # tests run first, with the interpreter the runner provides (standard
+      # library only), so the `release` job never runs an untested composer.
       - name: Check CHANGELOG.md has the entry for this version
         env:
           VERSION: ${{ steps.resolve.outputs.version }}
+          DRY_RUN: ${{ steps.resolve.outputs.dry_run }}
         run: |
           set -euo pipefail
           python3 -m unittest discover -s tests -p test_release_notes.py
-          python3 scripts/release_notes.py check --changelog CHANGELOG.md --version "$VERSION"
+          if python3 scripts/release_notes.py check --changelog CHANGELOG.md --version "$VERSION"; then
+            exit 0
+          fi
+          # A dry run publishes nothing, so a missing entry is a failure the
+          # maintainer should see now, on the branch, where it is fixable.
+          #
+          # A real release must not be blocked on it. release-please creates
+          # the tag and publishes the Release (with the CHANGELOG entry as
+          # its notes) BEFORE the tag push starts this workflow, so failing
+          # here would leave that published Release without assets,
+          # signatures and provenance -- and permanently, because a re-run
+          # builds the tag's own tree and would refuse again. A forced
+          # release (`Release-As:` over commits that are all hidden types)
+          # is exactly how an entry ends up empty. Warn instead; the compose
+          # step falls back to the generated notes, and release-please's own
+          # notes, where it published them, are never touched either way.
+          if [ "$DRY_RUN" = "true" ]; then
+            echo "::error::CHANGELOG.md has no usable [$VERSION] entry (see above); fix it before tagging." >&2
+            exit 1
+          fi
+          echo "::warning::CHANGELOG.md has no usable [$VERSION] entry; composed notes fall back to GitHub's generated list. A Release published by release-please keeps its own notes regardless."
 
   # Same steps as ci.yml, ci-cclib.yml and ci-fuse.yml, on the same runners:
   # build the kernels, run every differential suite (native, then forced
@@ -564,8 +585,11 @@ jobs:
           # as the four characters `null`.
           gh api -X POST "repos/${GH_REPO}/releases/generate-notes" \
             -f tag_name="$TAG" -f target_commitish="$SHA" --jq '.body // ""' > "$RUNNER_TEMP/generated.md"
+          # --allow-missing-section: see the preflight check. The Release is
+          # already published by now, so the notes degrade rather than the
+          # job failing with the assets unattached.
           python3 scripts/release_notes.py compose \
-            --changelog CHANGELOG.md --version "$VERSION" \
+            --changelog CHANGELOG.md --version "$VERSION" --allow-missing-section \
             --generated "$RUNNER_TEMP/generated.md" --out "$RUNNER_TEMP/notes.md"
           echo "::group::Composed release notes for $TAG"
           cat "$RUNNER_TEMP/notes.md"

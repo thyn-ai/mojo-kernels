@@ -38,8 +38,11 @@ notes, `release.yml` composes them itself from the tagged commit's
 requests (`scripts/release_notes.py`): a Release whose body is blank gets
 them, a same-tag draft is published with them (a draft's body is never
 published), and a tag with no release at all, which is not a supported path,
-gets one created with them. `preflight` refuses a tree whose `CHANGELOG.md`
-has no entry for the version before anything is built.
+gets one created with them. `preflight` reports a tree whose `CHANGELOG.md`
+has no entry for the version, before anything is built: that fails a dry
+run, where it is fixable, and only warns on a real release, where the
+Release is already published and the composed notes degrade to the
+generated list rather than leaving it without its assets.
 
 Registries are gated. The wheels are published to PyPI and the tarballs to
 npm **only** when the repository variables `PUBLISH_PYPI` / `PUBLISH_NPM`
@@ -97,7 +100,7 @@ release-please writes and a maintainer merges.
 
    | Job | Runs when | What it does |
    | --- | --- | --- |
-   | `preflight` | always | validates the tag (and, on a re-run, that the run was dispatched on it), checks that every package version equals the tag's and that `CHANGELOG.md` has a `## [X.Y.Z]` entry for it |
+   | `preflight` | always | validates the tag (and, on a re-run, that the run was dispatched on it), checks that every package version equals the tag's, and that `CHANGELOG.md` has a `## [X.Y.Z]` entry for it (fatal on a dry run, a warning on a release) |
    | `build` (ubuntu, macos) | always | kernels, differential suites, wheels, npm tarballs, smoke tests; each runner keeps the assets it can vouch for |
    | `sign` | always | `SHA256SUMS`; `cosign sign-blob` per asset with the job's OIDC identity; verifies every bundle; computes the provenance subjects |
    | `release` | not on a dry run | finds the GitHub Release release-please published for the tag and keeps its notes (a blank body, a same-tag draft or no release at all gets notes composed from `CHANGELOG.md`), uploads assets and bundles |
@@ -178,8 +181,11 @@ Download them with `gh run download <run-id>` and verify them as below, with
   on; a dry run dispatched on a tag.
 - A tag whose version differs from any package version in the tree, or a
   tree whose packages disagree with each other.
-- A tree whose `CHANGELOG.md` has no non-empty `## [X.Y.Z]` entry for the
-  version.
+- A **dry run** whose `CHANGELOG.md` has no non-empty `## [X.Y.Z]` entry for
+  the version. A real release is never refused for this: the Release is
+  already published by then, so the notes fall back to GitHub's generated
+  list instead (a `Release-As:` override over commits that are all hidden
+  types is how an entry ends up empty).
 - An asset set that is not exactly four wheels and three tarballs, all
   carrying the version.
 - A signature bundle that does not verify against the run's own identity.
