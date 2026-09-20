@@ -9,7 +9,7 @@
 
 **Clean-room [Mojo](https://www.modular.com/mojo) kernels as drop-in
 accelerators for popular Python and TypeScript libraries.** Same API, same
-results — measured **70x–8,700x** speedups with bit-exact-to-last-ulp parity
+results — measured **70x–13,137x** speedups with bit-exact-to-last-ulp parity
 against the reference packages, asserted by differential test suites that run
 on both backends. Prebuilt per-platform binaries mean **no Mojo toolchain is
 ever required** on an end user's machine, and every package ships a vendored
@@ -28,7 +28,7 @@ repository.
 
 | package | accelerates | kernel | measured speedup | parity |
 |---|---|---|---|---:|
-| [`bm25-mojo`](python/bm25_mojo/README.md) | [`rank_bm25`](https://pypi.org/project/rank_bm25/) (Python) | [`kernels/bm25`](kernels/bm25) | 116x–8,769x | max abs diff 3.6e-15 |
+| [`bm25-mojo`](python/bm25_mojo/README.md) | [`rank_bm25`](https://pypi.org/project/rank_bm25/) (Python) | [`kernels/bm25`](kernels/bm25) | 149x–13,137x vs rank_bm25; 1.10x–1.95x vs bm25s | max abs diff 3.6e-15 |
 | [`fuse-mojo`](typescript/fuse-mojo/README.md) | [Fuse.js](https://fusejs.io) fuzzy search (TypeScript/Node) | [`kernels/fuse`](kernels/fuse) | 8.8x–38.7x warm, 13x cold | bit-identical (0 diff) |
 | [`cclib-mojo`](python/cclib_mojo/README.md) | [cclib](https://cclib.github.io/) electron-density grids (Python) | [`kernels/gaussgrid`](kernels/gaussgrid) | 72x–7,033x | max abs diff 1.5e-12 |
 
@@ -44,25 +44,35 @@ Measured with `benchmarks/bench_bm25.py` (run `pixi run bench` to reproduce).
 Corpora are generated locally from fixed seeds: 1k / 10k / 100k documents of
 30-60 tokens from a Zipf-ish 20k-term vocabulary; 20 queries per cell; median
 of 5 runs. Environment: **Apple M4 Max, macOS 26.6.2 arm64, Python 3.12.14,
-numpy 2.5.3, Mojo 1.1.0, rank_bm25 0.2.2 (PyPI)**, 2026-09-19.
+numpy 2.5.3, Mojo 1.1.0, rank_bm25 0.2.2 (PyPI)**, 2026-09-20.
 
 | corpus | query terms | rank_bm25 ms/query | bm25_mojo ms/query | speedup |
 |---:|---:|---:|---:|---:|
-| 1,000 | 5 | 0.338 | 0.0029 | 116.1x |
-| 1,000 | 10 | 0.640 | 0.0038 | 167.4x |
-| 1,000 | 20 | 1.278 | 0.0041 | 315.1x |
-| 10,000 | 5 | 4.038 | 0.0047 | 863.8x |
-| 10,000 | 10 | 7.570 | 0.0050 | 1504.1x |
-| 10,000 | 20 | 14.869 | 0.0066 | 2263.5x |
-| 100,000 | 5 | 47.737 | 0.0104 | 4577.2x |
-| 100,000 | 10 | 89.463 | 0.0117 | 7647.7x |
-| 100,000 | 20 | 162.178 | 0.0185 | 8769.3x |
+| 1,000 | 5 | 0.292 | 0.0020 | 148.7x |
+| 1,000 | 10 | 0.566 | 0.0027 | 209.9x |
+| 1,000 | 20 | 1.069 | 0.0029 | 375.1x |
+| 10,000 | 5 | 2.853 | 0.0037 | 780.6x |
+| 10,000 | 10 | 5.447 | 0.0039 | 1396.8x |
+| 10,000 | 20 | 11.201 | 0.0047 | 2389.5x |
+| 100,000 | 5 | 45.313 | 0.0092 | 4942.1x |
+| 100,000 | 10 | 87.818 | 0.0125 | 7024.2x |
+| 100,000 | 20 | 159.890 | 0.0122 | 13137.2x |
 
 Correctness gate (asserted before every timing run, element-wise vs
 `rank_bm25`): max abs diff **3.6e-15** at 100k docs — the scores are the same
 numbers, not approximations.
 
-#### vs bm25s (the numba incumbent)
+Index build is one-time (v2: CSR postings are built inside the kernel and the
+idf-weighted scores are baked there, so the Python side only scans the corpus
+— the same scan rank_bm25 does):
+
+| corpus | rank_bm25 build (s) | bm25_mojo build (s) |
+|---:|---:|---:|
+| 1,000 | 0.006 | 0.011 |
+| 10,000 | 0.047 | 0.075 |
+| 100,000 | 0.423 | 0.688 |
+
+#### vs bm25s (the numba incumbent) — bm25-mojo wins every cell
 
 [`bm25s`](https://github.com/xhluca/bm25s) is the established fast BM25
 implementation (numba-JIT scorer over a precomputed sparse score matrix). It
@@ -70,51 +80,53 @@ is **not** a `rank_bm25` drop-in — different API, and its idf flooring
 differs from `rank_bm25`'s by design — so scores are not element-wise
 comparable; this is a workload-identical speed comparison on the same harness
 (`benchmarks/bench_bm25s.py`, same seeds/corpora/queries as above; median of
-5 runs, 20 queries per cell). Same machine and environment as above, plus
-**bm25s 0.3.11, numba 0.67.0**, bm25s timed in its recommended configuration
-(`method='lucene'`, float32, `compile()` numba scorer). Sanity check: mean
-top-10 ranking overlap between bm25s and rank_bm25 is **1.00** (10 queries,
-10k docs). (This table is from its own run; absolute latencies shift with
-machine load between runs, so its rank_bm25 column differs from the table
-above — ratios within each table are internally consistent.)
+5 runs, 20 queries per cell; correctness gate vs rank_bm25 asserted before
+timing). Same machine and environment as above, plus **bm25s 0.3.11, numba
+0.67.0**, bm25s timed in its recommended configuration (`method='lucene'`,
+float32, `compile()` numba scorer). Sanity check: mean top-10 ranking overlap
+between bm25s and rank_bm25 is **1.00** (10 queries, 10k docs). bm25_mojo is
+the faster of its single-query loop and its `get_scores_batch` batch API per
+cell; the full per-variant grid is in the bench script output.
 
 Warm steady-state (ms/query, lower is better):
 
-| corpus | query terms | rank_bm25 | bm25s (numba) | bm25_mojo | bm25_mojo vs bm25s |
-|---:|---:|---:|---:|---:|---:|
-| 1,000 | 5 | 1.486 | 0.0099 | 0.0097 | 1.02x |
-| 1,000 | 10 | 1.320 | 0.0060 | 0.0068 | 0.88x |
-| 1,000 | 20 | 3.007 | 0.0070 | 0.0085 | 0.82x |
-| 10,000 | 5 | 10.834 | 0.0072 | 0.0090 | 0.80x |
-| 10,000 | 10 | 16.883 | 0.0108 | 0.0163 | 0.66x |
-| 10,000 | 20 | 36.249 | 0.0080 | 0.0118 | 0.68x |
-| 100,000 | 5 | 129.633 | 0.0161 | 0.0174 | 0.93x |
-| 100,000 | 10 | 224.216 | 0.0193 | 0.0263 | 0.73x |
-| 100,000 | 20 | 498.358 | 0.0258 | 0.0578 | 0.45x |
+| corpus | query terms | bm25s (numba, best variant) | bm25_mojo (best path) | speedup |
+|---:|---:|---:|---:|---:|
+| 1,000 | 5 | 0.0023 | 0.0014 | **1.71x** |
+| 1,000 | 10 | 0.0026 | 0.0016 | **1.61x** |
+| 1,000 | 20 | 0.0031 | 0.0020 | **1.60x** |
+| 10,000 | 5 | 0.0032 | 0.0017 | **1.95x** |
+| 10,000 | 10 | 0.0035 | 0.0019 | **1.84x** |
+| 10,000 | 20 | 0.0048 | 0.0029 | **1.66x** |
+| 100,000 | 5 | 0.0079 | 0.0055 | **1.43x** |
+| 100,000 | 10 | 0.0090 | 0.0068 | **1.33x** |
+| 100,000 | 20 | 0.0115 | 0.0105 | **1.10x** |
 
-Honest result: **bm25s's numba scorer matches or beats bm25-mojo on warm
-steady-state latency in most cells** (bm25s's float32 NumPy backend, not
-shown, is within ~1.5-3x of both; float64 numba scores similarly to float32).
-bm25s front-loads the work — its index build precomputes a sparse score
-matrix, so a query mostly sums precomputed columns. The two packages sit at
-different design points:
+An earlier revision of this table (v1 kernel) honestly reported bm25s winning
+most cells (0.45x-1.02x). The counterattack is documented layer by layer in
+[`benchmarks/AUTOPSY-bm25s.md`](benchmarks/AUTOPSY-bm25s.md): baking the
+idf-weighted scores into the CSR at index time (the bm25s trick, in float64
+with bit-exact op order), eliminating per-query buffer zeroing, query
+batching with malloc-friendly panel sizes, and hot-path slimming — all
+verified against the 1e-8 parity gate after each step (measured agreement
+stayed 0-3.6e-15). float32 value storage was measured and **rejected** (9.4e-7
+max error, 94x over the parity gate); threading was not needed — all cells
+win single-threaded.
 
-- **Cold start**: bm25s pays a one-time numba JIT cost (**3.95 s** for
-  float32, +0.72 s float64, measured once per process) plus **~200-320 ms for
-  the first query on each freshly built index** (lazy numba binding).
-  bm25-mojo's kernel is AOT-compiled: first query on a fresh index is
-  **0.06-0.17 ms** — no JIT, no warmup.
-- **Index build (one-time)**: at 100k docs bm25s took **5.55 s** vs
-  bm25-mojo's 4.68 s and rank_bm25's 1.39 s (1k: 0.058 / 0.134 / 0.022 s;
-  10k: 0.426 / 0.517 / 0.161 s, respectively).
-- **Dependencies**: bm25s needs numba/llvmlite for its fast path; bm25-mojo
-  is a self-contained per-platform wheel with a pure-Python fallback.
+The remaining honest differences:
+
+- **Cold start**: bm25s pays a one-time numba JIT cost (**1.1-4.1 s** for
+  float32, ~0.2 s float64, measured once per process) plus lazy-binding cost
+  on some freshly built indexes; bm25-mojo's kernel is AOT-compiled, first
+  query on a fresh index is **0.003-0.015 ms** (batch) — no JIT, no warmup.
+- **Index build (one-time)**: at 100k docs bm25s took **1.58 s** vs
+  bm25-mojo's **0.81 s** and rank_bm25's **0.47 s** (1k: 0.016 / 0.010 /
+  0.006 s; 10k: 0.142 / 0.085 / 0.053 s, respectively — same run as the bm25s
+  table above).
 - **Semantics**: bm25-mojo is bit-faithful to `rank_bm25` (max abs diff
   3.6e-15 above); bm25s implements its own well-documented variants.
-
-For long-lived, query-heavy services bm25s is excellent and we say so.
-bm25-mojo's niche is the `rank_bm25`-compatible API, bit-identical scores,
-JIT-free cold starts, and no numba dependency.
+- **Dependencies**: bm25s needs numba/llvmlite for its fast path; bm25-mojo
+  is a self-contained per-platform wheel with a pure-Python fallback.
 
 ### fuse-mojo — fuzzy search (Fuse.js drop-in)
 
@@ -206,11 +218,16 @@ tokenized_corpus = [doc.split(" ") for doc in corpus]
 bm25 = BM25Okapi(tokenized_corpus)                  # same call shape as rank_bm25
 scores = bm25.get_scores(["windy", "in", "London"]) # np.ndarray, one score per doc
 top = bm25.get_top_n(["windy", "in", "London"], corpus, n=2)
+
+# and a batch addition rank_bm25 doesn't have: one FFI call, many queries
+panel = bm25.get_scores_batch([["windy", "London"], ["weather", "today"]])
+# panel[i] is bit-identical to bm25.get_scores(queries[i])
 ```
 
 `BM25Okapi`, `BM25L`, and `BM25Plus` are all provided with the same
 constructor arguments, index attributes, and methods as their `rank_bm25`
-counterparts. Force the fallback with `BM25_MOJO_DISABLE_NATIVE=1`; inspect
+counterparts, plus `get_scores_batch` for batched scoring. Force the fallback
+with `BM25_MOJO_DISABLE_NATIVE=1`; inspect
 the active backend with `bm25_mojo.backend_info()`. Full API parity notes:
 [`python/bm25_mojo/README.md`](python/bm25_mojo/README.md).
 
