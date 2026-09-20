@@ -24,6 +24,11 @@
  * (the platform package for another operating system) is left out, exactly as
  * npm leaves it out of node_modules.
  *
+ * Both files are written into the current directory, which must not already
+ * hold a package.json or package-lock.json: the script refuses to run
+ * otherwise, so it can never overwrite a real project's manifest or lockfile.
+ * The smoke scripts call it from a directory they have just created.
+ *
  * Node built-ins and `tar` only; npm itself is never invoked.
  */
 'use strict'
@@ -34,8 +39,11 @@ const { execFileSync } = require('node:child_process')
 
 const ROOT_NAME = 'fuse-mojo-smoke'
 const ROOT_VERSION = '0.0.0'
-// Manifest fields npm records on a lockfile entry for a tarball dependency.
-const RECORDED_FIELDS = ['version', 'license', 'os', 'cpu', 'engines', 'dependencies', 'optionalDependencies']
+const PACKAGE_JSON = 'package.json'
+const PACKAGE_LOCK = 'package-lock.json'
+// Manifest fields npm records on a lockfile entry for a tarball dependency,
+// besides `version`, which every entry starts from.
+const RECORDED_FIELDS = ['license', 'os', 'cpu', 'engines', 'dependencies', 'optionalDependencies']
 
 function fail(message) {
   console.error(`consumer-lockfile: ${message}`)
@@ -57,6 +65,11 @@ function main(argv) {
   if (!workspaceLockfile || tarballs.length === 0) {
     fail('usage: node consumer-lockfile.cjs <workspace package-lock.json> <tarball>...')
   }
+  for (const output of [PACKAGE_JSON, PACKAGE_LOCK]) {
+    if (fs.existsSync(output)) {
+      fail(`${output} already exists in ${process.cwd()}; run from an empty consumer directory so no project manifest is overwritten`)
+    }
+  }
   const pinned = JSON.parse(fs.readFileSync(workspaceLockfile, 'utf8')).packages
   if (!pinned) fail(`${workspaceLockfile} has no "packages" section (lockfileVersion 2 or 3 required)`)
 
@@ -71,7 +84,7 @@ function main(argv) {
     rootDependencies[manifest.name] = spec
     const entry = { version: manifest.version, resolved: spec, integrity: integrityOf(tarball) }
     for (const field of RECORDED_FIELDS) {
-      if (field !== 'version' && manifest[field] !== undefined) entry[field] = manifest[field]
+      if (manifest[field] !== undefined) entry[field] = manifest[field]
     }
     packages[`node_modules/${manifest.name}`] = entry
   }
@@ -109,9 +122,9 @@ function main(argv) {
     requires: true,
     packages: { '': root, ...sortedPackages },
   }
-  fs.writeFileSync('package.json', JSON.stringify(packageJson, null, 2) + '\n')
-  fs.writeFileSync('package-lock.json', JSON.stringify(lockfile, null, 2) + '\n')
-  console.log(`wrote package-lock.json: ${local.size} local tarball(s), ${copied} registry package(s) pinned from ${workspaceLockfile}`)
+  fs.writeFileSync(PACKAGE_JSON, JSON.stringify(packageJson, null, 2) + '\n')
+  fs.writeFileSync(PACKAGE_LOCK, JSON.stringify(lockfile, null, 2) + '\n')
+  console.log(`wrote ${PACKAGE_LOCK}: ${local.size} local tarball(s), ${copied} registry package(s) pinned from ${workspaceLockfile}`)
 }
 
 main(process.argv.slice(2))
