@@ -28,6 +28,15 @@ python -c "import elephant; assert elephant.__version__ == '1.2.1', elephant.__v
 
 SUITE="tests/test_elephant_surrogates_differential.py tests/test_elephant_surrogates_loader.py"
 
+# Preflight, on its own: the oracle's compiled mining extension must start in
+# a process that already imported this environment's numpy. Inside the full
+# run that failure is an uncatchable abort in the first mining test and
+# pytest's capture swallows the runtime's message; run alone, the test fails
+# cleanly and prints it (its docstring has the macOS history).
+echo "== elephant-mojo oracle preflight: fim mining beside numpy =="
+pytest "tests/test_elephant_surrogates_differential.py::test_oracle_mining_extension_starts_beside_numpy" -q
+
+echo
 echo "== elephant-mojo differential suite: native backend =="
 pytest $SUITE -q
 
