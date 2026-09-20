@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Full sacrebleu-mojo differential suite: once against the native kernel,
-# once with the pure-Python fallback forced on. Requires the sacrebleu
-# oracle package to be importable (e.g. `pip install sacrebleu==2.5.1` or
-# SACREBLEU_ORACLE_PATH=<dir containing the package>).
+# once with the pure-Python fallback forced on. The sacrebleu oracle
+# (sacrebleu==2.5.1) comes from the repo pixi environment (pixi.toml
+# [pypi-dependencies], pinned and lock-verified); SACREBLEU_ORACLE_PATH=<dir>
+# can point at an alternative checkout of the package.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."

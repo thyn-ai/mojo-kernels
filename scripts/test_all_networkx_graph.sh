@@ -10,25 +10,10 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-# Oracle provisioning: the differential oracle is the published PyPI package
-# networkx==3.5. It is deliberately NOT in pixi.toml (this kernel's scope
-# does not include that file), so install it into a local target dir and
-# put it on PYTHONPATH. The dir also survives pixi environment re-syncs,
-# which wipe pip installs from the pixi site-packages.
-ORACLE_DIR="$PWD/build/nx-test-oracle"
-export PYTHONPATH="$ORACLE_DIR${PYTHONPATH:+:$PYTHONPATH}"
-if [ ! -d "$ORACLE_DIR/networkx" ]; then
-  if python -m pip --version >/dev/null 2>&1; then
-    python -m pip install -q --target "$ORACLE_DIR" "networkx==3.5"
-  elif command -v uv >/dev/null 2>&1; then
-    # pixi re-syncs can wipe pip from the env; uv is host-managed.
-    uv pip install -q --python "$(python -c 'import sys; print(sys.executable)')" \
-      --target "$ORACLE_DIR" "networkx==3.5"
-  else
-    echo "error: need pip in the env or uv on PATH to provision the networkx oracle" >&2
-    exit 1
-  fi
-fi
+# The differential oracle is the published PyPI package networkx==3.5,
+# provided by the repo pixi environment (pixi.toml [pypi-dependencies],
+# pinned and lock-verified). The version check guards the parity claim
+# against an env that drifted from the lock.
 python - <<'EOF'
 import networkx
 assert networkx.__version__ == "3.5", f"oracle must be networkx==3.5, got {networkx.__version__}"

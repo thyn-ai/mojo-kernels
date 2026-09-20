@@ -5,24 +5,18 @@
 # Run inside the repo pixi environment with the wrapper on PYTHONPATH:
 #   PYTHONPATH=python/pypdf_filters_mojo pixi run bash scripts/test_all_pypdf_filters.sh
 #
-# The oracle is the published PyPI package pypdf==6.19.0. pixi.toml is shared
-# by every kernel in this repo and must NOT gain per-kernel oracle entries,
-# so the oracle is pip-installed on demand into a directory OUTSIDE the pixi
-# environment (a pixi re-solve prunes unknown packages from site-packages).
+# The oracle is the published PyPI package pypdf==6.19.0, provided by the
+# repo pixi environment (pixi.toml [pypi-dependencies], pinned and
+# lock-verified).
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-ORACLE_VERSION="6.19.0"
-ORACLE_DIR="${TMPDIR:-/tmp}/pypdf_oracle_${ORACLE_VERSION}"
-
-if ! python -c "import pypdf" 2>/dev/null; then
-  if [ ! -d "${ORACLE_DIR}/pypdf" ]; then
-    echo "== installing pypdf==${ORACLE_VERSION} oracle into ${ORACLE_DIR} =="
-    python -m pip install --quiet --target "${ORACLE_DIR}" "pypdf==${ORACLE_VERSION}"
-  fi
-  export PYTHONPATH="${ORACLE_DIR}${PYTHONPATH:+:${PYTHONPATH}}"
-fi
+python -c "import pypdf" 2>/dev/null || {
+  echo "error: the pypdf oracle package is not importable;" >&2
+  echo "       run inside the pixi environment (pixi install)" >&2
+  exit 1
+}
 
 SUITE="tests/test_pypdf_filters_differential.py tests/test_pypdf_filters_loader.py"
 

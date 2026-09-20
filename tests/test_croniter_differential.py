@@ -6,8 +6,8 @@ fallback). Both backends must agree with the oracle everywhere — results
 are exact datetime comparisons (==), plus tzinfo/fold/utcoffset checks for
 aware results.
 
-The oracle is the published PyPI package, pinned to croniter==6.2.4 (CI
-installs it into the pixi env; see .github/workflows/ci-croniter.yml).
+The oracle is the published PyPI package, pinned to croniter==6.2.4 in
+pixi.toml [pypi-dependencies].
 croniter was used strictly as a black-box oracle: no oracle source was
 read or adapted.
 

@@ -3,9 +3,8 @@
 Run twice by `scripts/test_all_networkx_graph.sh`: once against the native
 Mojo kernel and once with NX_MOJO_DISABLE_NATIVE=1 (forced pure-Python
 fallback). The oracle is the published PyPI package, pinned to
-networkx==3.5 (the script provisions it into build/nx-test-oracle, outside
-the pixi-managed site-packages). In practice both backends agree with the
-oracle bit-for-bit on the graphs in this suite.
+networkx==3.5 in pixi.toml [pypi-dependencies]. In practice both backends
+agree with the oracle bit-for-bit on the graphs in this suite.
 """
 
 from __future__ import annotations
