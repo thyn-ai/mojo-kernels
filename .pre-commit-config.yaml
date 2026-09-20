@@ -18,7 +18,7 @@ repos:
 
   # thyn-security-toolchain:begin -- managed by thyn-ai/security-toolchain (propagate). Edit args, not rev.
   - repo: https://github.com/thyn-ai/security-toolchain
-    rev: v0.1.15
+    rev: v0.1.16
     hooks:
       - id: gitleaks-staged
       - id: opengrep-changed

@@ -37,7 +37,7 @@ jobs:
       github.event.pull_request.user.login == 'dependabot[bot]'
       && (github.event_name != 'pull_request_review'
       || (github.event.review.user.login == 'codna-ai[bot]' && github.event.review.state == 'approved'))
-    uses: thyn-ai/security-toolchain/.github/workflows/dependabot-auto-merge.yml@a5dbd1f75e95943a6bcf4d6e76d23cd769e9240c # v0.1.15
+    uses: thyn-ai/security-toolchain/.github/workflows/dependabot-auto-merge.yml@fd4969a5e4e28afef68288224ac151e8e7258adc # v0.1.16
     permissions:
       contents: read
       pull-requests: read
