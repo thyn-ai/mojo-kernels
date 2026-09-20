@@ -94,7 +94,7 @@ release-please writes and a maintainer merges.
    | `preflight` | always | validates the tag (and, on a re-run, that the run was dispatched on it), checks that every package version equals the tag's |
    | `build` (ubuntu, macos) | always | kernels, differential suites, wheels, npm tarballs, smoke tests; each runner keeps the assets it can vouch for |
    | `sign` | always | `SHA256SUMS`; `cosign sign-blob` per asset with the job's OIDC identity; verifies every bundle; computes the provenance subjects |
-   | `release` | not on a dry run | finds / adopts / creates the GitHub Release, uploads assets and bundles |
+   | `release` | not on a dry run | finds the GitHub Release release-please published for the tag (creates one only if none exists), uploads assets and bundles |
    | `provenance` | always | SLSA generic generator; `multiple.intoto.jsonl` to the Release (or a workflow artifact on a dry run) |
    | `publish-pypi` | `PUBLISH_PYPI == "true"` | `pypa/gh-action-pypi-publish`, Trusted Publishing, PEP 740 attestations, `skip-existing` |
    | `publish-npm` | `PUBLISH_NPM == "true"` | `npm publish --provenance`, platform packages then core, versions already on the registry skipped |
