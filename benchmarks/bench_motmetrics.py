@@ -213,8 +213,10 @@ def main() -> None:
     worst = 0.0
     for name in MOTCHALLENGE:
         rv, gv = float(ref[name]), float(got[name])
-        if np.isnan(rv) and np.isnan(gv):
-            continue
+        if np.isnan(rv) or np.isnan(gv):
+            if np.isnan(rv) and np.isnan(gv):
+                continue
+            sys.exit(f"correctness gate failed for {name}: oracle={rv} ours={gv}")
         diff = abs(rv - gv)
         worst = max(worst, diff)
         if diff > ATOL:
