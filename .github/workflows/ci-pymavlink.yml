@@ -1,0 +1,91 @@
+name: ci-pymavlink
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Read-only token for every job: the workflow only builds, tests and uploads a
+# build artifact (artifact upload needs no write scope).
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: pymavlink-mojo differential tests + wheel (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install pixi
+        uses: prefix-dev/setup-pixi@d3f436a425481402e6a95a1d1fc10331c708cd9e # v0.10.2
+        with:
+          # Install the pixi binary only. The tasks below install the environment
+          # lazily on first `pixi run`, exactly as the previous curl|bash step did;
+          # `pixi install --locked` + caching is a separate, opt-in change.
+          run-install: false
+
+      - name: Install uv (provisions the pinned pymavlink oracle)
+        uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        with:
+          # The uv binary only, on PATH, as the previous curl|sh step left it;
+          # no uv cache is restored or saved.
+          enable-cache: false
+
+      - name: Build the pymavlink Mojo kernel
+        run: pixi run bash kernels/pymavlink/build.sh
+
+      - name: Differential suite vs pymavlink (native backend, then forced fallback)
+        env:
+          PYTHONPATH: python/pymavlink_mojo
+          PYTHONNOUSERSITE: "1"
+        run: pixi run bash scripts/test_all_pymavlink.sh
+
+      - name: Build + repair the platform wheel (delocate/auditwheel)
+        run: pixi run bash python/pymavlink_mojo/build_wheel.sh
+
+      - name: Smoke-test the wheel in a clean venv
+        shell: bash
+        run: |
+          set -e
+          python3 -m venv /tmp/pymav-wheel-smoke
+          /tmp/pymav-wheel-smoke/bin/pip install --quiet python/pymavlink_mojo/dist/*.whl
+          # Hide the pixi env for the smoke: an end user has no Mojo toolchain,
+          # so the wheel must load its kernel purely from its own vendored
+          # libraries (not via the build machine's absolute rpath).
+          repo_root="$PWD"
+          mv .pixi .pixi-hidden
+          trap 'mv "$repo_root/.pixi-hidden" "$repo_root/.pixi"' EXIT
+          cd /tmp
+          /tmp/pymav-wheel-smoke/bin/python "$repo_root/python/pymavlink_mojo/examples/quickstart.py" > /tmp/quickstart-native.txt
+          PYMAVLINK_MOJO_DISABLE_NATIVE=1 /tmp/pymav-wheel-smoke/bin/python "$repo_root/python/pymavlink_mojo/examples/quickstart.py" > /tmp/quickstart-fallback.txt
+          /tmp/pymav-wheel-smoke/bin/python - <<'EOF'
+          import pymavlink_mojo
+
+          info = pymavlink_mojo.backend_info()
+          assert info["native_available"], f"wheel must carry the native kernel: {info}"
+
+          def checksum(path):
+              for line in open(path):
+                  if line.startswith("checksum:"):
+                      return line.strip()
+              raise AssertionError(f"no checksum in {path}")
+
+          native = checksum("/tmp/quickstart-native.txt")
+          fallback = checksum("/tmp/quickstart-fallback.txt")
+          assert native == fallback, (native, fallback)
+          print("wheel smoke OK:", pymavlink_mojo.__version__, info["native_source"])
+          EOF
+
+      - name: Upload wheel
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: pymavlink-mojo-wheel-${{ matrix.os }}
+          path: python/pymavlink_mojo/dist/*.whl
+          retention-days: 14
