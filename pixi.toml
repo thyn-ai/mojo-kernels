@@ -28,6 +28,9 @@ platforms = [
 [dependencies]
 # Mojo ships as part of MAX; max-core pins the mojo-compiler package.
 max = "26.6.*"
+# Explicit compiler pin: Mojo v1 only (MAX bundles the runtime libs; the compiler
+# itself must stay on the 1.x line — no pre-1.0 or future-2.x toolchains).
+mojo = "1.1.*"
 python = "3.12.*"
 # pip is what the kernel CI workflows and scripts/test_all_*.sh use to
 # provision their pinned, test-only oracle packages into a --target
