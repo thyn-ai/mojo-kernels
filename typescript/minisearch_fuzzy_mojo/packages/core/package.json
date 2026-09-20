@@ -4,7 +4,16 @@
   "description": "Drop-in faster replacement for MiniSearch fuzzy/prefix search and auto-suggestions, powered by a Mojo kernel (pure-JS fallback included).",
   "license": "Apache-2.0",
   "author": "Algenta",
-  "keywords": ["minisearch", "fuzzy", "prefix", "search", "autosuggest", "bm25", "levenshtein", "mojo"],
+  "keywords": [
+    "minisearch",
+    "fuzzy",
+    "prefix",
+    "search",
+    "autosuggest",
+    "bm25",
+    "levenshtein",
+    "mojo"
+  ],
   "type": "commonjs",
   "main": "index.cjs",
   "types": "index.d.ts",

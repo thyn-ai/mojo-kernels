@@ -26,8 +26,7 @@ Set DYNESTY_MOJO_DISABLE_NATIVE=1 to force the pure-Python fallback.
 from dynesty_mojo._native import backend_info, native_available
 from dynesty_mojo.sampler import NSResults, SamplerError, sample
 
-__version__ = "0.1.0"
-
+__version__ = "0.1.0"  # x-release-please-version
 __all__ = [
     "NSResults",
     "SamplerError",

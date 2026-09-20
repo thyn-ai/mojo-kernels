@@ -93,7 +93,7 @@ test('ESM and CJS surfaces agree', async () => {
 })
 
 test('version is exposed', () => {
-  assert.equal(naturalMojo.version, '0.1.0')
+  assert.equal(naturalMojo.version, '0.1.0') // x-release-please-version
 })
 
 test('in-process forced fallback agrees with native on a tricky pair set', { skip: !NATIVE_EXPECTED }, () => {

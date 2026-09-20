@@ -24,7 +24,7 @@ one follows.
 | `benchmarks/` | Reproducible benchmarks (median of 5 runs, correctness gate before every timing pass) |
 | `scripts/` | `test_all.sh` / `test_all_cclib.sh`, the two-pass (native, then forced-fallback) suite runners |
 | `pixi.toml`, `pixi.lock` | The one reproducible toolchain: the Mojo compiler (from Modular's `max` channel), Python, numpy, pytest and the test oracles |
-| `.github/` | CI (one workflow per kernel), CodeQL, Scorecard, Dependabot, the security gate, `CODEOWNERS` |
+| `.github/` | CI (one workflow per kernel), CodeQL, Scorecard, Dependabot, the security gate, `release-please.yml` (opens the release pull request; tags and publishes the Release when it merges) and `release.yml` (builds, signs and attests the assets onto it), `CODEOWNERS` |
 
 ## Development setup
 
@@ -177,6 +177,17 @@ a new workflow is a two-part change:
    stays required until the ruleset is updated, and no pull request can
    satisfy it in the meantime.
 
+A new package joins the version lockstep by following the layout, with no
+edit to the release configuration: `release-please-config.json` globs
+`python/*/pyproject.toml` (`[project] version`), `python/*/*/__init__.py`
+(the line `__version__ = "X.Y.Z"  # x-release-please-version` — the
+trailing marker is what release-please rewrites, so keep it),
+`typescript/*/package.json`, `typescript/*/packages/*/package.json` (plus
+core's `optionalDependencies` pins) and `typescript/*/package-lock.json`.
+Anything else that must carry the version gets the same marker on its line
+and an entry in that file. `release.yml`'s preflight lists only the
+packages a release ships.
+
 ## Commit messages and pull requests
 
 We follow [Conventional Commits](https://www.conventionalcommits.org/), with
@@ -191,6 +202,15 @@ ci(fuse): pin patchelf
 
 - Branch from `main` as `feat/short-description`, `fix/short-description`
   or `docs/short-description`.
+- The pull request title becomes the squash commit on `main`, and that is
+  what release-please reads to cut the next release: `feat` bumps the minor
+  version; `fix`, `perf`, `deps`, `security` and `revert` bump the patch
+  version; a breaking change (`!` after the type, or a `BREAKING CHANGE:`
+  footer) bumps the minor version while the project is on 0.x
+  (`bump-minor-pre-major`) and the major version from 1.0.0 on. `docs`,
+  `ci`, `chore`, `build`, `refactor`, `test` and `style` never cut a release
+  and do not appear in `CHANGELOG.md`. Write the title as the changelog
+  line you want users to read; the scope becomes its bold prefix.
 - Keep the diff focused on one change; unrelated refactors go in their own
   pull request.
 - All CI checks must pass, including on forked-repository pull requests —
@@ -198,9 +218,10 @@ ci(fuse): pin patchelf
   automatically on every PR. Review follows [`CODEOWNERS`](./.github/CODEOWNERS):
   changes to `pixi.lock`, the packaging scripts or anything under `.github/`
   always get deliberate maintainer review.
-- Releases are cut by maintainers from a `vX.Y.Z` tag;
-  [RELEASING.md](./RELEASING.md) describes the pipeline, the version-bump
-  checklist, the registry gates and how anyone verifies a published asset.
+- Releases are cut by merging the release pull request that release-please
+  opens on `main` (`chore(release): vX.Y.Z`); nobody pushes a tag by hand.
+  [RELEASING.md](./RELEASING.md) describes the pipeline, the version
+  lockstep, the registry gates and how anyone verifies a published asset.
 
 ## Reporting issues and getting help
 

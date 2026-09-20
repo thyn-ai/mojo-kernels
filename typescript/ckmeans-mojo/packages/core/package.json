@@ -4,7 +4,14 @@
   "description": "Drop-in faster ckmeans for simple-statistics, powered by a Mojo kernel (pure-JS fallback included).",
   "license": "Apache-2.0",
   "author": "Algenta",
-  "keywords": ["ckmeans", "k-means", "clustering", "jenks", "simple-statistics", "mojo"],
+  "keywords": [
+    "ckmeans",
+    "k-means",
+    "clustering",
+    "jenks",
+    "simple-statistics",
+    "mojo"
+  ],
   "type": "commonjs",
   "main": "index.cjs",
   "types": "index.d.ts",

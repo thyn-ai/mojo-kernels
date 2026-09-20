@@ -31,8 +31,7 @@ from bio_mojo.core import (
 )
 from bio_mojo.errors import BioMojoError, ParseError, StreamModeError
 
-__version__ = "0.1.0"
-
+__version__ = "0.1.0"  # x-release-please-version
 __all__ = [
     "parse_fasta",
     "parse_genbank",
