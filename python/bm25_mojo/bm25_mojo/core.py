@@ -94,27 +94,26 @@ class BM25:
         unavailable, and in the degenerate avgdl == 0 case (an entirely empty
         corpus), where the reference's IEEE behaviour (NaN propagation) is the
         contract we mirror.
+
+        The kernel builds the CSR postings and bakes the idf-weighted scores
+        itself; this method only assembles doc-major term streams. The loops
+        below are deliberately pushed into C-level iteration (`map` over a
+        dict's `.get`, `list.extend` over `dict.values()`, one numpy
+        conversion per stream) because this is the build-time hot path.
         """
         if self.avgdl == 0:
             self._native_index = None
             return "fallback"
         # Vocabulary in first-appearance order (same iteration order as `nd`).
         self._vocab = {word: tid for tid, word in enumerate(nd)}
-        n_terms = len(self._vocab)
-        postings_docs: list[list[int]] = [[] for _ in range(n_terms)]
-        postings_freqs: list[list[float]] = [[] for _ in range(n_terms)]
-        for doc_id, frequencies in enumerate(self.doc_freqs):
-            for word, freq in frequencies.items():
-                tid = self._vocab[word]
-                postings_docs[tid].append(doc_id)
-                postings_freqs[tid].append(float(freq))
-        offsets = np.zeros(n_terms + 1, dtype=np.int64)
-        for tid in range(n_terms):
-            offsets[tid + 1] = offsets[tid] + len(postings_docs[tid])
-        docs = np.array([d for tid_list in postings_docs for d in tid_list], dtype=np.int32)
-        freqs = np.array(
-            [f for tid_list in postings_freqs for f in tid_list], dtype=np.float64
-        )
+        vocab_get = self._vocab.get
+        doc_offsets = [0]
+        tids: list[int] = []
+        freqs: list[float] = []
+        for frequencies in self.doc_freqs:
+            tids.extend(map(vocab_get, frequencies))
+            freqs.extend(frequencies.values())
+            doc_offsets.append(len(tids))
         idf_values = np.array([self.idf[word] for word in self._vocab], dtype=np.float64)
         try:
             self._native_index = NativeIndex(
@@ -124,9 +123,9 @@ class BM25:
                 b=float(self.b),
                 delta=float(self._delta),
                 variant=self._variant,
-                offsets=offsets,
-                docs=docs,
-                freqs=freqs,
+                doc_offsets=np.array(doc_offsets, dtype=np.int64),
+                doc_tids=np.array(tids, dtype=np.int32),
+                doc_freqs=np.array(freqs, dtype=np.float64),
                 idf=idf_values,
             )
             return "native"
@@ -143,12 +142,35 @@ class BM25:
         if self._native_index is not None:
             # Unseen terms contribute exactly 0 (their idf lookup is 0 and the
             # per-document factor is finite), so they are skipped — the same
-            # result the reference computes by adding 0.
+            # result the reference computes by adding 0. map/filter in C for
+            # speed: this is the per-query hot path.
+            vocab_get = self._vocab.get
             qids = np.array(
-                [self._vocab[q] for q in query if q in self._vocab], dtype=np.int32
+                [v for v in map(vocab_get, query) if v is not None], dtype=np.int32
             )
             return self._native_index.score(qids)
         return self._reference_scores(query)
+
+    def get_scores_batch(self, queries):
+        """Score a batch of tokenized queries in one call.
+
+        Returns a float64 array of shape (len(queries), corpus_size); row i is
+        bit-identical to ``get_scores(queries[i])``. Batching amortizes FFI,
+        allocation, and token-mapping overhead across the batch. On the
+        fallback backend this simply loops the reference scorer.
+        """
+        queries = list(queries)
+        if not queries:
+            return np.zeros((0, self.corpus_size), dtype=np.float64)
+        if self._native_index is not None:
+            vocab_get = self._vocab.get
+            qids_list = [
+                np.array([v for v in map(vocab_get, query) if v is not None],
+                         dtype=np.int32)
+                for query in queries
+            ]
+            return self._native_index.score_batch(qids_list)
+        return np.array([self._reference_scores(query) for query in queries])
 
     def _reference_scores(self, query):
         raise NotImplementedError()

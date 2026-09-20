@@ -23,7 +23,7 @@ vader_mojo/data/LICENSE.vaderSentiment.txt.
 from vader_mojo._native import backend_info, native_available
 from vader_mojo.core import SentimentIntensityAnalyzer, polarity_scores
 
-__version__ = "0.1.1"  # x-release-please-version
+__version__ = "0.1.2"  # x-release-please-version
 __all__ = [
     "SentimentIntensityAnalyzer",
     "polarity_scores",

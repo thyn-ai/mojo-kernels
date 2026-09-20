@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "motmetrics-mojo"
-version = "0.1.0"
+version = "0.1.2"
 description = "Fast MOTChallenge metrics (MOTA/MOTP/IDF1/MOSTLY_*), drop-in-shaped for motmetrics, powered by a Mojo kernel (pure-Python fallback included)."
 readme = "README.md"
 requires-python = ">=3.9"

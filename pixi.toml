@@ -11,7 +11,7 @@
 
 [workspace]
 name = "mojo-kernels"
-version = "0.1.1"
+version = "0.1.2"
 description = "Mojo kernel acceleration factory: prebuilt per-platform kernels with thin Python wrappers and pure-Python fallbacks."
 authors = ["thyn-ai"]
 license = "Apache-2.0"
@@ -88,6 +88,11 @@ jmespath = "==1.0.1"      # jmespath-mojo
 jsonpath-ng = "==1.7.0"   # jsonpath-mojo
 jsonschema = "==4.26.0"   # jsonschema-mojo
 ruptures = "==1.1.10"     # ruptures-mojo
+# Benchmark-only incumbent oracle for benchmarks/bench_bm25s.py (not a test
+# oracle: bm25s floors idf differently by design, so it is not element-wise
+# comparable). Pinned like the other oracles.
+bm25s = "==0.3.11"
+numba = "==0.67.0"
 pytest = ">=8"
 build = ">=1"
 hatchling = ">=1.21"

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "croniter-mojo"
-version = "0.1.1"
+version = "0.1.2"
 description = "Drop-in faster get_next/get_prev for 5-field cron expressions, powered by a Mojo kernel (pure-Python fallback included)."
 readme = "README.md"
 requires-python = ">=3.9"
