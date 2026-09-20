@@ -172,11 +172,12 @@ any mismatch, load failure, or missing library falls back silently.
 
 ## Tests
 
-From the repository root (oracle required: `pip install jsonschema`):
+From the repository root, inside the pixi environment (the jsonschema
+oracle, `jsonschema==4.26.0`, comes from `pixi.toml [pypi-dependencies]`):
 
 ```bash
-bash kernels/jsonschema/build.sh
-bash scripts/test_all_jsonschema.sh   # native backend, then forced fallback
+pixi run bash kernels/jsonschema/build.sh
+pixi run bash scripts/test_all_jsonschema.sh   # native backend, then forced fallback
 ```
 
 229 differential tests + 7 loader tests per backend run (native and forced

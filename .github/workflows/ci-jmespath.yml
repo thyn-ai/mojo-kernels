@@ -31,22 +31,15 @@ jobs:
           # `pixi install --locked` + caching is a separate, opt-in change.
           run-install: false
 
-      - name: Install the jmespath oracle (PyPI jmespath==1.0.1)
-        shell: bash
-        run: |
-          # Install outside the pixi env so re-solves cannot wipe it; the
-          # differential suite picks it up via PYTHONPATH.
-          pixi run python -m pip install --quiet --target="$RUNNER_TEMP/jm-oracle" "jmespath==1.0.1" || \
-            python3 -m pip install --quiet --target="$RUNNER_TEMP/jm-oracle" "jmespath==1.0.1"
-          echo "JMESPATH_ORACLE=$RUNNER_TEMP/jm-oracle" >> "$GITHUB_ENV"
-
       - name: Build the JMESPath Mojo kernel
         run: pixi run bash kernels/jmespath/build.sh
 
       - name: Differential suite (native backend, then forced fallback)
+        # The jmespath oracle (jmespath==1.0.1) comes from pixi.toml
+        # [pypi-dependencies], pinned and lock-verified.
         shell: bash
         env:
-          PYTHONPATH: "python/jmespath_mojo:${{ env.JMESPATH_ORACLE }}"
+          PYTHONPATH: python/jmespath_mojo
           PYTHONNOUSERSITE: "1"
         run: pixi run bash scripts/test_all_jmespath.sh
 

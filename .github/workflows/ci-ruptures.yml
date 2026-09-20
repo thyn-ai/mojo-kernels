@@ -31,20 +31,12 @@ jobs:
           # `pixi install --locked` + caching is a separate, opt-in change.
           run-install: false
 
-      - name: Install uv (fetches the pinned ruptures oracle outside the pixi env)
-        uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
-        with:
-          # The uv binary only, on PATH, as the previous curl|sh step left it;
-          # no uv cache is restored or saved.
-          enable-cache: false
-
       - name: Build the ruptures Mojo kernel
         run: pixi run bash kernels/ruptures/build.sh
 
       - name: Differential suite (native backend, then forced fallback)
-        # The script uv-installs ruptures==1.1.10 (with its own numpy/scipy)
-        # into $TMPDIR/ruptures-oracle-1.1.10 if it is not importable, and
-        # puts it on PYTHONPATH ahead of the pixi site-packages.
+        # The ruptures oracle (ruptures==1.1.10) comes from pixi.toml
+        # [pypi-dependencies], pinned and lock-verified.
         run: |
           PYTHONPATH="python/ruptures_mojo" PYTHONNOUSERSITE=1 \
             pixi run bash scripts/test_all_ruptures.sh

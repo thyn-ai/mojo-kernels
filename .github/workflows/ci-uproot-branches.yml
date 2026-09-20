@@ -48,7 +48,13 @@ jobs:
         run: |
           set -e
           python3 -m venv /tmp/uproot-wheel-smoke
-          /tmp/uproot-wheel-smoke/bin/pip install --quiet python/uproot-branches_mojo/dist/*.whl uproot awkward
+          # The quickstart writes its fixture with uproot and cross-checks
+          # through awkward, so the smoke venv gets both (at the oracle pins
+          # from pixi.toml) and their whole closure from a hash-pinned
+          # requirements file; the wheel then installs by path with every
+          # runtime dependency already satisfied, so nothing is resolved.
+          /tmp/uproot-wheel-smoke/bin/pip install --quiet --require-hashes -r python/uproot-branches_mojo/smoke-requirements.txt
+          /tmp/uproot-wheel-smoke/bin/pip install --quiet python/uproot-branches_mojo/dist/*.whl
           # Hide the pixi env for the smoke: an end user has no Mojo toolchain,
           # so the wheel must load its kernel purely from its own vendored
           # libraries (not via the build machine's absolute rpath).

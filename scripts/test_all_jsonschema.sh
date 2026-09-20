@@ -5,19 +5,21 @@
 # Run from the repository root inside the pixi environment:
 #   ~/.pixi/bin/pixi run bash scripts/test_all_jsonschema.sh
 #
-# The oracle (PyPI jsonschema) must be importable; it is pip-installed into
-# the pixi env here if missing (pixi.toml is deliberately untouched).
+# The oracle (PyPI jsonschema==4.26.0) comes from the repo pixi environment
+# (pixi.toml [pypi-dependencies], pinned and lock-verified).
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-if ! python -c "import jsonschema" 2>/dev/null; then
-  python -m ensurepip >/dev/null 2>&1 || true
-  python -m pip install --quiet "jsonschema==4.26.0"
-fi
-
 export PYTHONPATH="python/jsonschema_mojo"
 export PYTHONNOUSERSITE=1
+
+python -c "import jsonschema" 2>/dev/null || {
+  echo "error: the jsonschema oracle package is not importable;" >&2
+  echo "       run inside the pixi environment (pixi install)" >&2
+  exit 1
+}
+
 SUITE="tests/test_jsonschema_differential.py tests/test_jsonschema_loader.py"
 
 echo "== jsonschema-mojo differential suite: native backend =="

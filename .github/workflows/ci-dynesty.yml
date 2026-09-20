@@ -34,18 +34,14 @@ jobs:
       - name: Build the dynesty Mojo kernel
         run: pixi run bash kernels/dynesty/build.sh
 
-      - name: Create the oracle environment (pip dynesty, pinned)
-        shell: bash
-        run: |
-          python3 -m venv /tmp/dynesty-venv
-          /tmp/dynesty-venv/bin/pip install --quiet "dynesty==3.1.0" numpy pytest
-
       - name: Differential suite (native backend, then forced fallback)
-        shell: bash
-        run: |
-          PYTHONPATH=python/dynesty_mojo PYTHONNOUSERSITE=1 \
-            PATH=/tmp/dynesty-venv/bin:$PATH \
-            bash scripts/test_all_dynesty.sh
+        # The dynesty oracle (dynesty==3.1.0) comes from pixi.toml
+        # [pypi-dependencies], pinned and lock-verified; the published
+        # wrapper never depends on it.
+        run: pixi run bash scripts/test_all_dynesty.sh
+        env:
+          PYTHONPATH: python/dynesty_mojo
+          PYTHONNOUSERSITE: "1"
 
       - name: Build + repair the platform wheel (delocate/auditwheel)
         run: pixi run bash python/dynesty_mojo/build_wheel.sh

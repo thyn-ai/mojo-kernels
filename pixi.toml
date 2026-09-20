@@ -29,11 +29,11 @@ platforms = [
 # Mojo ships as part of MAX; max-core pins the mojo-compiler package.
 max = "26.6.*"
 python = "3.12.*"
-# pip is what several kernel CI workflows and scripts/test_all_*.sh still use
-# to provision their pinned, test-only oracle packages into a --target
-# directory (`pixi run python -m pip install --target ... "<oracle>==<pin>"`);
-# the oracles listed under [pypi-dependencies] below come from the lock
-# instead. The published wrappers never depend on it.
+# pip is what a few kernel CI workflows and scripts/test_all_*.sh (langdetect,
+# metpy, ta) still use to provision their pinned, test-only oracle packages
+# into a --target directory (`pixi run python -m pip install --target ...
+# "<oracle>==<pin>"`); the oracles listed under [pypi-dependencies] below come
+# from the lock instead. The published wrappers never depend on it.
 pip = ">=25"
 
 [target.osx-arm64.dependencies]
@@ -81,6 +81,12 @@ sacrebleu = "==2.5.1"     # sacrebleu-mojo
 uproot = "==5.7.6"        # uproot-mojo (kernels/uproot-branches)
 awkward = "==2.14.0"      # uproot-mojo: the uproot oracle reads arrays through awkward
 cramjam = "==2.12.1"      # uproot-mojo: the wrapper's own runtime dependency (pyproject.toml)
+dynesty = "==3.1.0"       # dynesty-mojo
+elephant = "==1.2.1"      # elephant-mojo (kernels/elephant-surrogates); pulls neo + quantities
+jmespath = "==1.0.1"      # jmespath-mojo
+jsonpath-ng = "==1.7.0"   # jsonpath-mojo
+jsonschema = "==4.26.0"   # jsonschema-mojo
+ruptures = "==1.1.10"     # ruptures-mojo
 pytest = ">=8"
 build = ">=1"
 hatchling = ">=1.21"

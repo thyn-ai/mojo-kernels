@@ -25,10 +25,10 @@ Two timing modes per cell:
 - **cold**: median of 7 fresh processes, timing only the first search call
   after imports (includes dlopen + runtime init for the native kernel).
 
-Run from the repository root (oracle + wrapper on PYTHONPATH):
+Run from the repository root (the oracle comes from the pixi environment,
+the wrapper from PYTHONPATH):
 
-    PYTHONPATH="python/jmespath_mojo:/tmp/jm-oracle" \
-      pixi run python benchmarks/bench_jmespath.py
+    PYTHONPATH=python/jmespath_mojo pixi run python benchmarks/bench_jmespath.py
 """
 
 from __future__ import annotations

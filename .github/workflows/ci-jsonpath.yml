@@ -34,19 +34,9 @@ jobs:
       - name: Build the jsonpath Mojo kernel
         run: pixi run bash kernels/jsonpath/build.sh
 
-      - name: Install uv (provisions the pinned jsonpath_ng oracle)
-        uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
-        with:
-          # The uv binary only, on PATH, as the previous curl|sh line left it;
-          # no uv cache is restored or saved.
-          enable-cache: false
-
-      - name: Bootstrap the oracle (jsonpath_ng is intentionally not in pixi.toml)
-        shell: bash
-        run: |
-          uv pip install --python .pixi/envs/default/bin/python --target /tmp/jporacle-lib "jsonpath_ng==1.7.0"
-
       - name: Differential suite (native backend, then forced fallback)
+        # The jsonpath_ng oracle (jsonpath-ng==1.7.0) comes from pixi.toml
+        # [pypi-dependencies], pinned and lock-verified.
         run: pixi run bash scripts/test_all_jsonpath.sh
 
       - name: Build + repair the platform wheel (delocate/auditwheel)

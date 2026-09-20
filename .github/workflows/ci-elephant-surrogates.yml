@@ -35,6 +35,8 @@ jobs:
         run: pixi run bash kernels/elephant-surrogates/build.sh
 
       - name: Differential suite (native backend, then forced fallback)
+        # The elephant oracle (elephant==1.2.1) comes from pixi.toml
+        # [pypi-dependencies], pinned and lock-verified.
         run: PYTHONPATH=python/elephant_mojo pixi run bash scripts/test_all_elephant_surrogates.sh
 
       - name: Build + repair the platform wheel (delocate/auditwheel)

@@ -7,8 +7,9 @@
 # must print byte-identical search results.
 #
 # Each fresh project is installed with `npm ci` against a lockfile written by
-# scripts/consumer-lockfile.cjs: the tarballs pinned by the sha512 of what was
-# just packed, koffi pinned to the entry in the committed workspace lockfile.
+# typescript/scripts/consumer-lockfile.cjs: the tarballs pinned by the sha512
+# of what was just packed, koffi pinned to the entry in the committed
+# workspace lockfile.
 # Every package is hash-verified on install; nothing is resolved at install
 # time.
 #
@@ -42,7 +43,7 @@ rm -rf /tmp/fuse-mojo-smoke-native
 mkdir -p /tmp/fuse-mojo-smoke-native/vendor
 cp "$dist/fuse-mojo-core-0.1.0.tgz" "$dist/$platform_pkg" /tmp/fuse-mojo-smoke-native/vendor/
 cd /tmp/fuse-mojo-smoke-native
-node "$here/scripts/consumer-lockfile.cjs" "$here/package-lock.json" vendor/*.tgz
+node "$here/../scripts/consumer-lockfile.cjs" "$here/package-lock.json" vendor/*.tgz
 npm ci --no-audit --no-fund --loglevel=error
 cp "$here/quickstart.mjs" .
 node quickstart.mjs --assert-native > native.json
@@ -53,7 +54,7 @@ rm -rf /tmp/fuse-mojo-smoke-win
 mkdir -p /tmp/fuse-mojo-smoke-win/vendor
 cp "$dist/fuse-mojo-core-0.1.0.tgz" /tmp/fuse-mojo-smoke-win/vendor/
 cd /tmp/fuse-mojo-smoke-win
-node "$here/scripts/consumer-lockfile.cjs" "$here/package-lock.json" vendor/*.tgz
+node "$here/../scripts/consumer-lockfile.cjs" "$here/package-lock.json" vendor/*.tgz
 npm ci --no-audit --no-fund --loglevel=error
 cp "$here/quickstart.mjs" .
 node quickstart.mjs --assert-fallback > fallback.json
