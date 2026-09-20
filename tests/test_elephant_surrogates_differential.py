@@ -27,6 +27,10 @@ the test runner); tests that need it skip cleanly when it is absent.
 from __future__ import annotations
 
 import os
+import random
+import subprocess
+import sys
+import textwrap
 
 import numpy as np
 import pytest
@@ -197,6 +201,58 @@ def test_pvalue_spectrum_single_surrogate_and_n_surr_override():
     ref10 = _ref_pvalue_spec(max_occs, 2, 3, 1, 10, 1, "#")
     mine10 = pvalue_spectrum(max_occs, 2, 3, 1, n_surr=10)
     _assert_entries_bit_exact(mine10, ref10, "#")
+
+
+def test_oracle_mining_extension_starts_beside_numpy():
+    """elephant's compiled `fim` mining extension must start in a process
+    that has already imported this environment's numpy.
+
+    Regression test for the abort behind the end-to-end test below. On macOS
+    the oracle wheel vendors its own copy of LLVM's OpenMP runtime for `fim`,
+    and libomp aborts the whole interpreter ("OMP: Error #15") the moment a
+    second copy initialises — which is what happened while the environment's
+    OpenBLAS was the OpenMP build (pixi.toml pins the pthreads build on
+    osx-arm64 for this reason; Linux wheels vendor GCC's libgomp, which
+    coexists with libomp). Inside pytest that abort is uncatchable and output
+    capture swallows the runtime's message, so the check runs in a child
+    interpreter and reports its stderr. The mining call is the one
+    `spade.concepts_mining` makes for every surrogate, on the smallest binned
+    matrix that reaches `fim`: identical transactions short-circuit before it,
+    so the third window differs from the other two.
+    """
+    if not espade.HAVE_FIM:
+        # Without the compiled extension elephant mines in pure Python and
+        # there is no second runtime to start; the published wheels for the
+        # two supported platforms always ship it, so CI never takes this path.
+        pytest.skip("the elephant oracle has no compiled fim extension")
+    child = textwrap.dedent(
+        """
+        import numpy as np
+        import quantities as pq
+        from elephant import conversion as conv
+        import elephant.spade as espade
+
+        # Two neurons, four bins: windows 0 and 2 hold both neurons, window 3
+        # only the first, so the transactions differ and fim is called.
+        binned = np.array([[1, 0, 1, 1], [1, 0, 1, 0]], dtype=bool)
+        bst = conv.BinnedSpikeTrain(
+            binned, bin_size=1 * pq.ms, t_start=0 * pq.ms, t_stop=4 * pq.ms, tolerance=None
+        )
+        concepts, _ = espade.concepts_mining(
+            bst, 1 * pq.ms, 1, min_spikes=2, max_spikes=2, min_occ=2, min_neu=1, report="#"
+        )
+        print(concepts.tolist())
+        """
+    )
+    # The child imports the scipy stack cold and mines a 2x4 matrix: seconds,
+    # so a hang (rather than an abort) surfaces within a minute.
+    proc = subprocess.run([sys.executable, "-c", child], capture_output=True, text=True, timeout=60)
+    assert proc.returncode == 0, (
+        f"oracle mining did not survive in a child interpreter "
+        f"(returncode {proc.returncode}); stderr:\n{proc.stderr}"
+    )
+    # The size-2 pattern {neuron 0, neuron 1} occurs twice: one spectrum entry.
+    assert proc.stdout.strip() == "[[2, 2, 1]]", proc.stdout
 
 
 def test_pvalue_spectrum_end_to_end_through_elephant_pipeline(monkeypatch):
@@ -428,7 +484,14 @@ def test_dither_refractory_matches_oracle_distribution():
     train = np.sort(rng.uniform(T_START, T_STOP, 30))
     n_surr = 2500
     refr_ms = 5.0
+    # The oracle's refractory path draws its perturbation order from
+    # np.random but each dither offset from the stdlib `random` module
+    # (elephant 1.2.1, spike_train_surrogates.py:107); seed both, or the
+    # oracle's occupancy differs run to run and this Bonferroni z-test
+    # keeps its nominal ~5% false-positive rate instead of being a fixed,
+    # reproducible comparison.
     np.random.seed(0)
+    random.seed(0)
     st = _neo_trains([train])[0]
     oracle = np.zeros((n_surr, N_BINS), dtype=bool)
     for k in range(n_surr):
