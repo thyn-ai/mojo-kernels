@@ -235,3 +235,46 @@ def test_empty_corpus_raises_like_reference():
         BM25Okapi([])
     with pytest.raises(ZeroDivisionError):
         RefBM25Okapi([])
+
+
+@pytest.mark.parametrize("ours_cls,ref_cls,params", VARIANTS)
+def test_get_scores_batch_parity(ours_cls, ref_cls, params, medium_corpus):
+    """The batch API must match rank_bm25 per row (1e-8) on both backends."""
+    import numpy as np
+
+    ours = ours_cls(medium_corpus, **params)
+    ref = ref_cls(medium_corpus, **params)
+    terms = corpus_terms(medium_corpus)
+    queries = make_queries(seed=23, terms=terms, n_queries=6) + [
+        [],
+        ["unseen-term"],
+        [terms[0], terms[0], terms[1]],
+    ]
+    panel = ours.get_scores_batch(queries)
+    assert panel.shape == (len(queries), len(medium_corpus))
+    assert panel.dtype == np.float64
+    for i, query in enumerate(queries):
+        assert_scores_close(panel[i], ref.get_scores(query))
+
+
+def test_get_scores_batch_matches_single_query_bitexact(medium_corpus):
+    """On the native backend every batch row is bit-identical to the
+    single-query path; on the fallback backend rows are identical too
+    (both are the same reference scorer)."""
+    import numpy as np
+
+    ours = BM25Okapi(medium_corpus)
+    terms = corpus_terms(medium_corpus)
+    queries = make_queries(seed=29, terms=terms, n_queries=6)
+    panel = ours.get_scores_batch(queries)
+    for i, query in enumerate(queries):
+        np.testing.assert_array_equal(panel[i], ours.get_scores(query))
+
+
+def test_get_scores_batch_empty(medium_corpus):
+    import numpy as np
+
+    ours = BM25Okapi(medium_corpus)
+    panel = ours.get_scores_batch([])
+    assert panel.shape == (0, len(medium_corpus))
+    assert panel.dtype == np.float64
