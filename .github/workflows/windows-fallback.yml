@@ -213,10 +213,13 @@ jobs:
             prefix: TA_MOJO
             oracles: pandas==3.0.6 pandas-ta-classic==0.8.32
             suite: tests/test_ta_differential.py tests/test_ta_loader.py
+          # tomlkit at pixi.lock's version: the suite's optional second oracle
+          # (test_generated_docs_accepted_by_tomlkit_if_installed) runs on the
+          # Linux/macOS legs, so it runs here too.
           - package: toml_mojo
             module: toml_mojo
             prefix: TOML_MOJO
-            oracles: ""
+            oracles: tomlkit==0.15.1
             suite: tests/test_toml_differential.py tests/test_toml_loader.py
           - package: uproot-branches_mojo
             module: uproot_mojo
