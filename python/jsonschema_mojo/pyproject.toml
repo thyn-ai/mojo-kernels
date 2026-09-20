@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "jsonschema-mojo"
-version = "0.1.0"
+version = "0.1.1"
 description = "Drop-in faster replacement for the jsonschema package (draft 2020-12 subset), powered by a Mojo kernel (pure-Python fallback included)."
 readme = "README.md"
 requires-python = ">=3.9"

@@ -16,7 +16,7 @@ inspect the active backend with jmespath_mojo.backend_info().
 from jmespath_mojo._native import backend_info, native_available
 from jmespath_mojo.core import search
 
-__version__ = "0.1.0"  # x-release-please-version
+__version__ = "0.1.1"  # x-release-please-version
 __all__ = [
     "search",
     "backend_info",

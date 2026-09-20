@@ -1,6 +1,6 @@
 {
   "name": "@ckmeans-mojo/core",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Drop-in faster ckmeans for simple-statistics, powered by a Mojo kernel (pure-JS fallback included).",
   "license": "Apache-2.0",
   "author": "Algenta",
@@ -38,8 +38,8 @@
     "koffi": "^3.3.1"
   },
   "optionalDependencies": {
-    "@ckmeans-mojo/darwin-arm64": "0.1.0",
-    "@ckmeans-mojo/linux-x64": "0.1.0"
+    "@ckmeans-mojo/darwin-arm64": "0.1.1",
+    "@ckmeans-mojo/linux-x64": "0.1.1"
   },
   "repository": {
     "type": "git",

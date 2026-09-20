@@ -19,7 +19,7 @@ Set ASE_MOJO_DISABLE_NATIVE=1 to force the pure-Python fallback.
 from ase_mojo._native import NativeUnavailable, backend_info, native_available
 from ase_mojo.core import neighbor_list, primitive_neighbor_list
 
-__version__ = "0.1.0"  # x-release-please-version
+__version__ = "0.1.1"  # x-release-please-version
 __all__ = [
     "NativeUnavailable",
     "backend_info",
