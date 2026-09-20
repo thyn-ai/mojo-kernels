@@ -1,0 +1,156 @@
+name: ci-nuscenes-eval
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Read-only token for every job: the workflow only builds, tests and uploads a
+# build artifact (artifact upload needs no write scope).
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: nuscenes-eval-mojo differential tests + wheel (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install pixi
+        uses: prefix-dev/setup-pixi@d3f436a425481402e6a95a1d1fc10331c708cd9e # v0.10.2
+        with:
+          # Install the pixi binary only. The tasks below install the environment
+          # lazily on first `pixi run`, exactly as the previous curl|bash step did;
+          # `pixi install --locked` + caching is a separate, opt-in change.
+          run-install: false
+
+      - name: Install the pinned oracle into .oracle-nuscenes-eval/
+        # nuscenes-devkit is a test/benchmark oracle only (the differential
+        # suite compares nuscenes_eval_mojo against its full metrics dict); it
+        # is not a runtime dependency of the published wrapper. Installed with
+        # `pip --target` into an unmanaged directory because `pixi run` prunes
+        # pip-installed packages from the pixi env. Pinned: the oracle must be
+        # the published PyPI release these numbers were measured against.
+        run: |
+          pixi run python -m ensurepip --upgrade
+          pixi run python -m pip install --target .oracle-nuscenes-eval "nuscenes-devkit==1.2.0"
+
+      - name: Build the nuscenes-eval Mojo kernel
+        run: pixi run bash kernels/nuscenes-eval/build.sh
+
+      - name: Differential suite (native backend, then forced fallback)
+        run: |
+          PYTHONPATH="python/nuscenes_eval_mojo:.oracle-nuscenes-eval:tests" PYTHONNOUSERSITE=1 pixi run python -m pytest tests/test_nuscenes_eval_differential.py tests/test_nuscenes_eval_loader.py -q
+          PYTHONPATH="python/nuscenes_eval_mojo:.oracle-nuscenes-eval:tests" PYTHONNOUSERSITE=1 NUSCENES_EVAL_MOJO_DISABLE_NATIVE=1 pixi run python -m pytest tests/test_nuscenes_eval_differential.py tests/test_nuscenes_eval_loader.py -q
+
+      - name: Build + repair the platform wheel (delocate/auditwheel)
+        run: PYTHONNOUSERSITE=1 pixi run bash python/nuscenes_eval_mojo/build_wheel.sh
+
+      - name: Smoke-test the wheel in a clean venv
+        shell: bash
+        # Note: heredoc bodies below start at column 0 relative to the block
+        # (indented heredoc Python would not parse).
+        run: |
+          set -e
+          python3 -m venv /tmp/nuscenes-eval-wheel-smoke
+          /tmp/nuscenes-eval-wheel-smoke/bin/pip install --quiet python/nuscenes_eval_mojo/dist/*.whl
+          # Hide the pixi env for the smoke: an end user has no Mojo toolchain,
+          # so the wheel must load its kernel purely from its own vendored
+          # libraries (not via the build machine's absolute rpath).
+          repo_root="$PWD"
+          mv .pixi .pixi-hidden
+          trap 'mv "$repo_root/.pixi-hidden" "$repo_root/.pixi"' EXIT
+          cd /tmp && /tmp/nuscenes-eval-wheel-smoke/bin/python - <<'PYEOF'
+          import math
+
+          import nuscenes_eval_mojo as ne
+
+          # Deterministic quickstart corpus (same values on both backends).
+          def q(yaw):
+              return [math.cos(yaw / 2), 0.0, 0.0, math.sin(yaw / 2)]
+
+          gt = {"samples": [
+              {"token": "s0", "ego_translation": [0.0, 0.0, 0.0], "annotations": [
+                  {"category_name": "vehicle.car", "translation": [10.0, 0.0, 0.0],
+                   "size": [1.9, 4.4, 1.6], "rotation": q(0.1), "velocity": [1.0, 0.0],
+                   "num_lidar_pts": 12, "num_radar_pts": 2, "attribute_name": "vehicle.moving"},
+                  {"category_name": "human.pedestrian.adult", "translation": [4.0, 3.0, 0.0],
+                   "size": [0.6, 0.7, 1.8], "rotation": q(-0.4), "velocity": [0.5, 0.2],
+                   "num_lidar_pts": 6, "num_radar_pts": 0, "attribute_name": "pedestrian.moving"},
+              ]},
+              {"token": "s1", "ego_translation": [0.0, 0.0, 0.0], "annotations": [
+                  {"category_name": "vehicle.car", "translation": [-8.0, 5.0, 0.0],
+                   "size": [1.9, 4.4, 1.6], "rotation": q(1.6), "velocity": [0.0, 0.0],
+                   "num_lidar_pts": 20, "num_radar_pts": 1, "attribute_name": "vehicle.parked"},
+              ]},
+          ]}
+          pred = {"meta": {}, "results": {
+              "s0": [
+                  {"sample_token": "s0", "translation": [10.3, 0.2, 0.0], "size": [1.9, 4.4, 1.6],
+                   "rotation": q(0.12), "velocity": [1.1, 0.0], "detection_name": "car",
+                   "detection_score": 0.9, "attribute_name": "vehicle.moving"},
+                  {"sample_token": "s0", "translation": [4.1, 2.8, 0.0], "size": [0.6, 0.7, 1.8],
+                   "rotation": q(-0.4), "velocity": [0.5, 0.2], "detection_name": "pedestrian",
+                   "detection_score": 0.8, "attribute_name": "pedestrian.standing"},
+              ],
+              "s1": [
+                  {"sample_token": "s1", "translation": [-8.1, 5.1, 0.0], "size": [1.9, 4.4, 1.6],
+                   "rotation": q(1.6), "velocity": [0.0, 0.0], "detection_name": "car",
+                   "detection_score": 0.95, "attribute_name": "vehicle.parked"},
+              ],
+          }}
+          m = ne.evaluate(gt, pred)
+          assert 0.0 <= m["mean_ap"] <= 1.0 and 0.0 <= m["nd_score"] <= 1.0
+          # All gt boxes matched within 0.5 m -> AP at 0.5 m must be ~1.0.
+          assert abs(m["label_aps"]["car"][0.5] - 1.0) < 1e-12, m["label_aps"]["car"]
+          assert abs(m["label_aps"]["pedestrian"][0.5] - 1.0) < 1e-12
+          assert m["label_aps"]["traffic_cone"][0.5] == 0.0
+          info = ne.backend_info()
+          assert info["native_available"], f"wheel must carry the native kernel: {info}"
+          print("wheel smoke OK:", ne.__version__, info["native_source"])
+          PYEOF
+
+      - name: Smoke-test the pure wheel (fallback-only) in a clean venv
+        shell: bash
+        run: |
+          set -e
+          cd python/nuscenes_eval_mojo
+          NUSCENES_EVAL_MOJO_ALLOW_PURE_WHEEL=1 pixi run python -m build --wheel --no-isolation --outdir dist-pure .
+          python3 -m venv /tmp/nuscenes-eval-pure-wheel-smoke
+          /tmp/nuscenes-eval-pure-wheel-smoke/bin/pip install --quiet dist-pure/*.whl
+          cd /tmp && /tmp/nuscenes-eval-pure-wheel-smoke/bin/python - <<'PYEOF'
+          import math
+
+          import nuscenes_eval_mojo as ne
+
+          def q(yaw):
+              return [math.cos(yaw / 2), 0.0, 0.0, math.sin(yaw / 2)]
+
+          gt = {"samples": [{"token": "s0", "ego_translation": [0.0, 0.0, 0.0], "annotations": [
+              {"category_name": "vehicle.car", "translation": [10.0, 0.0, 0.0],
+               "size": [1.9, 4.4, 1.6], "rotation": q(0.1), "velocity": [1.0, 0.0],
+               "num_lidar_pts": 12, "num_radar_pts": 2, "attribute_name": "vehicle.moving"}]}]}
+          pred = {"results": {"s0": [
+              {"sample_token": "s0", "translation": [10.3, 0.2, 0.0], "size": [1.9, 4.4, 1.6],
+               "rotation": q(0.12), "velocity": [1.1, 0.0], "detection_name": "car",
+               "detection_score": 0.9, "attribute_name": "vehicle.moving"}]}}
+          m = ne.evaluate(gt, pred)
+          assert abs(m["label_aps"]["car"][0.5] - 1.0) < 1e-12
+          info = ne.backend_info()
+          assert not info["native_available"], f"pure wheel must use the fallback: {info}"
+          print("pure-wheel smoke OK:", ne.__version__)
+          PYEOF
+
+      - name: Upload wheel
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: nuscenes-eval-mojo-wheel-${{ matrix.os }}
+          path: python/nuscenes_eval_mojo/dist/*.whl
+          retention-days: 14
