@@ -18,6 +18,12 @@ including Windows — get silently correct behavior. Raw Mojo source lives open
 in this repo; the reference libraries are used only as test and benchmark
 oracles, never as runtime dependencies.
 
+Custom Mojo kernels give Algenta its speed. The same team publishes these kernels in the
+open, under Apache-2.0: the same API and the same results as the libraries they
+accelerate, prebuilt binaries so no Mojo toolchain is ever required, and a pure-language
+fallback everywhere. The engine's own kernels are proprietary and are not in this
+repository.
+
 ## The kernels
 
 | package | accelerates | kernel | measured speedup | parity |
@@ -361,14 +367,14 @@ private channels and what is in scope. This project follows the
 
 ## Related repositories
 
-Open-source repositories from the Algenta team. The Algenta engine itself is proprietary; everything listed here is Apache-2.0. Issues and discussions are welcome in whichever repository owns the code.
+Open-source tooling around Algenta, from the Algenta team. The Algenta engine itself is proprietary; everything listed here is Apache-2.0. Issues and discussions are welcome in whichever repository owns the code.
 
-- [thyn-ai/algenta-sdk](https://github.com/thyn-ai/algenta-sdk) — Python & TypeScript SDKs for the Algenta decision engine: governed tool profiles, execution receipts, approvals.
+- [thyn-ai/algenta-sdk](https://github.com/thyn-ai/algenta-sdk) — Python and TypeScript SDKs for Algenta: governed data queries, simulations, decision memory with execution receipts, agent runs with approvals.
 - [thyn-ai/algenta-integrations](https://github.com/thyn-ai/algenta-integrations) — Framework integrations for Algenta: LangChain, LlamaIndex, pydantic-ai, MAF, Haystack, LiteLLM, Ray Serve, vLLM, Vercel AI SDK and n8n.
 - [thyn-ai/mojo-kernels](https://github.com/thyn-ai/mojo-kernels) (this repository) — Clean-room Mojo kernels as drop-in accelerators for popular Python/TypeScript libraries, with bit-exact parity and pure-language fallbacks.
 - [thyn-ai/security-toolchain](https://github.com/thyn-ai/security-toolchain) — The pinned, checksum-verified security toolchain (Gitleaks, Opengrep, OSV-Scanner, Trivy config, actionlint) that every thyn-ai repository runs locally and in CI.
-- [thyn-ai/feedback](https://github.com/thyn-ai/feedback) — Public issue intake for the Algenta family of open-source projects and the Codna GitHub App.
-- [thyn-ai/codna-action](https://github.com/thyn-ai/codna-action) — Public GitHub Action wrapper for Codna.
+- [thyn-ai/feedback](https://github.com/thyn-ai/feedback) — Public issue intake for the open-source tooling around Algenta and for the Codna GitHub App.
+- [thyn-ai/codna-action](https://github.com/thyn-ai/codna-action) — GitHub Action for Codna: fix, review or secure a repository in CI through the same packaged local runtime the CLI uses.
 
 ## Contributors
 

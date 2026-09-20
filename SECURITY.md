@@ -1,6 +1,6 @@
 # Security Policy
 
-This repository contains Algenta's open-source Mojo kernels and the thin
+This repository contains the Algenta team's open-source Mojo kernels and the thin
 wrapper packages that ship them: `bm25-mojo` and `cclib-mojo` (Python,
 `ctypes`) and `fuse-mojo` (TypeScript/Node, `koffi`), each with a vendored
 pure-language fallback. We take the security of these packages seriously and
@@ -72,7 +72,7 @@ to `security@algenta.ai` for anything Algenta-owned):
   backend, unmodified, under its own license)
 - The Mojo compiler and MAX runtime from Modular, which the kernels are
   built with and whose shared libraries the wheels vendor
-- The Algenta Engine and Algenta's hosted infrastructure (separate, private
+- The Algenta engine and Algenta's hosted infrastructure (separate, private
   repositories)
 
 **Also out of scope:** third-party dependencies (report those upstream; we
