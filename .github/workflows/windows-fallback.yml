@@ -86,21 +86,29 @@ jobs:
             prefix: CAPA_MOJO
             oracles: flare-capa==9.2.0
             suite: tests/test_capa_match_differential.py tests/test_capa_match_loader.py
+          # cclib's second, independent oracle (pyquante2==0.2.0, sdist only)
+          # does not compile with MSVC (C2129 in its crys.h), so this leg has
+          # cclib itself and the PyQuante1 transcription in tests/; the one
+          # pyquante2 test skips via importorskip.
           - package: cclib_mojo
             module: cclib_mojo
             prefix: CCLIB_MOJO
-            oracles: cclib==1.8.1 pyquante2==0.2.0
+            oracles: cclib==1.8.1
             suite: tests/test_gaussgrid_differential.py tests/test_gaussgrid_loader.py tests/test_fuzz_regression_cclib.py
+          # tzdata: the suite's aware cases use zoneinfo, which has no
+          # system zone database to read on Windows.
           - package: croniter_mojo
             module: croniter_mojo
             prefix: CRONITER_MOJO
-            oracles: croniter==6.2.4
+            oracles: croniter==6.2.4 tzdata
             suite: tests/test_croniter_differential.py tests/test_croniter_loader.py
-          - package: dynesty_mojo
-            module: dynesty_mojo
-            prefix: DYNESTY_MOJO
-            oracles: dynesty==3.1.0
-            suite: tests/test_dynesty_differential.py tests/test_dynesty_loader.py
+          # dynesty_mojo has no leg: its suite's sanity check on the ORACLE
+          # (dynesty 3.1.0's own logz against the analytic truth, within
+          # 4 sigma + 0.15) fails on windows-latest by 0.04 for the shared
+          # seed (run 35540328280: |-20.7991 - -21.4793| = 0.680 > 0.643),
+          # so the suite cannot go green there and dynesty-mojo's README
+          # does not claim Windows. The fallback itself matched the oracle
+          # and the truth in that run.
           - package: elephant_mojo
             module: elephant_mojo
             prefix: ELEPHANT_MOJO
@@ -136,10 +144,14 @@ jobs:
             prefix: MOTMETRICS_MOJO
             oracles: motmetrics==1.4.0 pandas==3.0.6 scipy==1.18.1
             suite: tests/test_motmetrics_differential.py tests/test_motmetrics_loader.py
+          # nuscenes-devkit pins numpy<2 (the Linux/macOS legs satisfy it
+          # from a separate --target dir), so this leg lets the oracle's
+          # constraint pick numpy instead of the shared pin.
           - package: nuscenes_eval_mojo
             module: nuscenes_eval_mojo
             prefix: NUSCENES_EVAL_MOJO
             oracles: nuscenes-devkit==1.2.0
+            numpy: numpy<2
             suite: tests/test_nuscenes_eval_differential.py tests/test_nuscenes_eval_loader.py
           - package: nx_mojo
             module: nx_mojo
@@ -227,6 +239,8 @@ jobs:
       PREFIX: ${{ matrix.prefix }}
       ORACLES: ${{ matrix.oracles }}
       SUITE: ${{ matrix.suite }}
+      # A leg may override the shared numpy pin (see the nuscenes entry).
+      NUMPY_PIN: ${{ matrix.numpy }}
       # Keep the runner's user site-packages out of every interpreter below.
       PYTHONNOUSERSITE: "1"
     steps:
@@ -257,16 +271,16 @@ jobs:
           done
 
       - name: Install the wheel + pinned oracle into a fresh venv
-        # numpy at pixi.lock's version because tests/conftest.py imports it
-        # for every suite; pytest likewise. Everything else the suite needs is
-        # the package's own runtime dependency (pulled by the wheel) or the
-        # oracle pinned in the matrix.
+        # numpy at pixi.lock's version (unless the leg overrides it) because
+        # tests/conftest.py imports it for every suite; pytest likewise.
+        # Everything else the suite needs is the package's own runtime
+        # dependency (pulled by the wheel) or the oracle pinned in the matrix.
         run: |
           set -e
           python -m venv .venv-windows
           .venv-windows/Scripts/python.exe -m pip install --quiet --upgrade pip
           # shellcheck disable=SC2086  # ORACLES is a space-separated list of pins
-          .venv-windows/Scripts/python.exe -m pip install --quiet dist-pure-windows/*.whl "numpy==2.5.3" "pytest==9.1.1" $ORACLES
+          .venv-windows/Scripts/python.exe -m pip install --quiet dist-pure-windows/*.whl "${NUMPY_PIN:-numpy==2.5.3}" "pytest==9.1.1" $ORACLES
           .venv-windows/Scripts/python.exe -m pip list --format=columns
 
       - name: "End-user path: import with no environment variable set, expect the fallback"

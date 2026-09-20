@@ -120,7 +120,9 @@ pre-commit install            # installs both the pre-commit and pre-push hooks
   proven otherwise.
 - **Both backends, both platforms.** CI runs every suite on `ubuntu-latest`
   and `macos-latest`, native then fallback. Windows has no Mojo toolchain;
-  the wrappers' fallback is the Windows path and the fuse smoke simulates it.
+  the wrappers' fallback is the Windows path: `windows-fallback.yml` runs it
+  on `windows-latest` for every package (see below), and the fuse smoke
+  simulates it on the other two platforms.
 - **The C ABI is versioned.** Kernels export `<name>_index_create` /
   `<name>_score` / `<name>_index_destroy`-style entry points behind an ABI
   version; changing a signature means bumping it and teaching the wrapper's
@@ -176,6 +178,23 @@ a new workflow is a two-part change:
    differ. Renaming a job or a matrix leg is the same change: the old name
    stays required until the ruleset is updated, and no pull request can
    satisfy it in the meantime.
+
+`windows-fallback.yml` is the one workflow outside that rule, on purpose.
+Windows has no Mojo toolchain, so the only thing a Windows user can run is
+the vendored fallback, and that workflow is the only place the fallback runs
+on Windows: for every Python package it builds the `py3-none-any` wheel with
+the package's `<NAME>_MOJO_ALLOW_PURE_WHEEL=1` escape hatch (plain
+`python -m build`, no pixi), installs it into a fresh venv beside the same
+oracle pin, asserts that a bare import selects the fallback with no override
+set, and runs the forced-fallback half of the suite against the installed
+wheel; every TypeScript package runs its `test:fallback` script. It is
+path-filtered to the package trees and is not a required check — a
+path-filtered required check would block every unrelated pull request — so
+it certifies the READMEs' "tested on Windows in CI" wording rather than
+gating merges. A README may carry that wording only for a package with a leg
+in the workflow; a new package adds its leg to both matrices' `include`
+lists (Python: directory, import name, `<NAME>_MOJO` prefix, oracle pin,
+suite files; TypeScript: directory, npm scope, prefix).
 
 A new package joins the version lockstep by following the layout, with no
 edit to the release configuration: `release-please-config.json` globs

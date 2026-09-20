@@ -432,6 +432,9 @@ def test_native_and_fallback_agree_bitwise(monkeypatch):
     # The kernel and the vendored fallback run the same integer tallies and
     # the same float64 operation order (no FMA-sensitive arithmetic), so
     # every counter — including the MOTP distance sum — is bit-identical.
+    monkeypatch.delenv("MOTMETRICS_MOJO_DISABLE_NATIVE", raising=False)
+    if not M.native_available():
+        pytest.skip("native kernel not built on this machine; this test needs both backends")
     frames = make_stream(151, n_frames=60, n_obj=10, n_hyp=12)
     results = {}
     for disabled in (None, "1"):
