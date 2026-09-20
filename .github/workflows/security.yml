@@ -4,6 +4,7 @@ name: security
 
 on:
   pull_request:
+  merge_group:
   push:
     branches: [main]
   schedule:
@@ -24,7 +25,7 @@ concurrency:
 
 jobs:
   full:
-    uses: thyn-ai/security-toolchain/.github/workflows/security-full.yml@b71521eb3933b7b30580dbd748c77ce96806e239 # v0.1.12
+    uses: thyn-ai/security-toolchain/.github/workflows/security-full.yml@901e5ebd81ec3ca9c241d99c60a3a525eadf1230 # v0.1.13
     permissions:
       contents: read
       security-events: write
