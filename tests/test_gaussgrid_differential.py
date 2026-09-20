@@ -225,6 +225,10 @@ def test_cclib_wavefunction_equivalence():
     cclib_volume = pytest.importorskip(
         "cclib.method.volume", reason="cclib not installed"
     )
+    # cclib's wavefunction()/electrondensity*() evaluate through its pyquante2
+    # backend and raise ImportError without it; pyquante2 is sdist-only and
+    # does not build everywhere (MSVC rejects its crys.h).
+    pytest.importorskip("pyquante2", reason="cclib's volume functions need pyquante2")
     from cclib_mojo import cclib_integration
 
     gbasis, atomcoords = fx.h2o_sto3g_d()
@@ -242,6 +246,7 @@ def test_cclib_electrondensity_equivalence():
     cclib_volume = pytest.importorskip(
         "cclib.method.volume", reason="cclib not installed"
     )
+    pytest.importorskip("pyquante2", reason="cclib's volume functions need pyquante2")
     from cclib_mojo import cclib_integration
 
     gbasis, atomcoords = fx.h2o_sto3g()

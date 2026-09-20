@@ -36,18 +36,22 @@ EPOCH = datetime(1970, 1, 1)
 
 
 def _platform_converts_pre_epoch_timestamps() -> bool:
-    """Whether datetime.fromtimestamp() accepts a timestamp before 1970 here.
+    """Whether datetime.fromtimestamp() reaches the earliest instant this suite needs.
 
     The oracle converts every step through datetime.fromtimestamp(), so a
-    get_prev chain that crosses the epoch depends on the C runtime accepting
-    a negative timestamp. Windows' does not (OSError EINVAL), which is a limit
-    of the oracle's platform, not a verdict on the expression; the cases that
-    cross the epoch are therefore a separate test, skipped where the oracle
-    cannot produce its side. Probed, not inferred from sys.platform.
+    get_prev chain that crosses the epoch depends on the C runtime's gmtime
+    accepting the timestamp. Windows' UCRT stops at -43200 s (12 hours before
+    1970-01-01T00:00Z) and returns EINVAL below that, which is a limit of the
+    oracle's platform, not a verdict on the expression; the cases that cross
+    the epoch are therefore a separate test, skipped where the oracle cannot
+    produce its side. Probed at the suite's earliest expected result (year 8,
+    test_year_bound_edges) rather than inferred from sys.platform, so a
+    runtime that clears it clears every pre-epoch case in the corpus.
     """
+    earliest = datetime(8, 2, 29, tzinfo=timezone.utc).timestamp()
     try:
-        datetime.fromtimestamp(-1, tz=timezone.utc)
-    except (OSError, OverflowError):
+        datetime.fromtimestamp(earliest, tz=timezone.utc)
+    except (OSError, OverflowError, ValueError):
         return False
     return True
 
