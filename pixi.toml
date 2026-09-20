@@ -35,6 +35,18 @@ python = "3.12.*"
 # The published wrappers never depend on it.
 pip = ">=25"
 
+[target.osx-arm64.dependencies]
+# One OpenMP runtime per process. conda-forge's default OpenBLAS on osx-arm64
+# is the OpenMP build, which loads the environment's libomp.dylib as soon as
+# numpy is imported. Several pip-installed test oracles ship their own copy of
+# LLVM's OpenMP runtime inside the wheel (elephant's `fim` mining extension
+# does, via delocate), and LLVM's libomp aborts the whole process the moment a
+# second copy initialises ("OMP: Error #15"). The pthreads build of the same
+# OpenBLAS keeps the environment free of OpenMP, so an oracle's vendored
+# runtime is the only one in the process. Linux is unaffected: manylinux
+# wheels vendor GCC's libgomp, which coexists with libomp.
+libopenblas = { version = "*", build = "pthreads*" }
+
 [target.linux-64.dependencies]
 # Native library repair for the fuse-mojo npm platform package on Linux
 # (rpath rewrite to $ORIGIN after vendoring the Mojo runtime; delocate

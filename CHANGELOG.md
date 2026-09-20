@@ -47,6 +47,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   fast-check parity properties for `@fuse-mojo/core` against Fuse.js 7.1.0;
   a `fuzz` workflow (bounded budget per pull request, larger nightly).
 
+### Fixed
+
+- pixi toolchain (macOS arm64): the environment's OpenBLAS is now the
+  pthreads build instead of the OpenMP build, so importing numpy no longer
+  loads LLVM's OpenMP runtime into the process. pip-installed test oracles
+  that vendor their own copy of that runtime — elephant's `fim` mining
+  extension does — aborted the interpreter on the first mining call
+  (`OMP: Error #15`, two copies of libomp), which took the `elephant-mojo`
+  differential suite down on macOS while Linux, where the manylinux wheel
+  vendors GCC's libgomp instead, passed. The suite now runs a preflight that
+  reports the runtime's own message instead of an opaque abort.
+
 ### Known issues
 
 - `bm25-mojo`: for degenerate parameters (`k1 == 0`, `b == 1` with an empty
