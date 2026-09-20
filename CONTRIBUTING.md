@@ -132,6 +132,50 @@ pre-commit install            # installs both the pre-commit and pre-push hooks
 - **No credentials, no network.** Nothing in this repository talks to a
   network at test time; hard-coded tokens or endpoints of any kind are out.
 
+### Adding a kernel workflow
+
+Every `.github/workflows/ci-<kernel>.yml` runs on every push and pull
+request, with no path filter, and the `main` branch ruleset ("Codna Review
+required (mojo-kernels)", id `23705899`) lists each of its job names — both
+matrix legs, spelled exactly as the check run appears on a commit, for
+example `uproot-mojo differential tests + wheel (ubuntu-latest)` — as a
+required status check under the strict (branch up to date) policy, next to
+`codna review`, `full / security gate`, the fuzz jobs and CodeQL. A pull
+request can never merge while any required check is red or pending, and a
+branch that is behind `main` has to be brought up to date and re-run first.
+A job the ruleset does not name still runs, but does not gate the merge, so
+a new workflow is a two-part change:
+
+1. Add the workflow (copy a sibling; keep `on: [push, pull_request]` and the
+   `<name>-mojo differential tests + wheel (${{ matrix.os }})` job name so
+   the check exists on every pull request and on `main`).
+2. Add both job names to the ruleset. This needs repository admin and sends
+   the whole ruleset back — the PUT replaces it, so start from the GET and
+   strip only the read-only fields (a denylist, so an updatable field GitHub
+   adds later is kept rather than silently dropped), keep every other rule,
+   and send the bypass list as an empty array even if the GET returns `null`:
+
+   ```bash
+   gh api repos/thyn-ai/mojo-kernels/rulesets/23705899 \
+     | jq 'del(.id, .node_id, .source, .source_type, .current_user_can_bypass,
+               .created_at, .updated_at, ._links)
+           | .bypass_actors |= (. // [])
+           | .rules |= map(if .type == "required_status_checks" then
+               .parameters.required_status_checks += [
+                 {context: "<name>-mojo differential tests + wheel (ubuntu-latest)", integration_id: 15368},
+                 {context: "<name>-mojo differential tests + wheel (macos-latest)", integration_id: 15368}]
+             else . end)' > ruleset.json
+   gh api -X PUT repos/thyn-ai/mojo-kernels/rulesets/23705899 --input ruleset.json
+   gh api repos/thyn-ai/mojo-kernels/rulesets/23705899 \
+     --jq '.rules[] | select(.type == "required_status_checks") | .parameters.required_status_checks[].context'
+   ```
+
+   `integration_id` 15368 is GitHub Actions. Compare the last GET with the
+   first one: apart from `updated_at` and the two new contexts, nothing may
+   differ. Renaming a job or a matrix leg is the same change: the old name
+   stays required until the ruleset is updated, and no pull request can
+   satisfy it in the meantime.
+
 ## Commit messages and pull requests
 
 We follow [Conventional Commits](https://www.conventionalcommits.org/), with
