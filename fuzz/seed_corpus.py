@@ -1,6 +1,6 @@
 """(Re)generate the checked-in seed corpora under fuzz/corpus/.
 
-Two kinds of seed per harness:
+Three kinds of seed per harness:
 
 * ``random-NN.bin`` -- fixed-seed pseudo-random byte strings of varying
   length (``random.Random(base + NN).randbytes(...)``). Because every
@@ -11,6 +11,10 @@ Two kinds of seed per harness:
   harness's ``encode``. Generation asserts that each one still decodes to
   the intended case and still reproduces its issue, so this script doubles
   as the check that a reproducer is minimal *and* live.
+* ``regression-<name>-<n>.bin`` -- hand-minimised reproducers of divergences
+  that have been fixed, encoded the same way. Generation asserts that each
+  one still decodes to the intended case and replays *without* a divergence,
+  so a fix that regresses fails this script and the seed replay alike.
 
 Usage (from the repo root, inside the pixi environment, kernels built)::
 
@@ -82,6 +86,26 @@ def _bm25_reproducers(harness) -> dict[str, bytes]:
             vocab_size=2, with_unicode=False,
             corpus=(("w00", "w01"), ("w00",), ("w01",)), queries=(("w00",),),
         ),
+    }
+    return {name: harness.encode(case) for name, case in cases.items()}
+
+
+def _bm25_regressions(harness) -> dict[str, bytes]:
+    """Minimal reproducers of fixed bm25 divergences; each must replay clean."""
+    Case = harness.Case
+    # BM25Plus with |idf * delta| past DBL_MAX. The kernel adds the per-term
+    # floor idf * delta densely and gives posted documents only their excess
+    # over it; once the floor overflows that excess was inf - inf = NaN where
+    # the reference's single evaluation idf * (delta + ...) is +-inf. "w02" is
+    # posted once in four documents (idf = ln 5 > 1, so its floor overflows);
+    # "w00" three times (idf < 1, finite floor). Found by the atheris run.
+    corpus = (("w00", "w01"), ("w00", "w02"), ("w00", "w03"), ("w01", "w03"))
+    cases = {
+        f"regression-plus-overflowing-floor-{n}.bin": Case(
+            variant=2, raw_params=True, k1=1.5, b=0.75, third=delta,
+            vocab_size=4, with_unicode=False, corpus=corpus, queries=(("w00", "w02"),),
+        )
+        for n, delta in ((1, -sys.float_info.max), (2, sys.float_info.max))
     }
     return {name: harness.encode(case) for name, case in cases.items()}
 
@@ -174,6 +198,14 @@ def build(name: str) -> None:
         assert outcome == expected_key, f"{filename}: expected outcome {expected_key!r}, got {outcome!r}"
     seeds.update(reproducers)
 
+    # Every regression reproducer must round-trip and replay without a divergence.
+    regressions = {"bm25": _bm25_regressions, "cclib": lambda _harness: {}}[name](harness)
+    for filename, data in regressions.items():
+        assert harness.encode(harness.decode(data)) == data, f"{filename}: encode/decode round trip"
+        outcome = harness.test_one_input(data)
+        assert outcome is None, f"{filename}: fixed divergence is back, outcome {outcome!r}"
+    seeds.update(regressions)
+
     stale = {p.name for p in corpus_dir.iterdir()} - set(seeds)
     for filename in sorted(stale):
         (corpus_dir / filename).unlink()
@@ -181,7 +213,7 @@ def build(name: str) -> None:
     for filename, data in sorted(seeds.items()):
         (corpus_dir / filename).write_bytes(data)
     print(f"{name}: wrote {len(seeds)} seeds to {corpus_dir.relative_to(FUZZ_DIR.parent)} "
-          f"({len(reproducers)} known-issue reproducers)")
+          f"({len(reproducers)} known-issue reproducers, {len(regressions)} regression reproducers)")
 
 
 if __name__ == "__main__":

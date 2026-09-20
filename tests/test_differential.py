@@ -14,7 +14,9 @@ delivers.
 from __future__ import annotations
 
 import os
+import sys
 
+import numpy as np
 import pytest
 from rank_bm25 import BM25L as RefBM25L
 from rank_bm25 import BM25Okapi as RefBM25Okapi
@@ -136,6 +138,26 @@ def test_single_doc_corpus(ours_cls, ref_cls, params):
     queries = [["only"], ["doc", "unseen"], ["terms", "terms"]]
     _check_full_parity(ours, ref, queries, ["the-doc"])
 
+
+@pytest.mark.parametrize("delta", [-sys.float_info.max, sys.float_info.max], ids=["-max", "+max"])
+def test_plus_overflowing_floor_matches_reference(delta):
+    """BM25Plus whose per-term floor idf * delta overflows float64.
+
+    rank_bm25 evaluates idf * (delta + ...) once per document, so every score
+    is +-inf. The kernel adds the floor densely and gives posted documents only
+    their excess over it, which is inf - inf = NaN unless such a term is
+    evaluated in reference order (found by fuzz/fuzz_bm25.py; the seeds are
+    fuzz/corpus/bm25/regression-plus-overflowing-floor-*.bin).
+    """
+    corpus = [["a", "b"], ["a", "c"], ["a", "d"], ["b", "d"]]  # idf("c") = ln 5 > 1
+    ours = BM25Plus(corpus, delta=delta)
+    ref = RefBM25Plus(corpus, delta=delta)
+    assert ours.backend == _expected_backend()
+    with np.errstate(over="ignore"):
+        expected = ref.get_scores(["a", "c"])
+        actual = ours.get_scores(["a", "c"])
+    assert np.isinf(expected).all() and (np.sign(expected) == np.sign(delta)).all()
+    assert_scores_close(actual, expected)
 
 @pytest.mark.parametrize("ours_cls,ref_cls,params", VARIANTS)
 def test_top_n_tie_order(ours_cls, ref_cls, params):

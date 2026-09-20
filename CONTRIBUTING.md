@@ -84,8 +84,9 @@ FC_NUM_RUNS=5000 pixi run fuzz-fuse                # fast-check, native then for
 ```
 
 A divergence the fuzzer finds is a bug, not noise: minimise it, check the
-input in under `fuzz/corpus/<name>/` so it is replayed forever, and either
-fix it or open an issue and register it as a `KnownIssue` in the harness
+input in under `fuzz/corpus/<name>/` (through `fuzz/seed_corpus.py`, which
+owns that directory) so it is replayed forever, and either fix it or open an
+issue and register it as a `KnownIssue` in the harness
 (the replay then insists the seed keeps reproducing until the fix removes
 both). Never narrow a generator to avoid a finding.
 

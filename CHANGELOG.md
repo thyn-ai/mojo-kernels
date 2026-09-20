@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- `bm25-mojo`: `BM25Plus` with a `delta` whose per-term floor `idf * delta`
+  overflows float64 scored the documents posting that term `NaN` where
+  `rank_bm25` yields `±inf` (the kernel added the floor densely, then a posted
+  document's excess over it: `inf - inf`). Such a term is now evaluated once
+  per document in reference order. Found by the atheris harness; reproducers
+  checked in as `fuzz/corpus/bm25/regression-plus-overflowing-floor-*.bin`.
+
 ## [0.1.0] - 2026-09-20
 
 ### Added
