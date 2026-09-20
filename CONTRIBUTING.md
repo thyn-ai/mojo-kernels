@@ -1,7 +1,7 @@
 # Contributing to mojo-kernels
 
 Thank you for your interest in contributing. This repository is the kernel
-factory behind Algenta's drop-in accelerator packages: clean-room
+factory behind the Algenta team's drop-in accelerator packages: clean-room
 [Mojo](https://www.modular.com/mojo) kernels, thin wrappers that load them
 (`ctypes` for Python, `koffi` for Node), and a vendored pure-language
 fallback for every package, so an end user never needs a Mojo toolchain.
