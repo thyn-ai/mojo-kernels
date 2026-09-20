@@ -168,6 +168,8 @@ def load_messages(xml_path: str) -> list[Message]:
         if abspath in seen:
             return
         seen.add(abspath)
+        # Trusted, repo-vendored protocol spec only (never user/network input);
+        # ElementTree resolves no external entities. nosemgrep: use-defused-xml-parse
         root = ET.parse(abspath).getroot()
         for inc in root.findall("include"):
             walk(os.path.join(os.path.dirname(abspath), inc.text))
