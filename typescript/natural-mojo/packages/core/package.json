@@ -4,7 +4,15 @@
   "description": "Drop-in faster replacement for natural's Levenshtein/Damerau-Levenshtein distance, powered by a Mojo kernel (pure-JS fallback included).",
   "license": "Apache-2.0",
   "author": "Algenta",
-  "keywords": ["natural", "levenshtein", "damerau", "edit-distance", "string-distance", "mojo", "nlp"],
+  "keywords": [
+    "natural",
+    "levenshtein",
+    "damerau",
+    "edit-distance",
+    "string-distance",
+    "mojo",
+    "nlp"
+  ],
   "type": "commonjs",
   "main": "index.cjs",
   "types": "index.d.ts",

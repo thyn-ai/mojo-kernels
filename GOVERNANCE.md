@@ -76,7 +76,9 @@ request.
   and its platform packages on npm) follows
   [Semantic Versioning](https://semver.org/); notable changes are recorded in
   [CHANGELOG.md](./CHANGELOG.md).
-- Releases are cut from `main` by a maintainer. Per-platform binaries
+- Releases are cut from `main` by a maintainer merging the release pull
+  request that release-please opens ([RELEASING.md](./RELEASING.md)); no
+  tag is pushed by hand. Per-platform binaries
   (wheels and npm platform packages) are built and repaired by CI — never
   uploaded from a developer machine — so that every published artifact is
   reproducible from a tagged commit. Release authorization currently rests

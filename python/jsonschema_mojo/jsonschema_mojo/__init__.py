@@ -31,8 +31,7 @@ from jsonschema_mojo.core import (
     validate,
 )
 
-__version__ = "0.1.0"
-
+__version__ = "0.1.0"  # x-release-please-version
 __all__ = [
     "Draft202012Validator",
     "UnsupportedSchemaError",

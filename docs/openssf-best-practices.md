@@ -30,8 +30,8 @@ What stands between this repository and `passing`:
 
 1. **`release_notes` (MUST)** - no release has been published yet, so there
    are no release notes to point at. `CHANGELOG.md` already carries the
-   human-written `[Unreleased]` summary and release-drafter maintains a
-   categorized draft; the criterion becomes Met the moment the first release
+   human-written 0.1.0 summary and release-please writes every later entry
+   from the merged Conventional Commits; the criterion becomes Met the moment the first release
    (`v0.1.0`) is published with that summary as its notes. Registration can
    proceed now (the badge shows *in progress*), and this criterion is
    flipped to Met at the first release.
@@ -103,11 +103,11 @@ Evidence links below point at `main`; `R` abbreviates
 | `repo_track` (MUST) | Met | git history records author, date and content of every change; every change arrives as a pull request with its review thread. `R/commits/main` |
 | `repo_interim` (MUST) | Met | `main` receives every merged pull request between releases; there are no squashed release-only drops. `R/commits/main` |
 | `repo_distributed` (SUGGESTED) | Met | git. |
-| `version_unique` (MUST) | Met | Each package carries a Semantic Versioning identifier (`version = "0.1.0"` in `python/*/pyproject.toml`, `"version": "0.1.0"` in `typescript/*/packages/*/package.json`); `GOVERNANCE.md` requires releases to be cut from a tagged commit and release-drafter names releases `v$RESOLVED_VERSION`. No release has shipped yet; the first will be `v0.1.0`. `R/blob/main/GOVERNANCE.md#releases` |
+| `version_unique` (MUST) | Met | Each package carries a Semantic Versioning identifier (`version = "0.1.0"` in `python/*/pyproject.toml`, `"version": "0.1.0"` in `typescript/*/packages/*/package.json`); `GOVERNANCE.md` requires releases to be cut from a tagged commit and release-please names every tag and Release `vX.Y.Z` after the version it bumps. No release has shipped yet; the first will be `v0.1.0`. `R/blob/main/GOVERNANCE.md#releases` |
 | `version_semver` (SUGGESTED) | Met | SemVer is the stated policy in `GOVERNANCE.md` and `CHANGELOG.md`. `R/blob/main/GOVERNANCE.md#releases` |
-| `version_tags` (SUGGESTED) | **Not met** | The repository has no git tags yet (release-drafter holds an unpublished draft, currently resolved to `v0.0.1`). Would meet it: push the `v0.1.0` tag as `RELEASING.md` describes; `release.yml` then builds, signs and attests every asset and adopts the open draft as the Release, rewriting the draft's version to the tag and keeping its notes, so the tag that is pushed (not the draft's `v0.0.1`) is what has to match the packages' `0.1.0`. `R/blob/main/RELEASING.md` |
-| `release_notes` (MUST, URL required) | **Not met** (no release yet) | `CHANGELOG.md` follows Keep a Changelog with a human-written `[Unreleased]` summary of each package, and release-drafter maintains a categorized draft release on every merge - but no release has been published, so there are no release notes *in a release*. Would meet it: at the first release, move `[Unreleased]` to `## [0.1.0] - <date>`, put that summary in the draft's body, then push the tag; `release.yml` publishes the draft with its notes kept (the drafter's list of pull-request titles is not a substitute for the summary). `R/blob/main/CHANGELOG.md`, `R/releases` |
-| `release_notes_vulns` (MUST) | N/A | No release has been published and no vulnerability has been publicly reported against this project (0 security advisories). When releases exist, every fixed CVE will be listed in the release's `Security` section, which `CHANGELOG.md` and the drafter's categories already provide for. `R/security/advisories` |
+| `version_tags` (SUGGESTED) | **Not met** | The repository has no git tags yet. Would meet it: merge the release pull request as `RELEASING.md` describes; release-please creates the `v0.1.0` tag and the Release, and `release.yml` then builds, signs and attests every asset onto it. The tag always equals the version release-please wrote into every package, so the two cannot disagree. `R/blob/main/RELEASING.md` |
+| `release_notes` (MUST, URL required) | **Not met** (no release yet) | `CHANGELOG.md` follows Keep a Changelog with a human-written 0.1.0 summary of each package, and release-please writes every later entry from the merged Conventional Commits and publishes it as the Release's notes - but no release has been published, so there are no release notes *in a release*. Would meet it: merge the first release pull request; release-please publishes the Release with the CHANGELOG entry as its body. `R/blob/main/CHANGELOG.md`, `R/releases` |
+| `release_notes_vulns` (MUST) | N/A | No release has been published and no vulnerability has been publicly reported against this project (0 security advisories). When releases exist, every fixed CVE will be listed in the release's `Security` section, which `CHANGELOG.md`'s `Security` section (release-please's `security` commit type) already provides for. `R/security/advisories` |
 
 ## Reporting
 

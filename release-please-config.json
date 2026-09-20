@@ -1,0 +1,43 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "release-type": "simple",
+  "include-component-in-tag": false,
+  "include-v-in-tag": true,
+  "bump-minor-pre-major": true,
+  "bump-patch-for-minor-pre-major": false,
+  "pull-request-title-pattern": "chore(release): v${version}",
+  "pull-request-header": "Release pull request. release-please computed the version below from the Conventional Commits merged since the previous tag and bumped every version location in the tree in lockstep (RELEASING.md lists them). Merging it creates the `vX.Y.Z` tag and the GitHub Release; `release.yml` then builds, signs and attests the assets onto that Release. It is gated like any other pull request: codna review plus every required check.",
+  "changelog-sections": [
+    { "type": "feat", "section": "Added" },
+    { "type": "fix", "section": "Fixed" },
+    { "type": "perf", "section": "Performance" },
+    { "type": "security", "section": "Security" },
+    { "type": "deps", "section": "Dependencies" },
+    { "type": "revert", "section": "Reverted" },
+    { "type": "docs", "section": "Documentation", "hidden": true },
+    { "type": "ci", "section": "CI", "hidden": true },
+    { "type": "chore", "section": "Maintenance", "hidden": true },
+    { "type": "build", "section": "Build", "hidden": true },
+    { "type": "refactor", "section": "Refactoring", "hidden": true },
+    { "type": "test", "section": "Tests", "hidden": true },
+    { "type": "style", "section": "Style", "hidden": true }
+  ],
+  "packages": {
+    ".": {
+      "package-name": "mojo-kernels",
+      "extra-files": [
+        { "type": "toml", "path": "pixi.toml", "jsonpath": "$.workspace.version" },
+        { "type": "toml", "path": "python/*/pyproject.toml", "jsonpath": "$.project.version", "glob": true },
+        { "type": "generic", "path": "python/*/*/__init__.py", "glob": true },
+        { "type": "json", "path": "typescript/*/package.json", "jsonpath": "$.version", "glob": true },
+        { "type": "json", "path": "typescript/*/packages/*/package.json", "jsonpath": "$.version", "glob": true },
+        { "type": "json", "path": "typescript/*/packages/core/package.json", "jsonpath": "$.optionalDependencies.*", "glob": true },
+        { "type": "json", "path": "typescript/*/package-lock.json", "jsonpath": "$.version", "glob": true },
+        { "type": "json", "path": "typescript/*/package-lock.json", "jsonpath": "$.packages[''].version", "glob": true },
+        { "type": "json", "path": "typescript/*/package-lock.json", "jsonpath": "$.packages['packages/core'].version", "glob": true },
+        { "type": "json", "path": "typescript/*/package-lock.json", "jsonpath": "$.packages['packages/core'].optionalDependencies.*", "glob": true },
+        { "type": "generic", "path": "typescript/*/tests/unit.test.cjs", "glob": true }
+      ]
+    }
+  }
+}

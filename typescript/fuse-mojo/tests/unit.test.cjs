@@ -132,7 +132,7 @@ test('explicit destroy + GC does not double-free the native index', { skip: !NAT
 
 test('config defaults are exposed and mutable like the reference', () => {
   assert.equal(Fuse.config.threshold, 0.6)
-  assert.equal(Fuse.version, '0.1.0')
+  assert.equal(Fuse.version, '0.1.0') // x-release-please-version
 })
 
 test('in-process forced fallback agrees with native on a tricky corpus', () => {

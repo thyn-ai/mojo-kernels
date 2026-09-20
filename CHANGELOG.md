@@ -6,17 +6,9 @@ All notable changes to the mojo-kernels packages (`bm25-mojo` and
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
-
-## [Unreleased]
-
-### Fixed
-
-- `bm25-mojo`: `BM25Plus` with a `delta` whose per-term floor `idf * delta`
-  overflows float64 scored the documents posting that term `NaN` where
-  `rank_bm25` yields `±inf` (the kernel added the floor densely, then a posted
-  document's excess over it: `inf - inf`). Such a term is now evaluated once
-  per document in reference order. Found by the atheris harness; reproducers
-  checked in as `fuzz/corpus/bm25/regression-plus-overflowing-floor-*.bin`.
+Entries after 0.1.0 are written by [release-please](https://github.com/googleapis/release-please)
+from the Conventional Commits merged since the previous tag, in the release
+pull request that cuts the version ([RELEASING.md](RELEASING.md)).
 
 ## [0.1.0] - 2026-09-20
 
@@ -89,5 +81,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   orders disagree (inf x 0 = NaN on one side, 0 on the other)
   ([#16](https://github.com/thyn-ai/mojo-kernels/issues/16)).
 
-[Unreleased]: https://github.com/thyn-ai/mojo-kernels/compare/v0.1.0...HEAD
 [0.1.0]: https://github.com/thyn-ai/mojo-kernels/releases/tag/v0.1.0
