@@ -19,8 +19,8 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 SCRIPT = REPO_ROOT / "scripts" / "release_notes.py"
 
 spec = importlib.util.spec_from_file_location("release_notes", SCRIPT)
+assert spec is not None and spec.loader is not None, f"could not load {SCRIPT}"
 release_notes = importlib.util.module_from_spec(spec)
-assert spec.loader is not None
 spec.loader.exec_module(release_notes)
 
 CHANGELOG = """\
@@ -234,10 +234,16 @@ class Compose(unittest.TestCase):
         body = release_notes.compose(changelog, "1.0.0", GENERATED, require_section=False)
         self.assertEqual(body, GENERATED.strip("\n") + "\n")
 
-    def test_nothing_to_compose_fails_even_when_a_missing_section_is_allowed(self):
+    def test_nothing_to_compose_yields_a_one_line_body_when_a_missing_section_is_allowed(self):
+        # Even with no entry and no generated notes the release job must not
+        # fail: the Release is already published, and a body saying why it
+        # has no notes beats stranding its assets.
         for generated in (None, "", "  \n"):
-            with self.assertRaises(release_notes.ChangelogError):
-                release_notes.compose(CHANGELOG, "9.9.9", generated, require_section=False)
+            body = release_notes.compose(CHANGELOG, "9.9.9", generated, require_section=False)
+            self.assertEqual(len(body.splitlines()), 1)
+            self.assertTrue(body.startswith("Release 9.9.9."))
+            self.assertIn("No `## [9.9.9]` entry", body)
+            self.assertTrue(body.endswith("\n"))
 
 
 class CommandLine(unittest.TestCase):
@@ -302,18 +308,20 @@ class CommandLine(unittest.TestCase):
         )
         self.assertEqual(code, 0)
         self.assertIn("warning", err)
-        self.assertIn("no usable `## [0.3.0]` entry", err)
+        self.assertIn("no `## [0.3.0]` section", err)
         self.assertIn("heading: ## What's Changed", out)
         self.assertEqual(self.out.read_text(encoding="utf-8"), GENERATED.strip("\n") + "\n")
 
-    def test_compose_with_allow_missing_section_still_fails_with_nothing_to_write(self):
-        code, _, err = self.run_main(
+    def test_compose_with_allow_missing_section_and_nothing_else_writes_the_one_line_body(self):
+        code, out, err = self.run_main(
             "compose", "--changelog", str(self.changelog), "--version", "0.3.0",
             "--allow-missing-section", "--out", str(self.out),
         )
-        self.assertEqual(code, 1)
-        self.assertIn("nothing to compose", err)
-        self.assertFalse(self.out.exists())
+        self.assertEqual(code, 0)
+        self.assertIn("no generated notes either", err)
+        self.assertIn("heading: Release 0.3.0.", out)
+        body = self.out.read_text(encoding="utf-8")
+        self.assertEqual(body, release_notes.compose(CHANGELOG, "0.3.0", None, require_section=False))
 
 
 class RepositoryChangelog(unittest.TestCase):

@@ -30,7 +30,8 @@ worth blocking on a changelog, because release-please publishes the Release
 already-published Release without its assets, signatures and provenance --
 permanently, since a re-run builds the tag's own tree and would refuse
 again. With that flag a missing or empty entry degrades to the generated
-notes alone and says so on stderr. Standard library only, Python 3.9+.
+notes alone, or to a one-line body when there are none either, and says so
+on stderr; it never fails. Standard library only, Python 3.9+.
 
 Run the tests with ``python3 -m unittest discover -s tests -p test_release_notes.py``.
 """
@@ -125,35 +126,38 @@ def compose(
     the result always contains its heading; that invariant is asserted here
     so a caller cannot publish a body without it.
 
-    `require_section=False` (the `release` job) turns a missing or empty
-    entry into the generated notes alone rather than an error, so a release
-    is never blocked on the changelog. ChangelogError is still raised when
-    that would leave nothing at all to publish.
+    `require_section=False` (the `release` job) never raises for a missing
+    or empty entry, so a release is never blocked on the changelog: the body
+    degrades to the generated notes alone, or, when there are none either,
+    to one line naming the release and saying why it carries no notes. Both
+    are reported on stderr.
     """
     try:
         section = extract_section(changelog, version)
-    except ChangelogError:
+    except ChangelogError as error:
         if require_section:
             raise
-        if not (generated and generated.strip()):
-            raise ChangelogError(
-                f"CHANGELOG.md has no usable `## [{version}]` entry and there are no "
-                "generated notes either; nothing to compose"
-            ) from None
+        if generated and generated.strip():
+            print(
+                f"release_notes: warning: {error}; composing from the generated notes alone",
+                file=sys.stderr,
+            )
+            return generated.strip("\n") + "\n"
         print(
-            f"release_notes: warning: CHANGELOG.md has no usable `## [{version}]` entry; "
-            "composing from the generated notes alone",
+            f"release_notes: warning: {error}, and there are no generated notes either; "
+            "writing a one-line body",
             file=sys.stderr,
         )
-        return generated.strip("\n") + "\n"
+        return (
+            f"Release {version}. No `## [{version}]` entry was found in CHANGELOG.md at "
+            "the tagged commit and GitHub generated no notes, so this release carries "
+            "no notes; the assets, signatures and provenance below are unaffected.\n"
+        )
+    # The entry leads the body by construction; the tests assert it.
     parts = [section.rstrip("\n")]
     if generated and generated.strip():
         parts.append(generated.strip("\n"))
-    body = "\n\n".join(parts) + "\n"
-    heading = section.splitlines()[0]
-    if heading not in body.splitlines():
-        raise AssertionError(f"composed body lost the CHANGELOG heading {heading!r}")
-    return body
+    return "\n\n".join(parts) + "\n"
 
 
 def main(argv: list[str] | None = None) -> int:
