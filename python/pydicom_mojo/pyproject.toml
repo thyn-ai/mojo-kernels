@@ -1,0 +1,35 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "pydicom-mojo"
+version = "0.1.0"
+description = "Mojo-accelerated DICOM RLE Lossless codec (decode + encode), byte-compatible with pydicom, with a vendored pure-Python fallback."
+readme = "README.md"
+requires-python = ">=3.9"
+license = "Apache-2.0"
+authors = [{ name = "Algenta" }]
+keywords = ["dicom", "pydicom", "rle", "packbits", "medical-imaging", "mojo", "codec"]
+classifiers = [
+  "Intended Audience :: Developers",
+  "Intended Audience :: Healthcare Industry",
+  "Intended Audience :: Science/Research",
+  "License :: OSI Approved :: Apache Software License",
+  "Programming Language :: Python :: 3",
+  "Topic :: Scientific/Engineering :: Medical Science Apps.",
+]
+# Zero runtime dependencies: bytes in, bytes out. pydicom is only the test
+# oracle and the optional host of the plugin seam, never a dependency.
+dependencies = []
+
+[project.urls]
+Repository = "https://github.com/thyn-ai/mojo-kernels"
+
+# Wheels only: the shared library cannot rebuild from an sdist, so no sdist
+# target is offered. Per-platform wheels are produced by CI.
+[tool.hatch.build.targets.wheel]
+packages = ["pydicom_mojo"]
+
+[tool.hatch.build.hooks.custom]
+path = "hatch_build.py"
