@@ -2,7 +2,7 @@
 
 **Batch MAVLink v1/v2 log decoding — the offline `.tlog` analysis workload —
 powered by a clean-room Mojo kernel**, with a vendored pure-Python fallback
-for platforms without a native build (including Windows). One call decodes a
+for platforms without a native build (including Windows — tested there in CI: [`windows-fallback`](https://github.com/thyn-ai/mojo-kernels/actions/workflows/windows-fallback.yml)). One call decodes a
 whole telemetry log: headers, per-field payloads for the bundled MAVLink
 `common.xml` dialect (all 205 messages), CRC-16/MCRF4XX validation, and
 pymavlink's robust resync-on-garbage semantics — message-for-message
@@ -43,7 +43,8 @@ pip install pymavlink-mojo
 
 Per-platform wheels (macOS arm64, Linux x86_64) carry the native kernel,
 self-contained (the Mojo runtime is vendored into the wheel; nothing to
-compile, no absolute rpaths). On any other platform — including Windows —
+compile, no absolute rpaths). On any other platform — including Windows, where CI runs this package's fallback suite
+([`windows-fallback`](https://github.com/thyn-ai/mojo-kernels/actions/workflows/windows-fallback.yml)) —
 the same wheel API runs on the vendored pure-Python fallback, silently and
 correctly. There is no sdist: a source tarball cannot rebuild the native
 library.
@@ -177,7 +178,7 @@ parser**:
   wheel-relative. (Redistribution terms for Modular's runtime binaries
   should be confirmed with Modular before any public release.) A pure
   `py3-none-any` fallback wheel can be produced with
-  `PYMAVLINK_MOJO_ALLOW_PURE_WHEEL=1` (e.g. for Windows).
+  `PYMAVLINK_MOJO_ALLOW_PURE_WHEEL=1` (the wheel CI builds and tests on Windows: [`windows-fallback`](https://github.com/thyn-ai/mojo-kernels/actions/workflows/windows-fallback.yml)).
 
 ## Differential tests
 

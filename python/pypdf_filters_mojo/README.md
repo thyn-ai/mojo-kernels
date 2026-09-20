@@ -3,7 +3,7 @@
 Mojo-accelerated PNG-predictor and LZW decoders for PDF streams — the two
 pure-Python hot loops in [pypdf](https://pypi.org/project/pypdf/)'s
 `FlateDecode`/`LZWDecode` filter path — with a vendored pure-Python fallback
-for platforms without a native build (including Windows).
+for platforms without a native build (including Windows — tested there in CI: [`windows-fallback`](https://github.com/thyn-ai/mojo-kernels/actions/workflows/windows-fallback.yml)).
 
 ```python
 import zlib

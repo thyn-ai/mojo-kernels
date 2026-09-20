@@ -27,7 +27,7 @@ pip install dynesty-mojo
 
 Per-platform wheels (macOS arm64, Linux x86_64) carry the native kernel,
 self-contained (the Mojo runtime is vendored into the wheel; nothing to
-compile, no absolute rpaths). On any other platform — including Windows —
+compile, no absolute rpaths). On any other platform
 the same wheel API runs on the vendored NumPy fallback. There is no sdist:
 a source tarball cannot rebuild the native library. numpy is the only
 runtime dependency; **dynesty itself is not a dependency** (it is the
@@ -178,7 +178,13 @@ go missing — so the wrapper **falls back to a vendored NumPy reference**
   wheel-relative. (Redistribution terms for Modular's runtime binaries
   should be confirmed with Modular before any public release.) A pure
   `py3-none-any` fallback wheel can be produced with
-  `DYNESTY_MOJO_ALLOW_PURE_WHEEL=1` (e.g. for Windows).
+  `DYNESTY_MOJO_ALLOW_PURE_WHEEL=1`. That wheel is not tested on Windows
+  in CI, and this package makes no Windows claim: the differential
+  suite's sanity check on the *oracle* itself (dynesty's own `logz`
+  against the analytic truth, within 4σ + 0.15) does not hold on
+  `windows-latest` for the shared seed, so the suite cannot go green
+  there even though the fallback matched both the oracle and the truth
+  in that run.
 
 ## Differential tests
 

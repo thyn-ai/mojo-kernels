@@ -3,7 +3,7 @@
 A drop-in faster replacement for the [`croniter`](https://pypi.org/project/croniter/)
 package's `get_next` / `get_prev` on 5-field cron expressions, powered by a
 clean-room Mojo kernel — with a pure-Python engine for platforms without a
-native build (including Windows). Zero runtime dependencies.
+native build (including Windows — tested there in CI: [`windows-fallback`](https://github.com/thyn-ai/mojo-kernels/actions/workflows/windows-fallback.yml)). Zero runtime dependencies.
 
 ```python
 from datetime import datetime

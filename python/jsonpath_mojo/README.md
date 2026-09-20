@@ -3,8 +3,7 @@
 A fast JSONPath query engine, API-compatible with the
 [`jsonpath-ng`](https://pypi.org/project/jsonpath-ng/) package (the
 `jsonpath_ng.ext` extended dialect), powered by a clean-room Mojo kernel —
-with a vendored pure-Python engine for platforms without a native build
-(including Windows).
+with a vendored pure-Python engine for platforms without a native build (including Windows — tested there in CI: [`windows-fallback`](https://github.com/thyn-ai/mojo-kernels/actions/workflows/windows-fallback.yml)).
 
 ```python
 from jsonpath_mojo import find

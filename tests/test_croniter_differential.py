@@ -48,8 +48,8 @@ def _platform_converts_pre_epoch_timestamps() -> bool:
     test_year_bound_edges) rather than inferred from sys.platform, so a
     runtime that clears it clears every pre-epoch case in the corpus.
     """
-    earliest = datetime(8, 2, 29, tzinfo=timezone.utc).timestamp()
     try:
+        earliest = datetime(8, 2, 29, tzinfo=timezone.utc).timestamp()
         datetime.fromtimestamp(earliest, tz=timezone.utc)
     except (OSError, OverflowError, ValueError):
         return False

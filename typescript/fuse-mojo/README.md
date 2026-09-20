@@ -4,7 +4,7 @@
 the same API, the same results, powered by a clean-room Bitap kernel written
 in [Mojo](https://www.modular.com/mojo). Prebuilt per-platform native
 libraries, a thin Node wrapper, and the vendored Fuse.js itself as an
-automatic fallback on platforms without a native build (e.g. Windows). No
+automatic fallback on platforms without a native build (e.g. Windows — tested there in CI: [`windows-fallback`](https://github.com/thyn-ai/mojo-kernels/actions/workflows/windows-fallback.yml)). No
 Mojo toolchain required at install time.
 
 ```js

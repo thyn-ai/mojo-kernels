@@ -5,7 +5,7 @@ the same API, exactly the same cluster assignments, powered by a clean-room
 Ckmeans.1d.dp kernel written in [Mojo](https://www.modular.com/mojo). Prebuilt
 per-platform native libraries, a thin Node wrapper, and the vendored
 simple-statistics implementation itself as an automatic fallback on platforms
-without a native build (e.g. Windows). No Mojo toolchain required at install
+without a native build (e.g. Windows — tested there in CI: [`windows-fallback`](https://github.com/thyn-ai/mojo-kernels/actions/workflows/windows-fallback.yml)). No Mojo toolchain required at install
 time.
 
 ```js
@@ -156,7 +156,8 @@ is preserved, including:
 
 **Out of scope**: the rest of simple-statistics (this package is exactly
 `ckmeans`), and Windows/native-unsupported platforms (the vendored fallback
-is the product there, bit-identical results). NaN/±Infinity/non-numeric
+is the product there, bit-identical results, tested on Windows in CI:
+[`windows-fallback`](https://github.com/thyn-ai/mojo-kernels/actions/workflows/windows-fallback.yml)). NaN/±Infinity/non-numeric
 array elements are garbage-in for the reference itself; ckmeans-mojo
 reproduces the reference's observable behavior on them (via the JS-sort
 path) but treats them as unsupported input.

@@ -2,8 +2,7 @@
 
 A drop-in faster replacement for the [`ruptures`](https://pypi.org/project/ruptures/)
 change-point detection package, powered by a clean-room Mojo kernel — with a
-vendored pure-Python fallback for platforms without a native build (including
-Windows).
+vendored pure-Python fallback for platforms without a native build (including Windows — tested there in CI: [`windows-fallback`](https://github.com/thyn-ai/mojo-kernels/actions/workflows/windows-fallback.yml)).
 
 ```python
 import ruptures_mojo

@@ -5,7 +5,7 @@ PARTIALLY_TRACKED / MOSTLY_LOST**, plus precision, recall, fragmentation and the
 supporting counts — matching [`motmetrics`](https://pypi.org/project/motmetrics/)
 (py-motmetrics, `cheind/py-motmetrics`) value-for-value, powered by a clean-room
 Mojo kernel, with a vendored pure-Python fallback for platforms without a native
-build (including Windows).
+build (including Windows — tested there in CI: [`windows-fallback`](https://github.com/thyn-ai/mojo-kernels/actions/workflows/windows-fallback.yml)).
 
 ```python
 import motmetrics_mojo as mm
@@ -49,7 +49,8 @@ pip install motmetrics-mojo
 ```
 
 Per-platform wheels (macOS arm64, Linux x86_64) carry the native kernel. On
-any other platform — including Windows — the same wheel API runs on the
+any other platform — including Windows, where CI runs this package's fallback suite
+([`windows-fallback`](https://github.com/thyn-ai/mojo-kernels/actions/workflows/windows-fallback.yml)) — the same wheel API runs on the
 vendored pure-Python fallback, silently and correctly. There is no sdist: a
 source tarball cannot rebuild the native library. The only runtime dependency
 is NumPy; unlike the oracle, pandas and scipy are **not** required.

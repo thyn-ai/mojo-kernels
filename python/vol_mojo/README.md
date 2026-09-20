@@ -61,7 +61,8 @@ pip install vol-mojo
 
 Per-platform wheels (macOS arm64, Linux x86_64) carry the native kernel,
 self-contained (the Mojo runtime is vendored into the wheel; nothing to
-compile, no absolute rpaths). On any other platform — including Windows —
+compile, no absolute rpaths). On any other platform — including Windows, where CI runs this package's fallback suite
+([`windows-fallback`](https://github.com/thyn-ai/mojo-kernels/actions/workflows/windows-fallback.yml)) —
 the same wheel API runs on the vendored pure-Python fallback, silently
 and correctly. There is no sdist: a source tarball cannot rebuild the
 native library.

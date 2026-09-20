@@ -14,8 +14,8 @@ the 3-word negation window, `but` contrast, `no`/`least`/`never so-this`/
 - **Native backend** (macOS arm64, Linux x86_64/aarch64): the rules engine runs
   inside a Mojo shared library; measured **4.1x** faster steady-state (see
   Benchmarks).
-- **Fallback backend** (Windows, or any host where the shared library is
-  missing/broken): a vendored pure-Python implementation of the same rules.
+- **Fallback backend** (Windows — tested there in CI: [`windows-fallback`](https://github.com/thyn-ai/mojo-kernels/actions/workflows/windows-fallback.yml) — or any
+  host where the shared library is missing/broken): a vendored pure-Python implementation of the same rules.
   Results are identical; the switch is silent and automatic.
 - Zero runtime dependencies. The lexicon data is vendored in the wheel.
 
@@ -45,8 +45,9 @@ pip install vader_mojo-<version>-py3-none-<platform>.whl
 Platform wheels (macOS arm64, Linux x86_64/aarch64) carry the compiled kernel
 plus its Mojo runtime libraries, repaired to be self-contained (delocate /
 auditwheel): they work on machines with no Mojo toolchain installed. On
-Windows, or if the shared library fails to load for any reason, the package
-still works — on the fallback backend.
+Windows (where CI runs the fallback suite: [`windows-fallback`](https://github.com/thyn-ai/mojo-kernels/actions/workflows/windows-fallback.yml)), or if the shared
+library fails to load for any reason, the package still works — on the
+fallback backend.
 
 Environment variables:
 
@@ -95,7 +96,8 @@ valences).
   likewise unreachable in its per-character lookup. Both drops are
   behavior-identical and covered by the differential suite.
 - Windows: no Mojo toolchain builds there today, so Windows uses the fallback
-  backend (identical scores, no native speedup).
+  backend (identical scores, no native speedup); CI runs this package's
+  fallback suite on `windows-latest` ([`windows-fallback`](https://github.com/thyn-ai/mojo-kernels/actions/workflows/windows-fallback.yml)).
 
 ## Benchmarks
 

@@ -3,7 +3,7 @@
 FASTA and GenBank parsers that are **record-for-record identical to
 [`Bio.SeqIO`](https://biopython.org/)** (biopython) — powered by a clean-room
 Mojo kernel, with a vendored pure-Python fallback for platforms without a
-native build (including Windows). No runtime dependencies; biopython itself
+native build (including Windows — tested there in CI: [`windows-fallback`](https://github.com/thyn-ai/mojo-kernels/actions/workflows/windows-fallback.yml)). No runtime dependencies; biopython itself
 is used only as the differential-test oracle, never at runtime.
 
 ```python
