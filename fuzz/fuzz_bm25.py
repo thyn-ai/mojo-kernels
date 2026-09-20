@@ -246,11 +246,24 @@ def _degenerate_parameters(case: Case) -> bool:
     floor) there. That happens for ``k1 == 0`` (incl. underflow of
     ``k1 * norm``), ``b == 1`` with an empty document, any ``b > 1`` that
     zeroes ``norm``, non-finite parameters, and BM25L with ``k1 + delta == 0``.
+
+    The same NaN arises through the idf instead of the denominator: BM25Okapi
+    floors every negative idf (a term in more than half the corpus) to
+    ``epsilon * average_idf``, and a finite ``epsilon`` of extreme magnitude
+    (``-1.8e308 * -1.18`` in the run that found it) overflows that floor to
+    infinity, so the reference computes ``inf * 0`` -- NaN -- for a document
+    without the term while the kernel, visiting posted documents only, yields
+    0 or infinity there. ``_okapi_idf_floor`` reproduces the floor the way
+    rank_bm25 computes it.
     """
     if not all(math.isfinite(v) for v in (case.k1, case.b, case.third)):
         return True
     if not case.corpus:
         return False
+    if case.variant == 0:
+        floor = _okapi_idf_floor(case)
+        if floor is not None and not math.isfinite(floor):
+            return True
     doc_len = np.array([len(doc) for doc in case.corpus], dtype=np.float64)
     avgdl = doc_len.sum() / doc_len.shape[0]
     if avgdl == 0:
@@ -269,12 +282,32 @@ def _degenerate_parameters(case: Case) -> bool:
     return False
 
 
+def _okapi_idf_floor(case: Case) -> float | None:
+    """The value rank_bm25's BM25Okapi substitutes for every negative idf --
+    ``epsilon * average_idf`` -- or None when no idf is negative and the floor
+    is never applied. Computed exactly as rank_bm25 0.2.2 does: per term,
+    ``log(N - n + 0.5) - log(n + 0.5)`` with ``n`` the document frequency, and
+    ``average_idf`` the mean over the vocabulary before flooring."""
+    n_docs = len(case.corpus)
+    doc_freq: dict[str, int] = {}
+    for doc in case.corpus:
+        for term in set(doc):
+            doc_freq[term] = doc_freq.get(term, 0) + 1
+    if not doc_freq:
+        return None
+    idf = [math.log(n_docs - n + 0.5) - math.log(n + 0.5) for n in doc_freq.values()]
+    if not any(v < 0 for v in idf):
+        return None
+    return case.third * (sum(idf) / len(idf))
+
+
 ISSUE_DEGENERATE_NAN = KnownIssue(
     key="degenerate-nan",
     url="https://github.com/thyn-ai/mojo-kernels/issues/15",
     title=(
         "bm25-mojo: kernel scores unposted documents 0 where rank_bm25 yields NaN "
-        "(k1 == 0, b == 1 with empty documents, b > 1, non-finite parameters)"
+        "(k1 == 0, b == 1 with empty documents, b > 1, non-finite parameters, an Okapi "
+        "idf floor epsilon * average_idf that overflows to infinity)"
     ),
     applies=_degenerate_parameters,
 )
