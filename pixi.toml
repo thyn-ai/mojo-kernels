@@ -29,6 +29,11 @@ platforms = [
 # Mojo ships as part of MAX; max-core pins the mojo-compiler package.
 max = "26.6.*"
 python = "3.12.*"
+# pip is what the kernel CI workflows and scripts/test_all_*.sh use to
+# provision their pinned, test-only oracle packages into a --target
+# directory (`pixi run python -m pip install --target ... "<oracle>==<pin>"`).
+# The published wrappers never depend on it.
+pip = ">=25"
 
 [target.linux-64.dependencies]
 # Native library repair for the fuse-mojo npm platform package on Linux
