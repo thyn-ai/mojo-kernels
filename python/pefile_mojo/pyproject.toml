@@ -1,0 +1,34 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "pefile-mojo"
+version = "0.1.0"
+description = "Bit-exact hot-loop accelerators for pefile (generate_checksum, import-directory parsing), powered by a Mojo kernel (pure-Python fallback included)."
+readme = "README.md"
+requires-python = ">=3.9"
+license = "Apache-2.0"
+authors = [{ name = "Algenta" }]
+keywords = ["pefile", "pe", "portable-executable", "checksum", "imports", "mojo", "security"]
+classifiers = [
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: Apache Software License",
+  "Programming Language :: Python :: 3",
+  "Topic :: Security",
+  "Topic :: Software Development :: Disassemblers",
+]
+# No runtime dependencies: the package works on bytes and returns plain
+# dataclasses; the Mojo kernel is loaded via ctypes from the wheel itself.
+dependencies = []
+
+[project.urls]
+Repository = "https://github.com/thyn-ai/mojo-kernels"
+
+# Wheels only: the shared library cannot rebuild from an sdist, so no sdist
+# target is offered. Per-platform wheels are produced by CI.
+[tool.hatch.build.targets.wheel]
+packages = ["pefile_mojo"]
+
+[tool.hatch.build.hooks.custom]
+path = "hatch_build.py"
