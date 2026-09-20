@@ -1,0 +1,143 @@
+name: ci-pefile
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Read-only token for every job: the workflow only builds, tests and uploads a
+# build artifact (artifact upload needs no write scope).
+permissions:
+  contents: read
+
+# One run per ref; a newer push to a pull request cancels the run it supersedes.
+# Pushes to main always run to completion.
+concurrency:
+  group: ci-pefile-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  test:
+    name: pefile-mojo differential tests + wheel (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install pixi
+        uses: prefix-dev/setup-pixi@d3f436a425481402e6a95a1d1fc10331c708cd9e # v0.10.2
+        with:
+          # Install the pixi binary only. The tasks below install the environment
+          # lazily on first use, exactly as the previous curl|bash step did.
+          run-install: false
+
+      - name: Install the pixi environment
+        run: pixi install --locked
+
+      - name: Build the pefile Mojo kernel
+        # kernels/pefile/* and scripts/*_pefile.sh are this kernel's disjoint
+        # paths; pixi.toml is intentionally untouched, so the build is invoked
+        # directly with the environment's toolchain on PATH.
+        shell: bash
+        run: |
+          set -e
+          export PATH="$PWD/.pixi/envs/default/bin:$PATH"
+          bash kernels/pefile/build.sh
+
+      - name: Differential suite (native backend, then forced fallback)
+        # The script bootstraps the pinned, hash-verified pefile oracle.
+        shell: bash
+        run: bash scripts/test_all_pefile.sh
+
+      - name: Build + repair the platform wheel (delocate/auditwheel)
+        shell: bash
+        run: |
+          set -e
+          export PATH="$PWD/.pixi/envs/default/bin:$PATH"
+          bash python/pefile_mojo/build_wheel.sh
+
+      - name: Smoke-test the wheel in a clean venv
+        shell: bash
+        run: |
+          set -e
+          python3 -m venv /tmp/pefile-wheel-smoke
+          /tmp/pefile-wheel-smoke/bin/pip install --quiet python/pefile_mojo/dist/*.whl
+          # Hide the pixi env for the smoke: an end user has no Mojo toolchain,
+          # so the wheel must load its kernel purely from its own vendored
+          # libraries (not via the build machine's absolute rpath).
+          repo_root="$PWD"
+          mv .pixi .pixi-hidden
+          trap 'mv "$repo_root/.pixi-hidden" "$repo_root/.pixi"' EXIT
+          cd /tmp
+          /tmp/pefile-wheel-smoke/bin/python - <<'EOF'
+          import pefile_mojo
+
+          info = pefile_mojo.backend_info()
+          assert info["native_available"], f"wheel must carry the native kernel: {info}"
+
+          # Minimal PE32 with one imported function, built inline (no fixtures
+          # on the end-user machine): the same values the differential suite
+          # pins against the oracle.
+          import struct
+
+          def mini_pe():
+              idata = bytearray(0x200)
+              # descriptor 0 at 0x00, null descriptor at 0x14, ILT at 0x28,
+              # IAT at 0x30, hint/name at 0x38, dll name at 0x40
+              struct.pack_into("<IIIII", idata, 0, 0x2028, 0, 0, 0x2040, 0x2030)
+              struct.pack_into("<II", idata, 0x28, 0x2038, 0)
+              struct.pack_into("<II", idata, 0x30, 0x2038, 0)
+              struct.pack_into("<H", idata, 0x38, 0)
+              idata[0x3A:0x40] = b"FuncA\0"
+              idata[0x40:0x49] = b"TEST.dll\0"
+              hdr = bytearray(0x200)
+              hdr[0:2] = b"MZ"
+              struct.pack_into("<I", hdr, 0x3C, 0x40)
+              hdr[0x40:0x44] = b"PE\0\0"
+              struct.pack_into("<HHIIIHH", hdr, 0x44, 0x14C, 1, 0, 0, 0, 0xE0, 0x0102)
+              struct.pack_into(
+                  "<HBBIIIIIIIIIHHHHHHIIIIHHIIIIII",
+                  hdr, 0x58, 0x10B, 0, 0, 0x200, 0x200, 0, 0x1000, 0x1000, 0x2000,
+                  0x400000, 0x1000, 0x200, 6, 0, 0, 0, 6, 0, 0, 0x3000, 0x200, 0x1234,
+                  3, 0, 0x100000, 0x1000, 0x100000, 0x1000, 0, 16,
+              )
+              struct.pack_into("<II", hdr, 0x58 + 96 + 8, 0x2000, 40)
+              struct.pack_into("<8sIIIIIIHHI", hdr, 0x138, b".idata\0\0", 0x200,
+                               0x2000, 0x200, 0x200, 0, 0, 0, 0, 0xC0000040)
+              return bytes(hdr) + bytes(idata)
+
+          blob = mini_pe()
+          off = pefile_mojo.checksum_field_offset(blob)
+          native_cs = pefile_mojo.generate_checksum(blob, off)
+          native_imports = pefile_mojo.parse_imports(blob)
+
+          import os
+          os.environ["PEFILE_MOJO_DISABLE_NATIVE"] = "1"
+          import importlib
+          importlib.reload(pefile_mojo._native)
+          fb_cs = pefile_mojo.generate_checksum(blob, off)
+          fb_imports = pefile_mojo.parse_imports(blob)
+
+          assert native_cs == fb_cs, (native_cs, fb_cs)
+          assert native_imports == fb_imports
+          assert native_imports[0].dll == b"TEST.dll", native_imports
+          assert native_imports[0].imports[0].name == b"FuncA", native_imports
+          # Independently recomputed checksum for this exact blob:
+          data = blob + b"\0" * (-len(blob) % 4)
+          s = 0
+          for i in range(0, len(data), 4):
+              if i == off:
+                  continue
+              s += int.from_bytes(data[i:i+4], "little")
+              if s >= 2**32:
+                  s = (s & 0xFFFFFFFF) + (s >> 32)
+          s = (s & 0xFFFF) + (s >> 16)
+          s = (s + (s >> 16)) & 0xFFFF
+          assert native_cs == s + len(blob), (native_cs, s + len(blob))
+          print("wheel smoke OK:", pefile_mojo.__version__, info["native_source"])
+          EOF
