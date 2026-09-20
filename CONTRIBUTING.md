@@ -211,6 +211,16 @@ ci(fuse): pin patchelf
   `ci`, `chore`, `build`, `refactor`, `test` and `style` never cut a release
   and do not appear in `CHANGELOG.md`. Write the title as the changelog
   line you want users to read; the scope becomes its bold prefix.
+- The squash commit's body is the pull request description, and
+  release-please parses the whole message with a strict Conventional Commits
+  grammar. A message it cannot parse is dropped silently: no changelog line,
+  no part in the version bump, no warning on the pull request. The one
+  construct known to trip it is a `(` on a line that also contains a
+  backtick, without its `)` later on the same line — which is what a
+  backtick-quoted call becomes when it is hard-wrapped mid-argument
+  (`` `f(a, `` on one line, `` b)` `` on the next). Keep such a call on one
+  line or close the parenthesis before wrapping. Plain prose parentheses,
+  Markdown headings, tables, bullets and `#123` references are all fine.
 - Keep the diff focused on one change; unrelated refactors go in their own
   pull request.
 - All CI checks must pass, including on forked-repository pull requests —
