@@ -1,0 +1,141 @@
+name: ci-spatialmath
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Read-only token for every job: the workflow only builds, tests and uploads a
+# build artifact (artifact upload needs no write scope).
+permissions:
+  contents: read
+
+# One run per ref; a newer push to a pull request cancels the run it supersedes.
+# Pushes to main always run to completion.
+concurrency:
+  group: ci-spatialmath-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  test:
+    name: spatialmath-mojo differential tests + wheel (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install pixi
+        uses: prefix-dev/setup-pixi@d3f436a425481402e6a95a1d1fc10331c708cd9e # v0.10.2
+        with:
+          # Install the pixi binary only. The tasks below install the environment
+          # lazily on first `pixi run`, exactly as the previous curl|bash step did;
+          # `pixi install --locked` + caching is a separate, opt-in change.
+          run-install: false
+
+      - name: Install the pinned oracle into .oracle-spatialmath/
+        # spatialmath-python is a test/benchmark oracle only (the differential
+        # suite compares spatialmath_mojo against it element-wise); it is not a
+        # runtime dependency of the published wrapper. Installed with
+        # `pip --target` into an unmanaged directory because `pixi run` prunes
+        # pip-installed packages from the pixi env. Pinned: the oracle must be
+        # the published PyPI release these numbers were measured against.
+        run: |
+          pixi run python -m ensurepip --upgrade
+          pixi run python -m pip install --target .oracle-spatialmath "spatialmath-python==1.1.18"
+
+      - name: Build the spatialmath Mojo kernel
+        run: pixi run bash kernels/spatialmath/build.sh
+
+      - name: Differential suite (native backend, then forced fallback)
+        run: |
+          PYTHONPATH="python/spatialmath_mojo:.oracle-spatialmath" PYTHONNOUSERSITE=1 pixi run python -m pytest tests/test_spatialmath_differential.py tests/test_spatialmath_loader.py -q
+          PYTHONPATH="python/spatialmath_mojo:.oracle-spatialmath" PYTHONNOUSERSITE=1 SPATIALMATH_MOJO_DISABLE_NATIVE=1 pixi run python -m pytest tests/test_spatialmath_differential.py tests/test_spatialmath_loader.py -q
+
+      - name: Build + repair the platform wheel (delocate/auditwheel)
+        run: PYTHONNOUSERSITE=1 pixi run bash python/spatialmath_mojo/build_wheel.sh
+
+      - name: Smoke-test the wheel in a clean venv
+        shell: bash
+        run: |
+          set -e
+          python3 -m venv /tmp/spatialmath-wheel-smoke
+          /tmp/spatialmath-wheel-smoke/bin/pip install --quiet python/spatialmath_mojo/dist/*.whl
+          # Hide the pixi env for the smoke: an end user has no Mojo toolchain,
+          # so the wheel must load its kernel purely from its own vendored
+          # libraries (not via the build machine's absolute rpath).
+          repo_root="$PWD"
+          mv .pixi .pixi-hidden
+          trap 'mv "$repo_root/.pixi-hidden" "$repo_root/.pixi"' EXIT
+          cd /tmp && /tmp/spatialmath-wheel-smoke/bin/python - <<'EOF'
+          import numpy as np
+
+          import spatialmath_mojo as smm
+
+          # Deterministic quickstart values (same on both backends).
+          rng = np.random.default_rng(7)
+          n = 256
+          a = np.repeat(np.eye(4)[np.newaxis], n, axis=0)
+          b = np.repeat(np.eye(4)[np.newaxis], n, axis=0)
+          # simple deterministic rotations about z + translations
+          th = rng.uniform(-np.pi, np.pi, n)
+          a[:, 0, 0] = np.cos(th); a[:, 0, 1] = -np.sin(th)
+          a[:, 1, 0] = np.sin(th); a[:, 1, 1] = np.cos(th)
+          a[:, :3, 3] = rng.normal(0, 1, (n, 3))
+          ph = rng.uniform(-np.pi, np.pi, n)
+          b[:, 0, 0] = np.cos(ph); b[:, 0, 2] = np.sin(ph)
+          b[:, 2, 0] = -np.sin(ph); b[:, 2, 2] = np.cos(ph)
+          b[:, :3, 3] = rng.normal(0, 1, (n, 3))
+          c = smm.compose(a, b)
+          assert c.shape == (n, 4, 4) and c.dtype == np.float64
+          # per-pose ground truth, computed inline
+          ref = np.stack([a[i] @ b[i] for i in range(n)])
+          np.testing.assert_allclose(c, ref, rtol=0, atol=1e-12)
+          ai = smm.inverse(a)
+          np.testing.assert_allclose(
+              np.stack([a[i] @ ai[i] for i in range(n)])[:, :3, :3],
+              np.broadcast_to(np.eye(3), (n, 3, 3)),
+              rtol=0, atol=1e-12,
+          )
+          pts = rng.normal(0, 1, (32, 3))
+          out = smm.transform(a, pts)
+          assert out.shape == (n, 32, 3)
+          np.testing.assert_allclose(out[0, 0], (a[0] @ np.r_[pts[0], 1.0])[:3], rtol=0, atol=1e-12)
+          info = smm.backend_info()
+          assert info["native_available"], f"wheel must carry the native kernel: {info}"
+          print("wheel smoke OK:", smm.__version__, info["native_source"])
+          EOF
+
+      - name: Smoke-test the pure wheel (fallback-only) in a clean venv
+        shell: bash
+        run: |
+          set -e
+          cd python/spatialmath_mojo
+          SPATIALMATH_MOJO_ALLOW_PURE_WHEEL=1 pixi run python -m build --wheel --no-isolation --outdir dist-pure .
+          python3 -m venv /tmp/spatialmath-pure-wheel-smoke
+          /tmp/spatialmath-pure-wheel-smoke/bin/pip install --quiet dist-pure/*.whl
+          cd /tmp && /tmp/spatialmath-pure-wheel-smoke/bin/python - <<'EOF'
+          import numpy as np
+
+          import spatialmath_mojo as smm
+
+          rng = np.random.default_rng(7)
+          a = np.repeat(np.eye(4)[np.newaxis], 8, axis=0)
+          a[:, :3, 3] = rng.normal(0, 1, (8, 3))
+          c = smm.compose(a, a)
+          np.testing.assert_allclose(c[:, :3, 3], 2.0 * a[:, :3, 3], rtol=0, atol=1e-12)
+          info = smm.backend_info()
+          assert not info["native_available"], f"pure wheel must use the fallback: {info}"
+          print("pure-wheel smoke OK:", smm.__version__)
+          EOF
+
+      - name: Upload wheel
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: spatialmath-mojo-wheel-${{ matrix.os }}
+          path: python/spatialmath_mojo/dist/*.whl
+          retention-days: 14
