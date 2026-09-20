@@ -56,17 +56,22 @@ and minimise it, then keep the minimal input as a seed:
 ```bash
 PYTHONPATH=python/bm25_mojo pixi run python fuzz/fuzz_bm25.py --regression .fuzz-work/crash-...
 pixi run -e fuzz fuzz-bm25 -- -minimize_crash=1 -exact_artifact_path=.fuzz-work/minimal .fuzz-work/crash-...
-cp .fuzz-work/minimal fuzz/corpus/bm25/<descriptive-name>.bin
+PYTHONPATH=python/bm25_mojo pixi run python -c 'import sys; sys.path.insert(0, "fuzz"); import fuzz_bm25; print(fuzz_bm25.decode(open(".fuzz-work/minimal", "rb").read()))'
 ```
+
+The last line prints the minimal input as a `Case`; add it to
+`fuzz/seed_corpus.py` (see below) rather than copying the file: that script
+owns `fuzz/corpus/<name>/` and removes any file it did not generate.
 
 A failing fast-check property prints the shrunk counterexample together
 with the seed and path that reproduce it; replay with
 `FC_SEED=<seed> FC_PATH=<path> npm run test:property` in
 `typescript/fuse-mojo`.
 
-A divergence is either a bug to fix (the seed then guards the fix as a
-regression test) or, when the fix needs a maintainer decision, a **known
-issue**: open a GitHub issue, add a `KnownIssue` entry to the harness whose
+A divergence is either a bug to fix -- the minimal case then goes into
+`fuzz/seed_corpus.py` as a `regression-<name>-<n>.bin` reproducer, which the
+replay runs forever and the generator asserts stays clean -- or, when the fix
+needs a maintainer decision, a **known issue**: open a GitHub issue, add a `KnownIssue` entry to the harness whose
 predicate names exactly the input class and whose comparison accepts exactly
 the observed shape of the disagreement, and check the minimised reproducer in
 as `fuzz/corpus/<name>/known-issue-<key>-<n>.bin`. The replay then requires
@@ -89,7 +94,7 @@ fuzz/_harness.py        ByteCursor/ByteWriter, KnownIssue, regression replay, CL
 fuzz/fuzz_bm25.py       bm25-mojo harness: decode/encode, KNOWN_ISSUES, test_one_input
 fuzz/fuzz_cclib.py      cclib-mojo harness
 fuzz/seed_corpus.py     regenerates fuzz/corpus/ deterministically and checks every reproducer
-fuzz/corpus/<name>/     random-NN.bin (fixed-seed byte strings) + known-issue-<key>-<n>.bin
+fuzz/corpus/<name>/     random-NN.bin (fixed-seed byte strings) + known-issue-<key>-<n>.bin + regression-<name>-<n>.bin
 tests/test_fuzz_regression_{bm25,cclib}.py   pytest replay, one test per seed, both backends
 typescript/fuse-mojo/tests/parity.property.test.js   fast-check properties (node --test)
 ```
@@ -97,5 +102,6 @@ typescript/fuse-mojo/tests/parity.property.test.js   fast-check properties (node
 `python fuzz/seed_corpus.py bm25` (with `PYTHONPATH=python/bm25_mojo`, inside
 the pixi environment, kernel built) rewrites the bm25 corpus from its fixed
 seeds and asserts that each `known-issue-*` seed round-trips through
-`encode`/`decode` and still reproduces its issue; `cclib` likewise. A clean
+`encode`/`decode` and still reproduces its issue, and that each
+`regression-*` seed round-trips and replays clean; `cclib` likewise. A clean
 `git status` afterwards means the corpus is what the script says it is.
