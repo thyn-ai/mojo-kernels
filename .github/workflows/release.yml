@@ -19,9 +19,13 @@
 # The Release itself is the one release-please published when the release
 # pull request merged (release-please.yml): creating it is what pushed the
 # tag this workflow runs for, so the assets are attached to that Release and
-# never to a second one. Only when no release exists for the tag (a
-# hand-pushed tag, which is not a supported path) is one created with
-# generated notes.
+# never to a second one; its notes are kept. Where there are no such notes
+# (a Release whose body is blank, a same-tag draft, or no release at all for
+# a hand-pushed tag, which is not a supported path) the body is composed by
+# scripts/release_notes.py from the tagged commit's CHANGELOG.md, the
+# `## [X.Y.Z]` entry followed by GitHub's generated "What's Changed" list,
+# never from a draft body. `preflight` refuses a tree whose CHANGELOG.md has
+# no entry for the version before anything is built.
 #
 # Registries are gated. Wheels go to PyPI (Trusted Publishing, PEP 740
 # attestations) and tarballs to npm (Trusted Publishing, `--provenance`) only
@@ -252,6 +256,20 @@ jobs:
             echo "dry_run=$DRY_RUN"
           } >> "$GITHUB_OUTPUT"
           echo "Releasing $TAG (version $VERSION) from $(git rev-parse HEAD); dry_run=$DRY_RUN prerelease=$PRERELEASE"
+
+      # The release notes are the CHANGELOG.md entry for the version (written
+      # by release-please in the release pull request), so a tree without a
+      # `## [X.Y.Z]` entry is refused here, before anything is built; a dry
+      # run checks the tree's own version. The composer's unit tests run
+      # first, with the interpreter the runner provides (standard library
+      # only), so the `release` job never runs an untested composer.
+      - name: Check CHANGELOG.md has the entry for this version
+        env:
+          VERSION: ${{ steps.resolve.outputs.version }}
+        run: |
+          set -euo pipefail
+          python3 -m unittest discover -s tests -p test_release_notes.py
+          python3 scripts/release_notes.py check --changelog CHANGELOG.md --version "$VERSION"
 
   # Same steps as ci.yml, ci-cclib.yml and ci-fuse.yml, on the same runners:
   # build the kernels, run every differential suite (native, then forced
@@ -502,9 +520,13 @@ jobs:
   # Attaches the signed assets to the GitHub Release for the tag. On the
   # supported path that Release already exists: release-please published it
   # (notes = the CHANGELOG entry) when the release pull request merged, and
-  # creating it is what pushed the tag this run is for; it is used as-is. A
-  # draft for the tag is published; only if there is neither is a release
-  # created with generated notes (a hand-pushed tag). Skipped on a dry run.
+  # creating it is what pushed the tag this run is for; it is used as-is,
+  # notes included. Everywhere else the notes are composed from the tagged
+  # commit's CHANGELOG.md: a published release whose body is blank gets
+  # them, a draft for the tag is published with them in place of whatever
+  # its body was, and a tag with no release at all (a hand-pushed tag) gets
+  # one created with them. A draft's body is never published. Skipped on a
+  # dry run.
   release:
     name: publish the GitHub Release
     needs: [preflight, sign]
@@ -514,10 +536,40 @@ jobs:
     permissions:
       contents: write # create or update the Release and upload its assets
     steps:
+      # The tagged commit's CHANGELOG.md and the composer, nothing else is
+      # read from the tree; the token is not kept in the checkout.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: release-assets
           path: release-assets
+
+      # The `## [X.Y.Z]` entry of CHANGELOG.md (preflight already checked it
+      # exists), then GitHub's generated list of merged pull requests since
+      # the previous release. generate-notes only reads; it creates nothing.
+      # The composer fails the job if the result lacks the entry's heading.
+      - name: Compose the release notes from CHANGELOG.md
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ needs.preflight.outputs.tag }}
+          VERSION: ${{ needs.preflight.outputs.version }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          # `// ""`: a null body must reach the composer as an empty file, not
+          # as the four characters `null`.
+          gh api -X POST "repos/${GH_REPO}/releases/generate-notes" \
+            -f tag_name="$TAG" -f target_commitish="$SHA" --jq '.body // ""' > "$RUNNER_TEMP/generated.md"
+          python3 scripts/release_notes.py compose \
+            --changelog CHANGELOG.md --version "$VERSION" \
+            --generated "$RUNNER_TEMP/generated.md" --out "$RUNNER_TEMP/notes.md"
+          echo "::group::Composed release notes for $TAG"
+          cat "$RUNNER_TEMP/notes.md"
+          echo "::endgroup::"
 
       - name: Find or create the Release for the tag
         env:
@@ -529,24 +581,34 @@ jobs:
         run: |
           set -euo pipefail
           api="repos/${GH_REPO}/releases"
+          notes="$RUNNER_TEMP/notes.md"
           # --slurp yields one array per page; `add` flattens them and `// []`
           # keeps the result an array even if no page came back.
           releases="$(gh api --paginate --slurp "${api}?per_page=100" | jq 'add // []')"
 
           # A published release for the tag wins over a draft with the same
           # tag name (a draft owns no tag, so both can exist at once): the
-          # published one is release-please's, and its notes are kept.
+          # published one is release-please's, and its notes are kept. Only
+          # a blank body is filled in, with the composed notes.
           existing="$(jq -r --arg tag "$TAG" '[.[] | select(.tag_name == $tag and (.draft | not))] | first | .id // empty' <<<"$releases")"
           if [ -n "$existing" ]; then
-            echo "Release $existing already exists for $TAG (release-please published it when the release pull request merged); keeping it and its notes."
+            body="$(jq -r --arg id "$existing" '[.[] | select((.id|tostring) == $id)] | first | .body // ""' <<<"$releases")"
+            if [ -z "$(printf '%s' "$body" | tr -d '[:space:]')" ]; then
+              echo "Release $existing already exists for $TAG but its notes are blank; writing the notes composed from CHANGELOG.md."
+              gh api -X PATCH "${api}/${existing}" -F body=@"$notes" --silent
+            else
+              echo "Release $existing already exists for $TAG (release-please published it when the release pull request merged); keeping it and its notes."
+            fi
           else
             draft="$(jq -r --arg tag "$TAG" '[.[] | select(.tag_name == $tag and .draft)] | first | .id // empty' <<<"$releases")"
             if [ -n "$draft" ]; then
-              echo "Release $draft is a draft for $TAG; publishing it against $SHA (notes kept)."
-              gh api -X PATCH "${api}/${draft}" -f target_commitish="$SHA" -F draft=false -F prerelease="$PRERELEASE" --silent
+              # A draft's body is nobody's reviewed text (release-please does
+              # not create drafts); the composed notes replace it.
+              echo "Release $draft is a draft for $TAG; publishing it against $SHA with the notes composed from CHANGELOG.md."
+              gh api -X PATCH "${api}/${draft}" -f target_commitish="$SHA" -F draft=false -F prerelease="$PRERELEASE" -F body=@"$notes" --silent
             else
-              echo "No release found for $TAG; creating one with generated notes."
-              args=(--verify-tag --title "$TAG" --generate-notes)
+              echo "No release found for $TAG; creating one with the notes composed from CHANGELOG.md."
+              args=(--verify-tag --title "$TAG" --notes-file "$notes")
               if [ "$PRERELEASE" = "true" ]; then args+=(--prerelease); fi
               gh release create "$TAG" "${args[@]}"
             fi

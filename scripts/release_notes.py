@@ -1,0 +1,159 @@
+#!/usr/bin/env python3
+"""Compose the body of a GitHub Release from CHANGELOG.md.
+
+The body of the Release for version X.Y.Z is that version's entry in
+CHANGELOG.md -- the ``## [X.Y.Z]...`` heading (release-please writes
+``## [X.Y.Z](compare-url) (YYYY-MM-DD)``, the hand-written 0.1.0 entry
+``## [0.1.0] - 2026-09-20``; both match) and everything up to the next
+``## `` heading, minus the link-reference definitions Keep a Changelog puts
+at the end of the file -- followed by GitHub's generated "What's Changed"
+list (the ``generate-notes`` API) when one is supplied.
+
+On the supported path release-please publishes the Release, with the
+CHANGELOG entry as its notes, before ``release.yml`` runs, and those notes
+are kept. This composer supplies the body everywhere there are no such
+notes -- a Release whose body is blank, a same-tag draft, a hand-pushed tag
+with no release -- so a draft's body is never what gets published. The
+composed body must contain the entry's heading, or the workflow fails before
+it touches the Release: that is the check both subcommands make.
+
+    release_notes.py check   --changelog CHANGELOG.md --version 0.1.0
+    release_notes.py compose --changelog CHANGELOG.md --version 0.1.0 \\
+        [--generated generated.md] --out notes.md
+
+``check`` prints the heading it found (``preflight`` runs it before anything
+is built); ``compose`` writes the body (the ``release`` job runs it). Both
+exit 1 with a message on stderr when CHANGELOG.md has no section for the
+version or the section is empty. Standard library only, Python 3.9+.
+
+Run the tests with ``python3 -m unittest discover -s tests -p test_release_notes.py``.
+"""
+
+from __future__ import annotations
+
+import argparse
+import re
+import sys
+from pathlib import Path
+
+# A Keep a Changelog version heading: `## [0.1.0] - 2026-09-20`, `## [0.2.0-rc.1]`,
+# `## [Unreleased]`. Group 1 is what is inside the brackets.
+HEADING_RE = re.compile(r"^## \[([^\]]+)\](.*)$")
+# Any second-level heading ends a section, whether or not it is a version.
+SECTION_END_RE = re.compile(r"^## ")
+# A link-reference definition line: `[0.1.0]: https://...`. Keep a Changelog
+# collects the version links in one block at the very end of the file, which
+# makes them the tail of the last section; only that trailing block is
+# dropped. A definition that a section's own text refers to
+# (`[text][bug-42]` ... `[bug-42]: https://...`) is content and stays.
+LINK_DEFINITION_RE = re.compile(r"^\[[^\]]+\]:\s+\S+\s*$")
+
+
+class ChangelogError(ValueError):
+    """CHANGELOG.md has no usable section for the requested version."""
+
+
+def find_heading(changelog: str, version: str) -> str:
+    """Return the heading line of the section for `version`."""
+    section = extract_section(changelog, version)
+    return section.splitlines()[0]
+
+
+def extract_section(changelog: str, version: str) -> str:
+    """Return the CHANGELOG.md section for `version`, heading included.
+
+    The section runs from its heading to the line before the next `## `
+    heading (or the end of the file). A block of link-reference definitions
+    that ends the section (the file-level `[X.Y.Z]: https://...` list Keep a
+    Changelog puts last) is dropped, as are surrounding blank lines; a
+    definition followed by more content is part of the section and kept.
+    Raises ChangelogError if there is no heading for exactly this version or
+    the section has no content.
+    """
+    if version.lower() == "unreleased":
+        raise ChangelogError("the [Unreleased] section is not a release; cut it as a [X.Y.Z] section first")
+    lines = changelog.splitlines()
+    start = None
+    for index, line in enumerate(lines):
+        match = HEADING_RE.match(line)
+        if match and match.group(1) == version:
+            start = index
+            break
+    if start is None:
+        raise ChangelogError(f"CHANGELOG.md has no `## [{version}]` section")
+    end = len(lines)
+    for index in range(start + 1, len(lines)):
+        if SECTION_END_RE.match(lines[index]):
+            end = index
+            break
+    body = _drop_trailing_link_definitions(lines[start + 1 : end])
+    body_text = "\n".join(body).strip("\n")
+    if not body_text.strip():
+        raise ChangelogError(f"the `## [{version}]` section of CHANGELOG.md is empty")
+    return lines[start].rstrip() + "\n\n" + body_text + "\n"
+
+
+def _drop_trailing_link_definitions(body: list[str]) -> list[str]:
+    """Remove the link-reference definitions (and blank lines) that end `body`.
+
+    Scans backwards from the end while every line is blank or a definition,
+    so only the trailing block goes; the first line of real content stops the
+    scan and everything before it, definitions included, is kept.
+    """
+    end = len(body)
+    while end > 0 and (not body[end - 1].strip() or LINK_DEFINITION_RE.match(body[end - 1])):
+        end -= 1
+    return body[:end]
+
+
+def compose(changelog: str, version: str, generated: str | None = None) -> str:
+    """Compose the Release body: the CHANGELOG section, then the generated notes.
+
+    `generated` is the body GitHub's generate-notes API returned (or None /
+    blank, in which case the section stands alone). The result always
+    contains the section heading; that invariant is asserted here so a
+    caller cannot publish a body without it.
+    """
+    section = extract_section(changelog, version)
+    parts = [section.rstrip("\n")]
+    if generated and generated.strip():
+        parts.append(generated.strip("\n"))
+    body = "\n\n".join(parts) + "\n"
+    heading = section.splitlines()[0]
+    if heading not in body.splitlines():
+        raise AssertionError(f"composed body lost the CHANGELOG heading {heading!r}")
+    return body
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    check = sub.add_parser("check", help="verify CHANGELOG.md has a non-empty section for the version")
+    check.add_argument("--changelog", type=Path, required=True)
+    check.add_argument("--version", required=True, help="X.Y.Z, without the leading v")
+
+    comp = sub.add_parser("compose", help="write the Release body for the version")
+    comp.add_argument("--changelog", type=Path, required=True)
+    comp.add_argument("--version", required=True, help="X.Y.Z, without the leading v")
+    comp.add_argument("--generated", type=Path, help="file holding GitHub's generated notes (optional)")
+    comp.add_argument("--out", type=Path, required=True)
+
+    args = parser.parse_args(argv)
+    changelog = args.changelog.read_text(encoding="utf-8")
+    try:
+        if args.command == "check":
+            print(find_heading(changelog, args.version))
+        else:
+            generated = args.generated.read_text(encoding="utf-8") if args.generated else None
+            body = compose(changelog, args.version, generated)
+            args.out.write_text(body, encoding="utf-8")
+            print(f"wrote {args.out} ({len(body.splitlines())} lines; heading: {body.splitlines()[0]})")
+    except ChangelogError as error:
+        print(f"release_notes: {error}", file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
