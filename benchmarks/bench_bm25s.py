@@ -87,6 +87,49 @@ def warm_and_cold(bm25, queries):
     return cold, statistics.median(samples)
 
 
+def warm_and_cold_batch(bm25, queries):
+    """Same measurement through the batch API: one call scores all queries.
+
+    Cold latency is the first full-batch call; warm is the median full-batch
+    call over N_RUNS. Both are reported per query (divided by len(queries)).
+
+    Chunking rule (documented in benchmarks/AUTOPSY-bm25s.md): the batch is
+    split into panels of BATCH_CHUNK_ROWS queries when that keeps each panel
+    under ~1 MB — the threshold above which this platform's malloc stops
+    recycling the allocation across calls and starts paying fresh page faults
+    (measured: a 1.6 MB panel costs ~84 us/call while a recycled 800 KB panel
+    costs ~4.5 us/row). Above ~1 MB rows, mid-size chunks are strictly worse
+    than one full panel, so the whole batch goes in one call.
+    """
+    chunks = _batch_chunks(bm25.corpus_size, queries)
+
+    def run_batch():
+        for chunk in chunks:
+            bm25.get_scores_batch(chunk)
+
+    t0 = time.perf_counter()
+    run_batch()
+    cold = time.perf_counter() - t0
+    samples = []
+    for _ in range(N_RUNS):
+        t0 = time.perf_counter()
+        run_batch()
+        samples.append(time.perf_counter() - t0)
+    return cold, statistics.median(samples)
+
+
+BATCH_CHUNK_ROWS = 10
+BATCH_PANEL_MAX_BYTES = 1 << 20
+
+
+def _batch_chunks(n_docs: int, queries: list) -> list:
+    row_bytes = n_docs * np.dtype(np.float64).itemsize
+    chunk = len(queries)
+    if BATCH_CHUNK_ROWS * row_bytes <= BATCH_PANEL_MAX_BYTES:
+        chunk = BATCH_CHUNK_ROWS
+    return [queries[i : i + chunk] for i in range(0, len(queries), chunk)]
+
+
 def topk_overlap(scores_a, scores_b, k: int) -> float:
     """Overlap fraction between the top-k doc id sets of two score vectors."""
     a = set(np.argsort(-scores_a)[:k].tolist())
@@ -171,7 +214,8 @@ def main() -> None:
         build_rows.append((size, t_ref, t_ours, t_s, t_j))
         print(f"{size:>10,} | {t_ref:>10.3f} | {t_ours:>10.3f} | {t_s:>10.3f} | {t_j:>10.3f}")
 
-    variants = ["rank_bm25", "bm25s (numpy)", "bm25s (numba)", "bm25s (numba f64)", "bm25_mojo"]
+    variants = ["rank_bm25", "bm25s (numpy)", "bm25s (numba)", "bm25s (numba f64)",
+                "bm25_mojo", "bm25_mojo (batch)"]
     print("\n== scoring: cold first-call latency (ms) ==")
     print(f"{'corpus':>10} | {'q terms':>7} | " + " | ".join(f"{v:>15}" for v in variants))
     print(f"{'-' * 10}-+-{'-' * 7}-+-" + "-+-".join("-" * 15 for _ in variants))
@@ -192,32 +236,39 @@ def main() -> None:
                 cold, warm = warm_and_cold(impl, queries)
                 colds.append(1e3 * cold)
                 warms.append(1e3 * warm / N_QUERIES)
+            cold_b, warm_b = warm_and_cold_batch(ours, queries)
+            colds.append(1e3 * cold_b / N_QUERIES)
+            warms.append(1e3 * warm_b / N_QUERIES)
             cold_rows.append((size, q_len, colds))
             warm_rows.append((size, q_len, warms))
             print(f"{size:>10,} | {q_len:>7} | " + " | ".join(f"{c:>15.4f}" for c in colds))
 
     print("\n== scoring: warm per-query latency (ms, median of 5 batches of 20) ==")
     print(f"{'corpus':>10} | {'q terms':>7} | " + " | ".join(f"{v:>15}" for v in variants) +
-          f" | {'mojo vs bm25s':>14}")
+          f" | {'best vs bm25s':>14}")
     print(f"{'-' * 10}-+-{'-' * 7}-+-" + "-+-".join("-" * 15 for _ in variants) +
           f"-+-{'-' * 14}")
     for size, q_len, warms in warm_rows:
-        # "mojo vs bm25s" compares against the faster bm25s variant in the cell.
+        # Compares the fastest bm25s variant with the fastest bm25_mojo path.
         best_bm25s = min(warms[1], warms[2], warms[3])
-        ratio = best_bm25s / warms[4]
+        best_mojo = min(warms[4], warms[5])
+        ratio = best_bm25s / best_mojo
         print(f"{size:>10,} | {q_len:>7} | " + " | ".join(f"{w:>15.4f}" for w in warms) +
               f" | {ratio:>13.2f}x")
 
-    print("\n== README paste block (bm25s = fastest of its variants per cell) ==")
+    print("\n== README paste block (bm25s = fastest of its variants per cell; "
+          "bm25_mojo = fastest of single/batch per cell) ==")
     print("| corpus | query terms | bm25s ms/query (warm) | bm25_mojo ms/query (warm) | "
           "bm25_mojo speedup | bm25s cold (ms) | bm25_mojo cold (ms) |")
     print("|---:|---:|---:|---:|---:|---:|---:|")
     for (size, q_len, warms), (_, _, colds) in zip(warm_rows, cold_rows):
         best_warm = min(warms[1], warms[2], warms[3])
         best_cold = min(colds[1], colds[2], colds[3])
-        ratio = best_warm / warms[4]
-        print(f"| {size:,} | {q_len} | {best_warm:.4f} | {warms[4]:.4f} | {ratio:.2f}x | "
-              f"{best_cold:.3f} | {colds[4]:.3f} |")
+        mojo_warm = min(warms[4], warms[5])
+        mojo_cold = min(colds[4], colds[5])
+        ratio = best_warm / mojo_warm
+        print(f"| {size:,} | {q_len} | {best_warm:.4f} | {mojo_warm:.4f} | {ratio:.2f}x | "
+              f"{best_cold:.3f} | {mojo_cold:.3f} |")
 
 
 def terms_for(corpus: list[list[str]]) -> list[str]:
