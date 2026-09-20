@@ -35,8 +35,8 @@ jobs:
         run: pixi run bash kernels/pypdf-filters/build.sh
 
       - name: Differential suite (native backend, then forced fallback)
-        # The script pip-installs the pinned pypdf oracle OUTSIDE the pixi
-        # env (pixi.toml is shared repo infrastructure and stays untouched).
+        # The pypdf oracle (pypdf==6.19.0) comes from pixi.toml
+        # [pypi-dependencies], pinned and lock-verified.
         run: |
           PYTHONPATH=python/pypdf_filters_mojo PYTHONNOUSERSITE=1 \
             pixi run bash scripts/test_all_pypdf_filters.sh

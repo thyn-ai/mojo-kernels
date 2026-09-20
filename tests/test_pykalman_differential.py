@@ -5,9 +5,9 @@ kernel and once with PYKALMAN_MOJO_DISABLE_NATIVE=1 (forced pure-NumPy
 fallback). Both backends must agree with pykalman within 1e-10 everywhere
 (measured agreement is at the 1e-14 level on these seeded systems).
 
-The oracle is the published PyPI package (pykalman==0.11.2, installed into
-the environment by CI; it works unmodified on numpy 2.x). Systems are random
-but seeded and stable (transition spectral radius < 1) with SPD,
+The oracle is the published PyPI package (pykalman==0.11.2, pinned in
+pixi.toml [pypi-dependencies]; it works unmodified on numpy 2.x). Systems
+are random but seeded and stable (transition spectral radius < 1) with SPD,
 well-conditioned covariances, transition/observation offsets, and masked
 observations.
 """
@@ -21,7 +21,7 @@ import pytest
 
 pykalman = pytest.importorskip(
     "pykalman",
-    reason="pykalman oracle not installed (CI: pip install pykalman==0.11.2)",
+    reason="pykalman oracle not installed (pixi.toml pins pykalman==0.11.2)",
 )
 
 import pykalman_mojo

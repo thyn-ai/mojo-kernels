@@ -5,8 +5,8 @@ Mojo kernel and once with PDF_MOJO_DISABLE_NATIVE=1 (forced pure-Python
 fallback). Both backends must agree with pypdf EXACTLY (byte-equal, zero
 tolerance) on every stream.
 
-The oracle is the published PyPI package, pinned to pypdf==6.19.0 (CI
-installs it explicitly; it is never a runtime dependency of pdf_mojo).
+The oracle is the published PyPI package, pinned to pypdf==6.19.0 in
+pixi.toml [pypi-dependencies]; it is never a runtime dependency of pdf_mojo.
 The predicted/LZW streams are synthetic: built locally from fixed seeds by
 the fresh encoders in test_pypdf_filters_fixtures.py.
 """

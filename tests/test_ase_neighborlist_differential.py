@@ -9,8 +9,8 @@ summation orders can flip the strict ``<`` comparison there, for random
 inputs this is measure-zero (the suite asserts the exclusion count stays
 zero across the whole corpus).
 
-Oracle: ``ase`` 3.26.0 from PyPI (installed into a scratch directory by the
-test script; see scripts/test_all_ase_neighborlist.sh). ASE behavior was
+Oracle: ``ase`` 3.26.0 from PyPI (pinned in pixi.toml [pypi-dependencies];
+see scripts/test_all_ase_neighborlist.sh). ASE behavior was
 probed black-box; the contract implemented is documented in
 ``ase_mojo.core``.
 
@@ -26,7 +26,7 @@ import numpy as np
 import pytest
 
 pnl_oracle = pytest.importorskip(
-    "ase.neighborlist", reason="ASE oracle not installed (set ASE_ORACLE_SITE)"
+    "ase.neighborlist", reason="ASE oracle not installed (pixi.toml pins ase==3.26.0)"
 )
 from ase import Atoms  # noqa: E402
 from ase.neighborlist import NeighborList  # noqa: E402

@@ -1,23 +1,22 @@
 #!/usr/bin/env bash
 # Full uproot-mojo differential suite: once against the native kernel, once
 # with the pure-Python fallback forced on. The oracle deps (uproot/awkward)
-# and the wrapper's runtime dep (cramjam) are not in the repo's pixi
-# manifest, so this script bootstraps them into a throwaway target dir
-# (pinned versions; override with UPROOT_MOJO_DEPS_DIR to reuse one).
+# and the wrapper's runtime dep (cramjam) come from the repo pixi environment
+# (pixi.toml [pypi-dependencies], pinned and lock-verified).
 #
-# Run from the repo root:  bash scripts/test_all_uproot-branches.sh
+# Run from the repo root inside the pixi environment:
+#   pixi run bash scripts/test_all_uproot-branches.sh
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-DEPS_DIR="${UPROOT_MOJO_DEPS_DIR:-/tmp/uproot-branches-deps}"
-if ! PYTHONPATH="$DEPS_DIR" python -c "import uproot, awkward, cramjam" >/dev/null 2>&1; then
-  echo "== bootstrapping oracle deps into $DEPS_DIR =="
-  python -m pip install --quiet --target "$DEPS_DIR" \
-    "uproot==5.7.6" "awkward==2.14.0" "cramjam==2.12.1"
-fi
+python -c "import uproot, awkward, cramjam" 2>/dev/null || {
+  echo "error: the uproot/awkward/cramjam oracle packages are not importable;" >&2
+  echo "       run inside the pixi environment (pixi install)" >&2
+  exit 1
+}
 
-export PYTHONPATH="python/uproot-branches_mojo:$DEPS_DIR"
+export PYTHONPATH="python/uproot-branches_mojo"
 export PYTHONNOUSERSITE=1
 
 SUITE="tests/test_uproot-branches_differential.py tests/test_uproot-branches_loader.py"

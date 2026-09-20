@@ -35,6 +35,8 @@ jobs:
         run: pixi run bash kernels/ase_neighborlist/build.sh
 
       - name: Differential suite (native backend, then forced fallback)
+        # The ASE oracle (ase==3.26.0) comes from pixi.toml
+        # [pypi-dependencies], pinned and lock-verified.
         run: pixi run bash scripts/test_all_ase_neighborlist.sh
 
       - name: Build + repair the platform wheel (delocate/auditwheel)
