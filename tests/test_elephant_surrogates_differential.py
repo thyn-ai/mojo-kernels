@@ -27,6 +27,7 @@ the test runner); tests that need it skip cleanly when it is absent.
 from __future__ import annotations
 
 import os
+import random
 import subprocess
 import sys
 import textwrap
@@ -54,7 +55,15 @@ DITHER = 15.0
 # Statistical thresholds (documented in the module docstring).
 KS_P_MIN = 1e-3
 SURVIVOR_FRAC_TOL = 0.02
-OCCUPANCY_ALPHA = 0.05  # Bonferroni-corrected over bins
+# Family-wise alpha for the per-bin occupancy z-tests, Bonferroni-corrected
+# over bins. 0.001 (not 0.05): these gates hunt SEMANTIC divergences (wrong
+# dither width, off-by-one bins, wrong edge handling), which produce z >> 10,
+# so a 0.1% family-wise rate keeps full power while a fixed seeded draw sits
+# far from the threshold. All oracle draws are fully seeded (numpy AND
+# stdlib random — elephant's refractory path uses random.random()), so the
+# statistics are deterministic across machines; the margin is insurance
+# against toolchain-version wobble only.
+OCCUPANCY_ALPHA = 0.001
 
 
 def _neo_trains(trains_ms: list[np.ndarray]) -> list[neo.SpikeTrain]:
@@ -67,6 +76,7 @@ def _neo_trains(trains_ms: list[np.ndarray]) -> list[neo.SpikeTrain]:
 def _oracle_binned_surrogates(trains_ms, n_surr, method="dither_spikes", seed=0):
     """Reference path: spade's _generate_binned_surrogates -> bool arrays."""
     np.random.seed(seed)
+    random.seed(seed)  # some oracle paths draw from stdlib random too
     sts = _neo_trains(trains_ms)
     out = [
         bst.to_bool_array()
@@ -400,6 +410,7 @@ def test_dither_displacement_distribution_matches_oracle(position):
     """Single-spike displacement: occupied-bin distribution vs reference."""
     n_surr = 8000
     np.random.seed(0)
+    random.seed(0)  # defense: some oracle paths draw from stdlib random
     oracle_bins = np.empty(n_surr)
     st = _neo_trains([[position]])[0]
     for k in range(n_surr):
@@ -445,6 +456,7 @@ def test_dither_edges_false_clamps_like_oracle(position):
     so both sides drop at the same rate."""
     n_surr = 8000
     np.random.seed(0)
+    random.seed(0)  # defense: some oracle paths draw from stdlib random
     st = _neo_trains([[position]])[0]
     oracle_bins = np.empty(n_surr)
     for k in range(n_surr):
@@ -478,6 +490,11 @@ def test_dither_refractory_matches_oracle_distribution():
     n_surr = 2500
     refr_ms = 5.0
     np.random.seed(0)
+    # elephant's refractory path draws the per-spike displacement with the
+    # stdlib `random` module (random.random()), not numpy's RNG — seed both,
+    # otherwise the oracle draw differs between processes and the occupancy
+    # statistic flakes at the family-wise threshold (observed on CI).
+    random.seed(0)
     st = _neo_trains([train])[0]
     oracle = np.zeros((n_surr, N_BINS), dtype=bool)
     for k in range(n_surr):
