@@ -29,7 +29,7 @@ from pefile_mojo.core import (
     parse_imports,
 )
 
-__version__ = "0.1.0"  # x-release-please-version
+__version__ = "0.1.2"  # x-release-please-version
 __all__ = [
     "ImportDescriptor",
     "ImportSymbol",

@@ -10,6 +10,13 @@ Entries after 0.1.0 are written by [release-please](https://github.com/googleapi
 from the Conventional Commits merged since the previous tag, in the release
 pull request that cuts the version ([RELEASING.md](RELEASING.md)).
 
+## [0.1.2](https://github.com/thyn-ai/mojo-kernels/compare/v0.1.1...v0.1.2) (2026-09-20)
+
+
+### Fixed
+
+* **fuzz:** classify the overflowing Okapi idf floor as the known degenerate-NaN divergence ([#44](https://github.com/thyn-ai/mojo-kernels/issues/44)) ([c870f60](https://github.com/thyn-ai/mojo-kernels/commit/c870f602fed2c014ddd86077862c8896b9e169dc))
+
 ## [0.1.1](https://github.com/thyn-ai/mojo-kernels/compare/v0.1.0...v0.1.1) (2026-09-20)
 
 
