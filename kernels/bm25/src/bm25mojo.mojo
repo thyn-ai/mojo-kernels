@@ -29,8 +29,12 @@ practice). Accumulation per document is sequential in query-term order. For
 BM25Plus, whose delta term gives even unposted documents a constant per-term
 floor, the floor is added with a dense SIMD pass per query term and posted
 documents receive only their excess over it (Okapi/BM25L have a zero floor).
+When that floor is not finite (|idf * delta| overflows float64, or is NaN),
+the excess would be inf - inf = NaN, so the term is instead evaluated once per
+document in reference order, exactly as the reference does.
 """
 
+from std.math import isfinite
 from std.memory import Pointer, unsafe_memcpy
 from std.memory.alloc import unsafe_alloc
 from std.origin import MutUntrackedOrigin
@@ -261,6 +265,28 @@ def bm25mojo_score(
         var floor_t = Float64(0.0)
         if variant == VARIANT_PLUS:
             floor_t = idf_t * delta
+        if not isfinite(floor_t):
+            # |idf * delta| overflowed to +-inf (or is NaN). Adding that floor
+            # densely and then a posted document's "excess over the floor"
+            # would be inf - inf = NaN, where the reference's single
+            # evaluation idf * (delta + ...) is +-inf. Evaluate the reference
+            # expression once per document instead -- posted documents with
+            # their qf, every other document with qf = 0 -- walking the
+            # corpus in tandem with the ascending posting list. Only
+            # out-of-domain parameters (|delta| near 1.8e308) reach this
+            # path, so it is scalar.
+            var d = 0
+            while d < n_docs:
+                var qf = SIMD[DType.float64, 1](0.0)
+                if i < end and Int(docs[unsafe_offset=i]) == d:
+                    qf = SIMD[DType.float64, 1](freqs[unsafe_offset=i])
+                    i += 1
+                var dl = SIMD[DType.float64, 1](doc_len[unsafe_offset=d])
+                out_scores[unsafe_offset=d] += _term_score[1](
+                    variant, qf, dl, idf_t, k1, b, avgdl, delta
+                )[0]
+                d += 1
+            continue
         if floor_t != 0.0:
             var floor_v = SIMD[DType.float64, WIDTH](floor_t)
             var d = 0
