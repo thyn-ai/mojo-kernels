@@ -1,0 +1,80 @@
+name: ci-jmespath
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Read-only token for every job: the workflow only builds, tests and uploads a
+# build artifact (artifact upload needs no write scope).
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: jmespath-mojo differential tests + wheel (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pixi
+        shell: bash
+        run: |
+          curl -fsSL https://pixi.sh/install.sh | bash
+          echo "$HOME/.pixi/bin" >> "$GITHUB_PATH"
+
+      - name: Install the jmespath oracle (PyPI jmespath==1.0.1)
+        shell: bash
+        run: |
+          # Install outside the pixi env so re-solves cannot wipe it; the
+          # differential suite picks it up via PYTHONPATH.
+          pixi run python -m pip install --quiet --target="$RUNNER_TEMP/jm-oracle" "jmespath==1.0.1" || \
+            python3 -m pip install --quiet --target="$RUNNER_TEMP/jm-oracle" "jmespath==1.0.1"
+          echo "JMESPATH_ORACLE=$RUNNER_TEMP/jm-oracle" >> "$GITHUB_ENV"
+
+      - name: Build the JMESPath Mojo kernel
+        run: pixi run bash kernels/jmespath/build.sh
+
+      - name: Differential suite (native backend, then forced fallback)
+        shell: bash
+        env:
+          PYTHONPATH: "python/jmespath_mojo:${{ env.JMESPATH_ORACLE }}"
+          PYTHONNOUSERSITE: "1"
+        run: pixi run bash scripts/test_all_jmespath.sh
+
+      - name: Build + repair the platform wheel (delocate/auditwheel)
+        run: pixi run bash python/jmespath_mojo/build_wheel.sh
+
+      - name: Smoke-test the wheel in a clean venv
+        shell: bash
+        run: |
+          set -e
+          python3 -m venv /tmp/jmespath-wheel-smoke
+          /tmp/jmespath-wheel-smoke/bin/pip install --quiet python/jmespath_mojo/dist/*.whl
+          # Hide the pixi env for the smoke: an end user has no Mojo toolchain,
+          # so the wheel must load its kernel purely from its own vendored
+          # libraries (not via the build machine's absolute rpath).
+          repo_root="$PWD"
+          mv .pixi .pixi-hidden
+          trap 'mv "$repo_root/.pixi-hidden" "$repo_root/.pixi"' EXIT
+          cd /tmp && /tmp/jmespath-wheel-smoke/bin/python - <<'EOF'
+          import jmespath_mojo
+          doc = {"reservations": [{"instances": [
+              {"id": "i-1", "state": "running"}, {"id": "i-2", "state": "stopped"}]}]}
+          ids = jmespath_mojo.search("reservations[].instances[?state=='running'].id | []", doc)
+          assert ids == ["i-1"], f"bad result: {ids!r}"
+          info = jmespath_mojo.backend_info()
+          assert info["native_available"], f"wheel must carry the native kernel: {info}"
+          print("wheel smoke OK:", jmespath_mojo.__version__, info["native_source"])
+          EOF
+
+      - name: Upload wheel
+        uses: actions/upload-artifact@v4
+        with:
+          name: jmespath-mojo-wheel-${{ matrix.os }}
+          path: python/jmespath_mojo/dist/*.whl
+          retention-days: 14

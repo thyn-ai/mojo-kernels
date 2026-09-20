@@ -6,6 +6,8 @@
 #
 # `pixi run build-kernel-bm25` compiles the BM25 kernel into a shared library.
 # `pixi run test` runs the differential suite (native + forced fallback).
+# `pixi run fuzz-regression` replays the fuzzing seed corpora; the `fuzz`
+# environment adds atheris for coverage-guided runs (Linux x86_64 only).
 
 [workspace]
 name = "mojo-kernels"
@@ -27,6 +29,11 @@ platforms = [
 # Mojo ships as part of MAX; max-core pins the mojo-compiler package.
 max = "26.6.*"
 python = "3.12.*"
+# pip is what the kernel CI workflows and scripts/test_all_*.sh use to
+# provision their pinned, test-only oracle packages into a --target
+# directory (`pixi run python -m pip install --target ... "<oracle>==<pin>"`).
+# The published wrappers never depend on it.
+pip = ">=25"
 
 [target.linux-64.dependencies]
 # Native library repair for the fuse-mojo npm platform package on Linux
@@ -62,8 +69,8 @@ build-kernel-bm25 = "bash kernels/bm25/build.sh"
 # PYTHONPATH makes the in-repo wrapper importable; PYTHONNOUSERSITE keeps
 # stray user site-packages out of the toolchain.
 test = { cmd = "bash scripts/test_all.sh", env = { PYTHONPATH = "python/bm25_mojo", PYTHONNOUSERSITE = "1" }, depends-on = ["build-kernel-bm25"] }
-test-native = { cmd = "pytest tests/test_differential.py tests/test_loader.py -q", env = { PYTHONPATH = "python/bm25_mojo", PYTHONNOUSERSITE = "1" }, depends-on = ["build-kernel-bm25"] }
-test-fallback = { cmd = "pytest tests/test_differential.py tests/test_loader.py -q", env = { PYTHONPATH = "python/bm25_mojo", PYTHONNOUSERSITE = "1", BM25_MOJO_DISABLE_NATIVE = "1" } }
+test-native = { cmd = "pytest tests/test_differential.py tests/test_loader.py tests/test_fuzz_regression_bm25.py -q", env = { PYTHONPATH = "python/bm25_mojo", PYTHONNOUSERSITE = "1" }, depends-on = ["build-kernel-bm25"] }
+test-fallback = { cmd = "pytest tests/test_differential.py tests/test_loader.py tests/test_fuzz_regression_bm25.py -q", env = { PYTHONPATH = "python/bm25_mojo", PYTHONNOUSERSITE = "1", BM25_MOJO_DISABLE_NATIVE = "1" } }
 # Reproducible benchmark: rank_bm25 vs bm25_mojo (median of 5 runs).
 bench = { cmd = "python benchmarks/bench_bm25.py", env = { PYTHONPATH = "python/bm25_mojo", PYTHONNOUSERSITE = "1" }, depends-on = ["build-kernel-bm25"] }
 # Build the platform wheel for bm25_mojo (wheel-only; no sdist).
@@ -74,8 +81,8 @@ wheel-bm25 = { cmd = "bash python/bm25_mojo/build_wheel.sh", env = { PYTHONNOUSE
 build-kernel-gaussgrid = "bash kernels/gaussgrid/build.sh"
 # cclib-mojo differential suite: native path, then forced fallback.
 test-cclib = { cmd = "bash scripts/test_all_cclib.sh", env = { PYTHONPATH = "python/cclib_mojo", PYTHONNOUSERSITE = "1" }, depends-on = ["build-kernel-gaussgrid"] }
-test-cclib-native = { cmd = "pytest tests/test_gaussgrid_differential.py tests/test_gaussgrid_loader.py -q", env = { PYTHONPATH = "python/cclib_mojo", PYTHONNOUSERSITE = "1" }, depends-on = ["build-kernel-gaussgrid"] }
-test-cclib-fallback = { cmd = "pytest tests/test_gaussgrid_differential.py tests/test_gaussgrid_loader.py -q", env = { PYTHONPATH = "python/cclib_mojo", PYTHONNOUSERSITE = "1", CCLIB_MOJO_DISABLE_NATIVE = "1" } }
+test-cclib-native = { cmd = "pytest tests/test_gaussgrid_differential.py tests/test_gaussgrid_loader.py tests/test_fuzz_regression_cclib.py -q", env = { PYTHONPATH = "python/cclib_mojo", PYTHONNOUSERSITE = "1" }, depends-on = ["build-kernel-gaussgrid"] }
+test-cclib-fallback = { cmd = "pytest tests/test_gaussgrid_differential.py tests/test_gaussgrid_loader.py tests/test_fuzz_regression_cclib.py -q", env = { PYTHONPATH = "python/cclib_mojo", PYTHONNOUSERSITE = "1", CCLIB_MOJO_DISABLE_NATIVE = "1" } }
 # Reproducible benchmark: PyQuante1-path vs cclib_mojo (median of 5 runs).
 bench-cclib = { cmd = "python benchmarks/bench_gaussgrid.py", env = { PYTHONPATH = "python/cclib_mojo", PYTHONNOUSERSITE = "1" }, depends-on = ["build-kernel-gaussgrid"] }
 # Build the platform wheel for cclib_mojo (wheel-only; no sdist).
@@ -95,3 +102,35 @@ pack-fuse = { cmd = "bash typescript/fuse-mojo/scripts/pack-platform.sh", depend
 # End-user bar: fresh npm project from packed tarballs, README quick-start,
 # native backend and simulated-Windows fallback with identical output.
 smoke-fuse = { cmd = "bash typescript/fuse-mojo/scripts/smoke.sh", depends-on = ["pack-fuse"] }
+
+# --- fuzzing (fuzz/, .github/workflows/fuzz.yml) ---
+# Replay the checked-in seed corpora through the two differential harnesses.
+# Needs no fuzzer: this is the mode the normal test suites run too
+# (tests/test_fuzz_regression_*.py), so it works on every pixi platform.
+fuzz-regression = { depends-on = ["fuzz-regression-bm25", "fuzz-regression-cclib"] }
+fuzz-regression-bm25 = { cmd = "python fuzz/fuzz_bm25.py --regression", env = { PYTHONPATH = "python/bm25_mojo", PYTHONNOUSERSITE = "1" }, depends-on = ["build-kernel-bm25"] }
+fuzz-regression-cclib = { cmd = "python fuzz/fuzz_cclib.py --regression", env = { PYTHONPATH = "python/cclib_mojo", PYTHONNOUSERSITE = "1" }, depends-on = ["build-kernel-gaussgrid"] }
+# fast-check parity properties for fuse-mojo, native backend then forced
+# fallback. FC_NUM_RUNS scales the budget (default 200; the nightly run uses
+# more), FC_SEED replays a reported counterexample.
+fuzz-fuse = { cmd = "bash typescript/fuse-mojo/scripts/test_property.sh", depends-on = ["build-kernel-fuse"] }
+
+# Coverage-guided fuzzing needs atheris (Google's libFuzzer binding for
+# Python), which publishes manylinux x86_64 wheels only; building it from
+# source needs a libFuzzer-capable clang, which Apple's toolchain does not
+# ship. The `fuzz` environment therefore exists for linux-64 CI runners and
+# Linux developer machines; everywhere else `pixi run fuzz-regression`
+# replays the same harnesses over the seed corpora.
+[feature.fuzz.target.linux-64.pypi-dependencies]
+atheris = "==3.1.0"
+
+[feature.fuzz.tasks]
+# libFuzzer flags pass straight through, e.g.
+#   pixi run -e fuzz fuzz-bm25 -- -max_total_time=60
+# New inputs and crash artifacts land under .fuzz-work/ (git-ignored); the
+# checked-in seeds under fuzz/corpus/ are read but never written.
+fuzz-bm25 = { cmd = "mkdir -p .fuzz-work/bm25 && python fuzz/fuzz_bm25.py -artifact_prefix=.fuzz-work/ .fuzz-work/bm25 fuzz/corpus/bm25", env = { PYTHONPATH = "python/bm25_mojo", PYTHONNOUSERSITE = "1" }, depends-on = ["build-kernel-bm25"] }
+fuzz-cclib = { cmd = "mkdir -p .fuzz-work/cclib && python fuzz/fuzz_cclib.py -artifact_prefix=.fuzz-work/ .fuzz-work/cclib fuzz/corpus/cclib", env = { PYTHONPATH = "python/cclib_mojo", PYTHONNOUSERSITE = "1" }, depends-on = ["build-kernel-gaussgrid"] }
+
+[environments]
+fuzz = { features = ["fuzz"], solve-group = "default" }

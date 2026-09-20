@@ -1,0 +1,82 @@
+name: ci-croniter
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Read-only token for every job: the workflow only builds, tests and uploads a
+# build artifact (artifact upload needs no write scope).
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: croniter-mojo differential tests + wheel (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pixi
+        shell: bash
+        run: |
+          curl -fsSL https://pixi.sh/install.sh | bash
+          echo "$HOME/.pixi/bin" >> "$GITHUB_PATH"
+
+      - name: Build the croniter Mojo kernel
+        run: pixi run bash kernels/croniter/build.sh
+
+      - name: Install the croniter oracle (test-only, pinned)
+        run: pixi run python -m pip install --quiet --target /tmp/croniter_oracle "croniter==6.2.4"
+
+      - name: Differential suite (native backend, then forced fallback)
+        shell: bash
+        run: |
+          export PYTHONPATH="python/croniter_mojo:/tmp/croniter_oracle"
+          export PYTHONNOUSERSITE=1
+          pixi run bash scripts/test_all_croniter.sh
+
+      - name: Build + repair the platform wheel (delocate/auditwheel)
+        run: pixi run bash python/croniter_mojo/build_wheel.sh
+
+      - name: Smoke-test the wheel in a clean venv
+        shell: bash
+        run: |
+          set -e
+          python3 -m venv /tmp/croniter-wheel-smoke
+          /tmp/croniter-wheel-smoke/bin/pip install --quiet python/croniter_mojo/dist/*.whl
+          # Hide the pixi env for the smoke: an end user has no Mojo toolchain,
+          # so the wheel must load its kernel purely from its own vendored
+          # libraries (not via the build machine's absolute rpath).
+          repo_root="$PWD"
+          mv .pixi .pixi-hidden
+          trap 'mv "$repo_root/.pixi-hidden" "$repo_root/.pixi"' EXIT
+          cd /tmp
+          /tmp/croniter-wheel-smoke/bin/python -m croniter_mojo | tee /tmp/qs-native.txt
+          CRONITER_MOJO_DISABLE_NATIVE=1 /tmp/croniter-wheel-smoke/bin/python -m croniter_mojo | tee /tmp/qs-fallback.txt
+          /tmp/croniter-wheel-smoke/bin/python - <<'EOF'
+          import croniter_mojo
+
+          info = croniter_mojo.backend_info()
+          assert info["native_available"], f"wheel must carry the native kernel: {info}"
+
+          def checksum(path):
+              for line in open(path):
+                  if line.startswith("checksum: "):
+                      return int(line.split(":")[1])
+              raise AssertionError(f"no checksum in {path}")
+
+          assert checksum("/tmp/qs-native.txt") == checksum("/tmp/qs-fallback.txt")
+          print("wheel smoke OK:", croniter_mojo.__version__, info["native_source"])
+          EOF
+
+      - name: Upload wheel
+        uses: actions/upload-artifact@v4
+        with:
+          name: croniter-mojo-wheel-${{ matrix.os }}
+          path: python/croniter_mojo/dist/*.whl
+          retention-days: 14

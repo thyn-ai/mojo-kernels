@@ -7,7 +7,7 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-SUITE="tests/test_differential.py tests/test_loader.py"
+SUITE="tests/test_differential.py tests/test_loader.py tests/test_fuzz_regression_bm25.py"
 
 echo "== differential suite: native backend =="
 pytest $SUITE -q

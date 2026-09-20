@@ -1,0 +1,678 @@
+# Release pipeline for thyn-ai/mojo-kernels: one tag, every distributable.
+#
+# A `vX.Y.Z` tag produces, from the tagged commit and with the exact steps the
+# per-kernel CI workflows use (pixi tasks, delocate/auditwheel/patchelf repair,
+# clean-environment smoke tests):
+#
+#   * bm25-mojo and cclib-mojo platform wheels (macOS arm64, Linux x86_64)
+#   * the @fuse-mojo/core, @fuse-mojo/darwin-arm64 and @fuse-mojo/linux-x64
+#     npm tarballs
+#   * SHA256SUMS over all of the above
+#
+# and attaches them to the GitHub Release for the tag together with
+#
+#   * a keyless Sigstore signature bundle per asset (<asset>.sigstore.json),
+#     signed by this workflow's own OIDC identity and verified before upload
+#   * SLSA build provenance for every asset (multiple.intoto.jsonl) from the
+#     SLSA generic generator, which signs it with its own isolated identity
+#
+# The Release itself is whatever release-drafter has been preparing: an
+# existing release for the tag is reused as-is, an open draft is adopted
+# (retagged and published, notes kept) and only when neither exists is one
+# created with generated notes.
+#
+# Registries are gated. Wheels go to PyPI (Trusted Publishing, PEP 740
+# attestations) and tarballs to npm (Trusted Publishing, `--provenance`) only
+# when the repository variables PUBLISH_PYPI / PUBLISH_NPM are the string
+# "true"; RELEASING.md walks through the one-time registration on each
+# registry and the exact commands. Until the owner flips a variable, the
+# corresponding job is skipped and the GitHub Release is the only channel.
+#
+# Triggers:
+#   * push of a `v*` tag: the release path for every planned release.
+#   * workflow_dispatch ON THE TAG (`gh workflow run release.yml --ref vX.Y.Z
+#     -f tag=vX.Y.Z`): re-runs the pipeline for an existing tag. Idempotent:
+#     existing assets are replaced, existing registry versions are skipped.
+#     The `tag` input is a confirmation and must equal the ref the run was
+#     dispatched on; a dispatch on a branch without `dry_run` is refused.
+#   * workflow_dispatch with `dry_run` on any branch: builds, signs and
+#     attests the branch tip and keeps the results as workflow artifacts. No
+#     Release, no registry. This is how the pipeline is exercised on a branch.
+#
+# Every job builds the commit the run was started for (`github.sha`): the
+# tag's commit on both release paths, the branch tip on a dry run. No job
+# ever checks out a ref chosen by an input, so nothing that runs here can be
+# steered at a tree other than the one the run is for. The price is that a
+# re-run always executes the tag's own copy of this file: a fix to the
+# pipeline made after a tag ships with the next tag, not with a re-run.
+#
+# Every job holds the least privilege it needs; the workflow default is
+# read-only. Third-party actions are pinned to full commit SHAs. The one
+# tag-pinned reference is the SLSA generator, which its verifiers require to
+# be called by tag (see the `provenance` job). No job restores or writes an
+# Actions cache: a release is built from scratch, from the lockfile.
+
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Re-run: the tag being re-released, e.g. v0.1.0. Must equal the ref the workflow is dispatched on (--ref v0.1.0). Leave empty for a dry run."
+        required: false
+        type: string
+        default: ""
+      dry_run:
+        description: "Build, sign and attest the dispatched branch tip; keep the results as workflow artifacts only (no GitHub Release, no PyPI, no npm)."
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+# One pipeline per ref. Runs are never cancelled: a half-published release is
+# worse than a slow one, and every step is idempotent so a re-run is safe.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  preflight:
+    name: resolve the release (tag, version, mode)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      # vX.Y.Z on a release; v<tree version> on a dry run (naming only).
+      tag: ${{ steps.resolve.outputs.tag }}
+      version: ${{ steps.resolve.outputs.version }}
+      prerelease: ${{ steps.resolve.outputs.prerelease }}
+      dry_run: ${{ steps.resolve.outputs.dry_run }}
+    steps:
+      # Dispatch-only pre-flight, before any checkout. A re-run must be
+      # dispatched on the tag itself and name it again in `tag`; the input
+      # never chooses what is built, it confirms it.
+      - name: Validate the dispatch inputs
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+          INPUT_DRY_RUN: ${{ inputs.dry_run }}
+          REF: ${{ github.ref }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if [ "$INPUT_DRY_RUN" = "true" ]; then
+            if [ -n "$INPUT_TAG" ]; then
+              echo "::error::A dry run builds the dispatched ref; leave 'tag' empty (got '$INPUT_TAG')." >&2
+              exit 1
+            fi
+            case "$REF" in
+              refs/tags/*)
+                # A dry run on a tag would look like a release and publish
+                # nothing; make the operator say which one they meant.
+                echo "::error::dry_run is for branches; this run is on '$REF'. To re-run the release, dispatch without dry_run and pass tag=$REF_NAME." >&2
+                exit 1 ;;
+            esac
+            echo "Dry run: building $REF at $GITHUB_SHA."
+            exit 0
+          fi
+          case "$REF" in
+            refs/tags/*) ;;
+            *) echo "::error::A release re-run must be dispatched on the tag: gh workflow run release.yml --ref vX.Y.Z -f tag=vX.Y.Z (this run is on '$REF'). Set dry_run to exercise a branch." >&2; exit 1 ;;
+          esac
+          if [ "$INPUT_TAG" != "$REF_NAME" ]; then
+            echo "::error::'tag' must confirm the dispatched ref: got '$INPUT_TAG', the run is on '$REF_NAME'." >&2
+            exit 1
+          fi
+          echo "Re-running the release of $REF_NAME at $GITHUB_SHA."
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Every published unit carries the same version and it must be the one
+      # the tag names. A tag that disagrees with the tree is refused here,
+      # before anything is built.
+      - name: Resolve the version and check every package agrees with the tag
+        id: resolve
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_DRY_RUN: ${{ inputs.dry_run }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = "workflow_dispatch" ] && [ "$INPUT_DRY_RUN" = "true" ]; then
+            DRY_RUN=true; TAG=""
+          else
+            # A tag push, or a re-run dispatched on the tag (checked above):
+            # either way the ref name is the tag.
+            DRY_RUN=false; TAG="$REF_NAME"
+          fi
+          if [ -n "$TAG" ] && ! printf '%s' "$TAG" | LC_ALL=C grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+[A-Za-z0-9.+-]*$'; then
+            echo "::error::Tag '$TAG' is not a release tag (vMAJOR.MINOR.PATCH with an optional suffix); refusing to release it." >&2
+            exit 1
+          fi
+          VERSION="$(EXPECTED_VERSION="${TAG#v}" python3 - <<'PYEOF'
+          import json, os, pathlib, re, sys, tomllib
+
+          seen: dict[str, str] = {}
+
+          def toml_version(path: str, *keys: str) -> str:
+              node = tomllib.loads(pathlib.Path(path).read_text())
+              for key in keys:
+                  node = node[key]
+              return str(node)
+
+          def json_version(path: str) -> dict:
+              return json.loads(pathlib.Path(path).read_text())
+
+          seen["pixi.toml [workspace].version"] = toml_version("pixi.toml", "workspace", "version")
+          for pkg in ("bm25_mojo", "cclib_mojo"):
+              seen[f"python/{pkg}/pyproject.toml [project].version"] = toml_version(
+                  f"python/{pkg}/pyproject.toml", "project", "version")
+              init = pathlib.Path(f"python/{pkg}/{pkg}/__init__.py").read_text()
+              match = re.search(r'^__version__\s*=\s*"([^"]+)"', init, re.M)
+              seen[f"python/{pkg}/{pkg}/__init__.py __version__"] = match.group(1) if match else "<missing>"
+          core = json_version("typescript/fuse-mojo/packages/core/package.json")
+          seen["typescript/fuse-mojo/packages/core/package.json version"] = core["version"]
+          for name, pin in core.get("optionalDependencies", {}).items():
+              seen[f"typescript/fuse-mojo/packages/core/package.json optionalDependencies[{name}]"] = pin
+          for plat in ("darwin-arm64", "linux-x64"):
+              seen[f"typescript/fuse-mojo/packages/{plat}/package.json version"] = json_version(
+                  f"typescript/fuse-mojo/packages/{plat}/package.json")["version"]
+
+          for label, value in seen.items():
+              print(f"  {value:<14} {label}", file=sys.stderr)
+          versions = sorted(set(seen.values()))
+          if len(versions) != 1:
+              print(f"::error::Package versions disagree ({', '.join(versions)}); bump them in lockstep (see RELEASING.md).", file=sys.stderr)
+              sys.exit(1)
+          version = versions[0]
+          expected = os.environ.get("EXPECTED_VERSION", "")
+          if expected and expected != version:
+              print(f"::error::Tag names version {expected} but every package in the tree is at {version}; refusing to release a mismatched tag.", file=sys.stderr)
+              sys.exit(1)
+          print(version)
+          PYEOF
+          )"
+          if [ -z "$TAG" ]; then
+            TAG="v${VERSION}"
+          fi
+          if printf '%s' "$TAG" | LC_ALL=C grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            PRERELEASE=false
+          else
+            PRERELEASE=true
+          fi
+          {
+            echo "tag=$TAG"
+            echo "version=$VERSION"
+            echo "prerelease=$PRERELEASE"
+            echo "dry_run=$DRY_RUN"
+          } >> "$GITHUB_OUTPUT"
+          echo "Releasing $TAG (version $VERSION) from $(git rev-parse HEAD); dry_run=$DRY_RUN prerelease=$PRERELEASE"
+
+  # Same steps as ci.yml, ci-cclib.yml and ci-fuse.yml, on the same runners:
+  # build the kernels, run every differential suite (native, then forced
+  # fallback), build and repair the distributables, and prove each one loads
+  # its kernel from its own vendored libraries in a clean environment. A
+  # release never ships an artifact that CI would have rejected.
+  build:
+    name: build, test and package (${{ matrix.os }})
+    needs: preflight
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      # A release needs every platform; if one fails, stop the other.
+      fail-fast: true
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install pixi
+        uses: prefix-dev/setup-pixi@d3f436a425481402e6a95a1d1fc10331c708cd9e # v0.10.2
+        with:
+          # Binary only; the tasks install the locked environment on first
+          # `pixi run`, exactly as CI does.
+          run-install: false
+          # setup-pixi caches the environment by default whenever pixi.lock
+          # is present. Not on the release path: the environment is resolved
+          # from the lockfile on every run and no cache is read or written.
+          cache: false
+
+      - name: Install Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 20
+          # No npm cache on the release path: a cache entry written by a
+          # pull-request run must never feed a release build.
+          package-manager-cache: false
+
+      - name: Build the Mojo kernels (bm25, gaussgrid, fuse)
+        run: |
+          set -euo pipefail
+          pixi run build-kernel-bm25
+          pixi run build-kernel-gaussgrid
+          pixi run build-kernel-fuse
+
+      - name: Differential suites (native backend, then forced fallback)
+        run: |
+          set -euo pipefail
+          pixi run test
+          pixi run test-cclib
+          pixi run test-fuse
+
+      - name: Build + repair the platform wheels (delocate/auditwheel)
+        run: |
+          set -euo pipefail
+          pixi run wheel-bm25
+          pixi run wheel-cclib
+
+      - name: Pack + repair the fuse-mojo platform package (delocate/patchelf)
+        run: pixi run pack-fuse
+
+      - name: Smoke-test the bm25-mojo wheel in a clean venv
+        run: |
+          set -e
+          python3 -m venv /tmp/bm25-wheel-smoke
+          /tmp/bm25-wheel-smoke/bin/pip install --quiet python/bm25_mojo/dist/*.whl
+          # Hide the pixi env for the smoke: an end user has no Mojo toolchain,
+          # so the wheel must load its kernel purely from its own vendored
+          # libraries (not via the build machine's absolute rpath).
+          repo_root="$PWD"
+          mv .pixi .pixi-hidden
+          trap 'mv "$repo_root/.pixi-hidden" "$repo_root/.pixi"' EXIT
+          cd /tmp && /tmp/bm25-wheel-smoke/bin/python - <<'EOF'
+          import bm25_mojo
+          # "world" appears in 1 of 3 docs, so its Okapi idf is positive and
+          # only doc 0 may score > 0 (deterministic on both backends).
+          bm25 = bm25_mojo.BM25Okapi([["hello", "world"], ["hello", "mojo"], ["goodbye", "sun"]])
+          scores = bm25.get_scores(["world"])
+          assert scores.shape == (3,), f"bad scores shape: {scores!r}"
+          assert scores[0] > 0 and scores[1] == 0 and scores[2] == 0, f"bad scores: {scores!r}"
+          info = bm25_mojo.backend_info()
+          assert info["native_available"], f"wheel must carry the native kernel: {info}"
+          print("wheel smoke OK:", bm25_mojo.__version__, info["native_source"])
+          EOF
+
+      - name: Smoke-test the cclib-mojo wheel in a clean venv
+        run: |
+          set -e
+          python3 -m venv /tmp/cclib-wheel-smoke
+          /tmp/cclib-wheel-smoke/bin/pip install --quiet python/cclib_mojo/dist/*.whl
+          repo_root="$PWD"
+          mv .pixi .pixi-hidden
+          trap 'mv "$repo_root/.pixi-hidden" "$repo_root/.pixi"' EXIT
+          cd /tmp
+          # quickstart.py lives at the repo root so its directory contains no
+          # cclib_mojo/ package: sys.path[0] cannot shadow the installed wheel.
+          /tmp/cclib-wheel-smoke/bin/python "$repo_root/quickstart.py" | tee /tmp/quickstart-native.txt
+          # The forced fallback must produce the same results (documented
+          # 1e-10 tolerance; identical to all printed digits here).
+          CCLIB_MOJO_DISABLE_NATIVE=1 /tmp/cclib-wheel-smoke/bin/python "$repo_root/quickstart.py" | tee /tmp/quickstart-fallback.txt
+          /tmp/cclib-wheel-smoke/bin/python - <<'EOF'
+          import re
+
+          import cclib_mojo
+
+          info = cclib_mojo.backend_info()
+          assert info["native_available"], f"wheel must carry the native kernel: {info}"
+
+          def checksum(path):
+              text = open(path).read()
+              m = re.search(r"density checksum: ([0-9.eE+-]+)", text)
+              assert m, f"no checksum in {path}"
+              return float(m.group(1))
+
+          native = checksum("/tmp/quickstart-native.txt")
+          fallback = checksum("/tmp/quickstart-fallback.txt")
+          assert abs(native - fallback) <= 1e-9 * abs(native), (native, fallback)
+          print("wheel smoke OK:", cclib_mojo.__version__, info["native_source"])
+          EOF
+
+      - name: Smoke-test the fuse-mojo tarballs in a fresh npm project (native + simulated-Windows fallback)
+        env:
+          FUSE_MOJO_DIST: typescript/fuse-mojo/dist
+        run: |
+          set -e
+          repo_root="$PWD"
+          mv .pixi .pixi-hidden
+          trap 'mv "$repo_root/.pixi-hidden" "$repo_root/.pixi"' EXIT
+          bash typescript/fuse-mojo/scripts/smoke.sh
+
+      # Each runner contributes exactly the distributables it can vouch for:
+      # its own wheels and its own platform package. The smoke packs all
+      # three npm tarballs on every platform, but a platform package packed
+      # on the other OS has no kernel in it, so only the native one is kept.
+      # The platform-independent core tarball comes from the Linux runner.
+      - name: Select this platform's release assets
+        run: |
+          set -euo pipefail
+          mkdir -p release-assets
+          cp python/bm25_mojo/dist/*.whl python/cclib_mojo/dist/*.whl release-assets/
+          case "$RUNNER_OS" in
+            Linux) cp typescript/fuse-mojo/dist/fuse-mojo-core-*.tgz typescript/fuse-mojo/dist/fuse-mojo-linux-x64-*.tgz release-assets/ ;;
+            macOS) cp typescript/fuse-mojo/dist/fuse-mojo-darwin-arm64-*.tgz release-assets/ ;;
+            *) echo "::error::Unexpected runner OS '$RUNNER_OS'." >&2; exit 1 ;;
+          esac
+          ls -la release-assets
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: dist-${{ matrix.os }}
+          path: release-assets/
+          if-no-files-found: error
+          retention-days: 90
+
+  # Signs the bytes the Release will carry. Nothing is rebuilt or checked
+  # out here; the job holds the only `id-token: write` on the build side and
+  # uses it for one thing: a Fulcio certificate naming this workflow at this
+  # ref as the signer. Each bundle is verified against that identity before
+  # anything is uploaded.
+  sign:
+    name: sign the release assets (Sigstore keyless)
+    needs: [preflight, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write # Sigstore keyless signing with this job's OIDC identity
+    outputs:
+      # sha256sum lines for every asset, base64-encoded: the provenance subjects.
+      hashes: ${{ steps.subjects.outputs.hashes }}
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: dist-*
+          merge-multiple: true
+          path: release-assets
+
+      - name: Check the asset set is complete and unambiguous
+        env:
+          VERSION: ${{ needs.preflight.outputs.version }}
+        working-directory: release-assets
+        run: |
+          set -euo pipefail
+          ls -la
+          wheels=$(find . -maxdepth 1 -name '*.whl' | wc -l)
+          tarballs=$(find . -maxdepth 1 -name '*.tgz' | wc -l)
+          total=$(find . -maxdepth 1 -type f | wc -l)
+          if [ "$wheels" -ne 4 ] || [ "$tarballs" -ne 3 ] || [ "$total" -ne 7 ]; then
+            echo "::error::Expected 4 wheels + 3 npm tarballs, found $wheels + $tarballs ($total files)." >&2
+            exit 1
+          fi
+          for f in *; do
+            case "$f" in
+              *"$VERSION"*) ;;
+              *) echo "::error::Asset '$f' does not carry version $VERSION." >&2; exit 1 ;;
+            esac
+          done
+
+      # SHA256SUMS lists the seven distributables and ships as an asset in
+      # its own right, so it is signed and attested like the rest. The
+      # provenance subjects are the distributables plus SHA256SUMS: exactly
+      # the files the Release carries, by asset name, in the sha256sum format
+      # (base64-encoded) the generator expects.
+      - name: Write SHA256SUMS and compute the provenance subjects
+        id: subjects
+        working-directory: release-assets
+        run: |
+          set -euo pipefail
+          sha256sum -- *.whl *.tgz > SHA256SUMS
+          sha256sum -- *.whl *.tgz SHA256SUMS | tee "$RUNNER_TEMP/subjects.sha256sum"
+          echo "hashes=$(base64 -w0 "$RUNNER_TEMP/subjects.sha256sum")" >> "$GITHUB_OUTPUT"
+
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+
+      - name: Sign every asset and verify each bundle against this workflow's identity
+        env:
+          # The identity the Fulcio certificate must carry: this workflow file
+          # at the run's ref (the tag on a push, the dispatched branch on a
+          # workflow_dispatch). It is also the identity consumers verify; see
+          # "Verify a release" in RELEASING.md.
+          CERT_IDENTITY: ${{ github.server_url }}/${{ github.repository }}/.github/workflows/release.yml@${{ github.ref }}
+          OIDC_ISSUER: https://token.actions.githubusercontent.com
+        working-directory: release-assets
+        run: |
+          set -euo pipefail
+          cosign version
+          for f in *.whl *.tgz SHA256SUMS; do
+            cosign sign-blob --yes --bundle "$f.sigstore.json" "$f"
+          done
+          for f in *.whl *.tgz SHA256SUMS; do
+            cosign verify-blob \
+              --bundle "$f.sigstore.json" \
+              --certificate-identity "$CERT_IDENTITY" \
+              --certificate-oidc-issuer "$OIDC_ISSUER" \
+              "$f"
+          done
+          ls -la
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-assets
+          path: release-assets/
+          if-no-files-found: error
+          retention-days: 90
+
+  # Publishes the GitHub Release for the tag and attaches the signed assets.
+  # release-drafter's work is kept: a release that already exists for the tag
+  # is used as-is, an open draft is adopted (retagged to this tag, notes
+  # kept, published), and only if there is neither is a release created with
+  # generated notes. Skipped on a dry run.
+  release:
+    name: publish the GitHub Release
+    needs: [preflight, sign]
+    if: needs.preflight.outputs.dry_run != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write # create or update the Release and upload its assets
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-assets
+          path: release-assets
+
+      - name: Find, adopt or create the Release for the tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ needs.preflight.outputs.tag }}
+          SHA: ${{ github.sha }}
+          PRERELEASE: ${{ needs.preflight.outputs.prerelease }}
+        run: |
+          set -euo pipefail
+          api="repos/${GH_REPO}/releases"
+          # --slurp yields one array per page; `add` flattens them and `// []`
+          # keeps the result an array even if no page came back.
+          releases="$(gh api --paginate --slurp "${api}?per_page=100" | jq 'add // []')"
+
+          existing="$(jq -r --arg tag "$TAG" '[.[] | select(.tag_name == $tag)] | first | .id // empty' <<<"$releases")"
+          if [ -n "$existing" ]; then
+            is_draft="$(jq -r --arg tag "$TAG" '[.[] | select(.tag_name == $tag)] | first | .draft' <<<"$releases")"
+            if [ "$is_draft" = "true" ]; then
+              echo "Release $existing is a draft for $TAG; publishing it against $SHA (notes kept)."
+              gh api -X PATCH "${api}/${existing}" -f target_commitish="$SHA" -F draft=false -F prerelease="$PRERELEASE" --silent
+            else
+              echo "Release $existing already exists for $TAG; keeping it and its notes."
+            fi
+          else
+            # release-drafter's draft carries the version it resolved from PR
+            # labels, which may differ from the tag being cut. Adopt the most
+            # recent v* draft: retag, rename, point at the tagged commit,
+            # publish. Its notes are kept, with the draft's own tag rewritten
+            # to this one so the compare link is right.
+            draft="$(jq -r '[.[] | select(.draft and (.tag_name | test("^v[0-9]")))] | sort_by(.created_at) | last | .id // empty' <<<"$releases")"
+            if [ -n "$draft" ]; then
+              old_tag="$(jq -r --arg id "$draft" '.[] | select((.id|tostring) == $id) | .tag_name' <<<"$releases")"
+              echo "Adopting draft release $draft ($old_tag) as $TAG."
+              jq -r --arg id "$draft" --arg old "$old_tag" --arg new "$TAG" \
+                '.[] | select((.id|tostring) == $id) | (.body // "") | split($old) | join($new)' <<<"$releases" > "$RUNNER_TEMP/notes.md"
+              gh api -X PATCH "${api}/${draft}" \
+                -f tag_name="$TAG" -f name="$TAG" -f target_commitish="$SHA" \
+                -F draft=false -F prerelease="$PRERELEASE" \
+                -F body=@"$RUNNER_TEMP/notes.md" --silent
+            else
+              echo "No release or draft found for $TAG; creating one with generated notes."
+              args=(--verify-tag --title "$TAG" --generate-notes)
+              if [ "$PRERELEASE" = "true" ]; then args+=(--prerelease); fi
+              gh release create "$TAG" "${args[@]}"
+            fi
+          fi
+
+      - name: Upload the assets and their signature bundles
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ needs.preflight.outputs.tag }}
+        run: |
+          set -euo pipefail
+          gh release upload "$TAG" release-assets/* --clobber
+          gh release view "$TAG" --json url,assets --jq '"\(.url)\n" + (.assets[] | "  \(.name)")'
+
+  # SLSA build provenance for every asset, from the SLSA generic generator:
+  # the provenance is signed by the generator's own reusable-workflow
+  # identity, not by this repository, so it attests independently of the
+  # `sign` job. On a release it is uploaded to the GitHub Release as
+  # multiple.intoto.jsonl; on a dry run it stays a workflow artifact.
+  provenance:
+    name: SLSA provenance
+    needs: [preflight, sign, release]
+    # `release` is skipped on a dry run; run whenever signing succeeded and
+    # the Release step did not fail.
+    if: ${{ !cancelled() && needs.sign.result == 'success' && (needs.release.result == 'success' || (needs.release.result == 'skipped' && needs.preflight.outputs.dry_run == 'true')) }}
+    permissions:
+      actions: read # the generator reads this run's workflow metadata
+      id-token: write # keyless signing of the provenance
+      contents: write # upload multiple.intoto.jsonl to the Release
+    # Referenced by TAG: deliberately the one exception to this repository's
+    # SHA-pinning. The generator downloads its builder binary from the release
+    # named by the ref it was called at, and slsa-verifier only trusts the
+    # generator at a `vX.Y.Z` tag (its README, "Referencing SLSA builders and
+    # generators"). A SHA here fails the job or yields provenance no verifier
+    # accepts. v2.1.0 = f7dd8c54c2067bafc12ca7a55595d5ee9b75204a.
+    uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@v2.1.0
+    with:
+      base64-subjects: ${{ needs.sign.outputs.hashes }}
+      provenance-name: multiple.intoto.jsonl
+      upload-assets: ${{ needs.preflight.outputs.dry_run != 'true' }}
+      # Named explicitly in both trigger paths: on a dispatch the run sits on
+      # a branch, not on a new tag, so the generator must be told the Release.
+      upload-tag-name: ${{ needs.preflight.outputs.tag }}
+
+  # PyPI, gated on the repository variable PUBLISH_PYPI == "true". Trusted
+  # Publishing: no token anywhere; PyPI trusts this workflow file in this
+  # repository, in the `pypi` environment, for both projects (registered by
+  # the owner; RELEASING.md). The action also uploads PEP 740 attestations.
+  # Runs only after the Release and its provenance exist. No checkout, by
+  # design: it publishes artifacts the `build` job produced and nothing else.
+  publish-pypi:
+    name: publish the wheels to PyPI (Trusted Publishing)
+    needs: [preflight, sign, release, provenance]
+    if: needs.preflight.outputs.dry_run != 'true' && vars.PUBLISH_PYPI == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: pypi
+    permissions:
+      contents: read
+      id-token: write # PyPI Trusted Publishing (OIDC) and PEP 740 attestations
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-assets
+          path: release-assets
+
+      # One directory per project: each upload step exchanges its own OIDC
+      # token, scoped to that project.
+      - name: Stage the wheels per project
+        run: |
+          set -euo pipefail
+          mkdir -p pypi/bm25-mojo pypi/cclib-mojo
+          cp release-assets/bm25_mojo-*.whl pypi/bm25-mojo/
+          cp release-assets/cclib_mojo-*.whl pypi/cclib-mojo/
+          ls -la pypi/*
+
+      - name: Publish bm25-mojo
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+        with:
+          packages-dir: pypi/bm25-mojo/
+          skip-existing: true
+
+      - name: Publish cclib-mojo
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+        with:
+          packages-dir: pypi/cclib-mojo/
+          skip-existing: true
+
+  # npm, gated on the repository variable PUBLISH_NPM == "true". Trusted
+  # Publishing (npm >= 11.5.1, Node 24) with `--provenance`, so every version
+  # on the registry carries a Sigstore attestation of this run. npm can only
+  # be told to trust a workflow for a package that already exists, so the
+  # first publish of each @fuse-mojo/* package uses a short-lived granular
+  # token in the NPM_TOKEN secret; after that the secret is deleted and OIDC
+  # is the only path (RELEASING.md). npm tries OIDC first and falls back to
+  # the token only when the exchange fails, so both paths run this same job.
+  publish-npm:
+    name: publish the packages to npm (Trusted Publishing, --provenance)
+    needs: [preflight, sign, release, provenance]
+    if: needs.preflight.outputs.dry_run != 'true' && vars.PUBLISH_NPM == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: npm
+    permissions:
+      contents: read
+      id-token: write # npm Trusted Publishing (OIDC) and `npm publish --provenance`
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-assets
+          path: release-assets
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+
+      - name: Publish the platform packages, then core
+        env:
+          VERSION: ${{ needs.preflight.outputs.version }}
+          # Empty unless the owner set NPM_TOKEN for a first publish; setup-node
+          # points .npmrc at this variable and npm ignores an empty token when
+          # the OIDC exchange succeeds.
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -euo pipefail
+          npm_version="$(npm --version)"
+          if ! node -e 'const [a, b, c] = process.versions.npm.split(".").map(Number); process.exit(a > 11 || (a === 11 && (b > 5 || (b === 5 && c >= 1))) ? 0 : 1)'; then
+            echo "::error::npm $npm_version is older than 11.5.1, the first version with Trusted Publishing." >&2
+            exit 1
+          fi
+          echo "npm $npm_version"
+          # Platform packages first: core lists them as optionalDependencies,
+          # so they must be resolvable the moment core is.
+          for pkg in linux-x64 darwin-arm64 core; do
+            name="@fuse-mojo/${pkg}"
+            matches=(release-assets/fuse-mojo-"${pkg}"-*.tgz)
+            if [ "${#matches[@]}" -ne 1 ] || [ ! -f "${matches[0]}" ]; then
+              echo "::error::Expected exactly one tarball for ${name}, found: ${matches[*]}" >&2
+              exit 1
+            fi
+            tarball="${matches[0]}"
+            published="$(npm view "${name}@${VERSION}" version 2>/dev/null || true)"
+            if [ "$published" = "$VERSION" ]; then
+              echo "${name}@${VERSION} is already on the registry; skipping."
+              continue
+            fi
+            echo "Publishing ${name}@${VERSION} from ${tarball}"
+            npm publish "$tarball" --provenance --access public
+          done
