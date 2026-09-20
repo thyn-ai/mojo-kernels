@@ -166,32 +166,62 @@ jobs:
 
           seen: dict[str, str] = {}
 
+          # A location whose key is gone reads "<missing>" rather than raising:
+          # it then disagrees with the rest and is named in the error below,
+          # which is the point of listing every location.
           def toml_version(path: str, *keys: str) -> str:
               node = tomllib.loads(pathlib.Path(path).read_text())
               for key in keys:
+                  if not isinstance(node, dict) or key not in node:
+                      return "<missing>"
                   node = node[key]
               return str(node)
 
           def json_version(path: str) -> dict:
               return json.loads(pathlib.Path(path).read_text())
 
+          def json_at(data: dict, *keys: str) -> str:
+              node = data
+              for key in keys:
+                  if not isinstance(node, dict) or key not in node:
+                      return "<missing>"
+                  node = node[key]
+              return str(node)
+
           seen["pixi.toml [workspace].version"] = toml_version("pixi.toml", "workspace", "version")
           # release-please's own anchor and the version it recorded as last released.
           seen["version.txt"] = pathlib.Path("version.txt").read_text().strip()
           seen[".release-please-manifest.json ."] = json_version(".release-please-manifest.json")["."]
-          for pkg in ("bm25_mojo", "cclib_mojo"):
-              seen[f"python/{pkg}/pyproject.toml [project].version"] = toml_version(
-                  f"python/{pkg}/pyproject.toml", "project", "version")
-              init = pathlib.Path(f"python/{pkg}/{pkg}/__init__.py").read_text()
-              match = re.search(r'^__version__\s*=\s*"([^"]+)"', init, re.M)
-              seen[f"python/{pkg}/{pkg}/__init__.py __version__"] = match.group(1) if match else "<missing>"
-          core = json_version("typescript/fuse-mojo/packages/core/package.json")
-          seen["typescript/fuse-mojo/packages/core/package.json version"] = core["version"]
-          for name, pin in core.get("optionalDependencies", {}).items():
-              seen[f"typescript/fuse-mojo/packages/core/package.json optionalDependencies[{name}]"] = pin
-          for plat in ("darwin-arm64", "linux-x64"):
-              seen[f"typescript/fuse-mojo/packages/{plat}/package.json version"] = json_version(
-                  f"typescript/fuse-mojo/packages/{plat}/package.json")["version"]
+          # Every location release-please bumps, discovered by the same globs
+          # release-please-config.json uses. Checking the whole set (not just
+          # the packages this release ships) is what turns a silently skipped
+          # rewrite -- an updater whose JSONPath stopped matching logs a warning
+          # and leaves the file untouched -- into a refusal that names the file,
+          # instead of version drift that surfaces some releases later.
+          root = pathlib.Path(".")
+          for path in sorted(root.glob("python/*/pyproject.toml")):
+              seen[f"{path} [project].version"] = toml_version(str(path), "project", "version")
+          for path in sorted(root.glob("python/*/*/__init__.py")):
+              match = re.search(r'^__version__\s*=\s*"([^"]+)"', path.read_text(), re.M)
+              seen[f"{path} __version__"] = match.group(1) if match else "<missing>"
+          for path in sorted(root.glob("typescript/*/package.json")):
+              seen[f"{path} version"] = json_at(json_version(str(path)), "version")
+          for path in sorted(root.glob("typescript/*/packages/*/package.json")):
+              data = json_version(str(path))
+              seen[f"{path} version"] = json_at(data, "version")
+              for name, pin in data.get("optionalDependencies", {}).items():
+                  seen[f"{path} optionalDependencies[{name}]"] = pin
+          for path in sorted(root.glob("typescript/*/package-lock.json")):
+              lock = json_version(str(path))
+              seen[f"{path} version"] = json_at(lock, "version")
+              for key in ("", "packages/core"):
+                  entry = lock.get("packages", {}).get(key)
+                  if entry is None:
+                      continue
+                  label = key or '""'
+                  seen[f"{path} packages[{label}].version"] = json_at(entry, "version")
+                  for name, pin in entry.get("optionalDependencies", {}).items():
+                      seen[f"{path} packages[{label}].optionalDependencies[{name}]"] = pin
 
           for label, value in seen.items():
               print(f"  {value:<14} {label}", file=sys.stderr)
