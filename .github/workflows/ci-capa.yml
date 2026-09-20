@@ -1,0 +1,173 @@
+name: ci-capa
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Read-only token for every job: the workflow only builds, tests and uploads a
+# build artifact (artifact upload needs no write scope).
+permissions:
+  contents: read
+
+# One run per ref; a newer push to a pull request cancels the run it supersedes.
+# Pushes to main always run to completion.
+concurrency:
+  group: ci-capa-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  test:
+    name: capa-mojo differential tests + wheel (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install pixi
+        uses: prefix-dev/setup-pixi@d3f436a425481402e6a95a1d1fc10331c708cd9e # v0.10.2
+        with:
+          # Install the pixi binary only. The tasks below install the environment
+          # lazily on first `pixi run`, exactly as the previous curl|bash step did;
+          # `pixi install --locked` + caching is a separate, opt-in change.
+          run-install: false
+
+      - name: Install the pinned oracle into .oracle-capa/
+        # flare-capa is a test/benchmark oracle only (the differential suite
+        # compares capa_mojo against capa.engine.match rule for rule); it is
+        # not a runtime dependency of the published wrapper. Installed with
+        # `pip --target` into an unmanaged directory because `pixi run` prunes
+        # pip-installed packages from the pixi env. Pinned: the oracle must be
+        # the published PyPI release the parity claim was measured against.
+        run: |
+          pixi run python -m ensurepip --upgrade
+          pixi run python -m pip install --target .oracle-capa "flare-capa==9.2.0"
+
+      - name: Build the capa Mojo kernel
+        run: pixi run bash kernels/capa/build.sh
+
+      - name: Differential suite (native backend, then forced fallback)
+        run: |
+          PYTHONPATH="python/capa_mojo:.oracle-capa" PYTHONNOUSERSITE=1 pixi run python -m pytest tests/test_capa_match_differential.py tests/test_capa_match_loader.py -q
+          PYTHONPATH="python/capa_mojo:.oracle-capa" PYTHONNOUSERSITE=1 CAPA_MOJO_DISABLE_NATIVE=1 pixi run python -m pytest tests/test_capa_match_differential.py tests/test_capa_match_loader.py -q
+
+      - name: Build + repair the platform wheel (delocate/auditwheel)
+        run: PYTHONNOUSERSITE=1 pixi run bash python/capa_mojo/build_wheel.sh
+
+      - name: Smoke-test the wheel in a clean venv
+        shell: bash
+        run: |
+          set -e
+          python3 -m venv /tmp/capa-wheel-smoke
+          /tmp/capa-wheel-smoke/bin/pip install --quiet python/capa_mojo/dist/*.whl
+          # Hide the pixi env for the smoke: an end user has no Mojo toolchain,
+          # so the wheel must load its kernel purely from its own vendored
+          # libraries (not via the build machine's absolute rpath).
+          repo_root="$PWD"
+          mv .pixi .pixi-hidden
+          trap 'mv "$repo_root/.pixi-hidden" "$repo_root/.pixi"' EXIT
+          cd /tmp
+          for mode in native fallback; do
+            if [ "$mode" = fallback ]; then export CAPA_MOJO_DISABLE_NATIVE=1; fi
+            /tmp/capa-wheel-smoke/bin/python - <<'EOF' | tee "/tmp/quickstart-capa-$mode.txt"
+          import capa_mojo
+
+          rules = capa_mojo.load_rules(["""
+          rule:
+            meta:
+              name: smoke pipes
+              namespace: smoke
+              authors: [smoke]
+              scopes: {static: function, dynamic: unsupported}
+            features:
+              - and:
+                - count(api(CreatePipe)): 2
+                - not:
+                  - string: "debug"
+                - optional:
+                  - mnemonic: push
+          """, """
+          rule:
+            meta:
+              name: smoke consumer
+              authors: [smoke]
+              scopes: {static: function, dynamic: unsupported}
+            features:
+              - and:
+                - match: smoke pipes
+                - 2 or more:
+                  - mnemonic: push
+                  - offset: 0x40
+                  - number: 0x10
+          """])
+          scopes = [
+              (0x401000, {
+                  ("api", "CreatePipe"): {0x401010, 0x401020},
+                  ("mnemonic", "push"): {0x401030},
+                  ("offset", 0x40): {0x401040},
+              }),
+              (0x402000, {("api", "CreatePipe"): {0x402010}}),
+          ]
+          results = rules.match(scopes)
+          assert results[0].rule_names == ["smoke pipes", "smoke consumer"], results[0].rule_names
+          assert results[1].rule_names == [], results[1].rule_names
+          tree = results[0].matches["smoke pipes"]
+          assert tree[0] == "and" and tree[1] is True
+          info = capa_mojo.backend_info()
+          print("quickstart OK:", capa_mojo.__version__, results[0].backend, sorted(results[0].matches))
+          EOF
+            unset CAPA_MOJO_DISABLE_NATIVE
+          done
+          /tmp/capa-wheel-smoke/bin/python - <<'EOF'
+          import capa_mojo
+
+          info = capa_mojo.backend_info()
+          assert info["native_available"], f"wheel must carry the native kernel: {info}"
+          native = open("/tmp/quickstart-capa-native.txt").read()
+          fallback = open("/tmp/quickstart-capa-fallback.txt").read()
+          # identical results; only the backend token in the line may differ
+          assert native.replace("native", "BACKEND") == fallback.replace("fallback", "BACKEND"), (native, fallback)
+          print("wheel smoke OK:", capa_mojo.__version__, info["native_source"])
+          EOF
+
+      - name: Smoke-test the pure wheel (fallback-only) in a clean venv
+        shell: bash
+        run: |
+          set -e
+          cd python/capa_mojo
+          CAPA_MOJO_ALLOW_PURE_WHEEL=1 pixi run python -m build --wheel --no-isolation --outdir dist-pure .
+          python3 -m venv /tmp/capa-pure-wheel-smoke
+          /tmp/capa-pure-wheel-smoke/bin/pip install --quiet dist-pure/*.whl
+          cd /tmp && /tmp/capa-pure-wheel-smoke/bin/python - <<'EOF'
+          import capa_mojo
+
+          rules = capa_mojo.load_rules(["""
+          rule:
+            meta:
+              name: smoke rule
+              authors: [smoke]
+              scopes: {static: function, dynamic: unsupported}
+            features:
+              - and:
+                - count(api(CreatePipe)): 2
+                - not:
+                  - string: "debug"
+          """])
+          result = rules.match({("api", "CreatePipe"): {0x10, 0x20}})
+          assert "smoke rule" in result
+          info = capa_mojo.backend_info()
+          assert not info["native_available"], f"pure wheel must use the fallback: {info}"
+          print("pure-wheel smoke OK:", capa_mojo.__version__)
+          EOF
+
+      - name: Upload wheel
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: capa-mojo-wheel-${{ matrix.os }}
+          path: python/capa_mojo/dist/*.whl
+          retention-days: 14
