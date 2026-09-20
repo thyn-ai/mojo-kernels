@@ -33,9 +33,9 @@ jobs:
         run: pixi run bash kernels/networkx-graph/build.sh
 
       - name: Differential suite (native backend, then forced fallback)
-        # The script provisions the pinned oracle (networkx==3.5) into
-        # build/nx-test-oracle itself; pixi.toml is out of this kernel's
-        # scope, so no pixi task is registered for it.
+        # The networkx oracle (networkx==3.5) comes from pixi.toml
+        # [pypi-dependencies], pinned and lock-verified; the script asserts
+        # the imported version matches the pin.
         run: PYTHONPATH=python/nx_mojo PYTHONNOUSERSITE=1 pixi run bash scripts/test_all_networkx_graph.sh
 
       - name: Build + repair the platform wheel (delocate/auditwheel)

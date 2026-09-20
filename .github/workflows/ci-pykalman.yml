@@ -29,15 +29,13 @@ jobs:
           curl -fsSL https://pixi.sh/install.sh | bash
           echo "$HOME/.pixi/bin" >> "$GITHUB_PATH"
 
-      - name: Install the pykalman oracle (test reference only)
-        # The oracle is a pip-only test dependency (pixi.toml is shared and
-        # not edited per-kernel); the published wrapper never depends on it.
-        run: pixi run python -m pip install pykalman==0.11.2
-
       - name: Build the pykalman Mojo kernel
         run: pixi run bash kernels/pykalman/build.sh
 
       - name: Differential suite (native backend, then forced fallback)
+        # The pykalman oracle (pykalman==0.11.2) comes from pixi.toml
+        # [pypi-dependencies], pinned and lock-verified; the published
+        # wrapper never depends on it.
         run: pixi run bash scripts/test_all_pykalman.sh
         env:
           PYTHONPATH: python/pykalman_mojo

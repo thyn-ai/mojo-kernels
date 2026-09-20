@@ -32,12 +32,10 @@ jobs:
       - name: Build the uproot-branches Mojo kernel
         run: pixi run bash kernels/uproot-branches/build.sh
 
-      - name: Install oracle deps (uproot/awkward) into the pixi env
-        # The repo pixi manifest is shared; these test-oracle packages are
-        # installed per-leg instead (pinned, matching the README benchmark).
-        run: pixi run python -m pip install "uproot==5.7.6" "awkward==2.14.0" "cramjam==2.12.1"
-
       - name: Differential suite (native backend, then forced fallback)
+        # The oracle deps (uproot/awkward) and the wrapper's runtime dep
+        # (cramjam) come from pixi.toml [pypi-dependencies], pinned and
+        # lock-verified; nothing is pip-installed into the env.
         run: pixi run bash scripts/test_all_uproot-branches.sh
 
       - name: Build + repair the platform wheel (delocate/auditwheel)

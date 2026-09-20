@@ -2,23 +2,21 @@
 # Full ase-mojo differential suite: once against the native kernel, once
 # with the pure-Python fallback forced on.
 #
-# The ASE oracle (test-only dependency) is installed into a scratch
-# directory so it never touches the repo toolchain env:
-#   bash scripts/test_all_ase_neighborlist.sh
-# (run with the repo toolchain on PATH, e.g. `pixi run bash
-# scripts/test_all_ase_neighborlist.sh`).
+# The ASE oracle (ase==3.26.0, test-only dependency) comes from the repo pixi
+# environment (pixi.toml [pypi-dependencies], pinned and lock-verified).
+# Run from the repository root inside the pixi environment:
+#   pixi run bash scripts/test_all_ase_neighborlist.sh
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-ORACLE_SITE="${ASE_ORACLE_SITE:-$(mktemp -d)/oracle}"
-if [ ! -d "${ORACLE_SITE}/ase" ]; then
-  echo "== installing ASE oracle into ${ORACLE_SITE} =="
-  python -m pip install --quiet --target "${ORACLE_SITE}" \
-    "ase==${ASE_ORACLE_VERSION:-3.26.0}" "scipy==1.16.3"
-fi
+python -c "import ase.neighborlist" 2>/dev/null || {
+  echo "error: the ASE oracle package is not importable;" >&2
+  echo "       run inside the pixi environment (pixi install)" >&2
+  exit 1
+}
 
-export PYTHONPATH="python/ase_mojo:${ORACLE_SITE}${PYTHONPATH:+:${PYTHONPATH}}"
+export PYTHONPATH="python/ase_mojo${PYTHONPATH:+:${PYTHONPATH}}"
 export PYTHONNOUSERSITE=1
 
 SUITE="tests/test_ase_neighborlist_differential.py tests/test_ase_neighborlist_loader.py"
