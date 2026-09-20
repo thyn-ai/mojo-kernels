@@ -42,6 +42,9 @@ from __future__ import annotations
 
 import argparse
 import os
+# The only XML parsed here is the MAVLink dialect specification, a trusted,
+# repo-vendored protocol-definition file (never user/network input), and
+# ElementTree does not resolve external entities. nosemgrep: use-defused-xml-parse
 import xml.etree.ElementTree as ET
 
 # XML type -> (type code, scalar size, struct char)
