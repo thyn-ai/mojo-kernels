@@ -7,7 +7,7 @@ name = "elephant-mojo"
 version = "0.1.2"
 description = "Fast SPADE surrogate dithering and p-value spectrum for elephant-style spike-train analysis, powered by a Mojo kernel (pure-Python fallback included)."
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.12"
 license = "Apache-2.0"
 authors = [{ name = "Algenta" }]
 keywords = ["elephant", "spade", "spike-train", "surrogates", "dithering", "pvalue-spectrum", "neuroscience", "mojo"]

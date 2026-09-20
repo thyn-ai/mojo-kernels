@@ -7,7 +7,7 @@ name = "motmetrics-mojo"
 version = "0.1.2"
 description = "Fast MOTChallenge metrics (MOTA/MOTP/IDF1/MOSTLY_*), drop-in-shaped for motmetrics, powered by a Mojo kernel (pure-Python fallback included)."
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.12"
 license = "Apache-2.0"
 authors = [{ name = "Algenta" }]
 keywords = ["motmetrics", "motchallenge", "mota", "motp", "idf1", "multiple-object-tracking", "mojo", "evaluation"]

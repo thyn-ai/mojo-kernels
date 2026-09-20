@@ -7,7 +7,7 @@ name = "spatialmath-mojo"
 version = "0.1.2"
 description = "Fast batched SE(3)/SO(3) pose algebra (compose, inverse, point transforms) matching spatialmath-python, powered by a Mojo kernel (pure-Python fallback included)."
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.12"
 license = "Apache-2.0"
 authors = [{ name = "Algenta" }]
 keywords = ["robotics", "spatial-math", "SE3", "SO3", "pose", "homogeneous-transformation", "mojo"]
