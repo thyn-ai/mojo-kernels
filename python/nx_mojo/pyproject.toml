@@ -7,7 +7,7 @@ name = "nx-mojo"
 version = "0.1.2"
 description = "Mojo-accelerated networkx: betweenness_centrality and single_source_dijkstra with networkx-identical results (pure-Python fallback included)."
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.12"
 license = "Apache-2.0"
 authors = [{ name = "Algenta" }]
 keywords = ["networkx", "graph", "betweenness-centrality", "dijkstra", "shortest-path", "mojo"]

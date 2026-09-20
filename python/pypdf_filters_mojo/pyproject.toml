@@ -7,7 +7,7 @@ name = "pypdf-filters-mojo"
 version = "0.1.2"
 description = "Mojo-accelerated PNG-predictor and LZW decoders for PDF streams, byte-compatible with pypdf (pure-Python fallback included)."
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.12"
 license = "Apache-2.0"
 authors = [{ name = "Algenta" }]
 keywords = ["pypdf", "pdf", "png-predictor", "lzw", "mojo", "flate", "decode"]

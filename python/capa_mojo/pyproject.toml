@@ -7,7 +7,7 @@ name = "capa-mojo"
 version = "0.1.2"
 description = "Accelerated rule-evaluation engine for capa-style rule sets, powered by a Mojo kernel (pure-Python fallback included)."
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.12"
 license = "Apache-2.0"
 authors = [{ name = "Algenta" }]
 keywords = ["capa", "malware", "security", "reverse-engineering", "mojo", "rules"]

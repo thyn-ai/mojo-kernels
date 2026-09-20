@@ -7,7 +7,7 @@ name = "ruptures-mojo"
 version = "0.1.2"
 description = "Drop-in faster replacement for ruptures change-point detection, powered by a Mojo kernel (pure-Python fallback included)."
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.12"
 license = "Apache-2.0"
 authors = [{ name = "Algenta" }]
 keywords = ["change-point-detection", "ruptures", "pelt", "binary-segmentation", "dynamic-programming", "mojo", "time-series"]

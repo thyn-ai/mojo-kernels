@@ -7,7 +7,7 @@ name = "uproot-mojo"
 version = "0.1.2"
 description = "Fast ROOT TBranch reading for vector<T> and string branches, powered by a Mojo kernel (pure-Python fallback included)."
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.12"
 license = "Apache-2.0"
 authors = [{ name = "Algenta" }]
 keywords = ["root", "uproot", "hep", "tbranch", "ttree", "mojo", "particle-physics"]
