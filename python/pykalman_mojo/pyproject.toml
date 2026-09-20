@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "pykalman-mojo"
-version = "0.1.0"
+version = "0.1.1"
 description = "Drop-in faster Kalman filter/smoother for pykalman workloads, powered by a Mojo kernel (pure-NumPy fallback included)."
 readme = "README.md"
 requires-python = ">=3.9"

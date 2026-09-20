@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "ase-mojo"
-version = "0.1.0"
+version = "0.1.1"
 description = "Fast periodic neighbor lists with an ASE-compatible API, powered by a Mojo kernel (pure-Python fallback included)."
 readme = "README.md"
 requires-python = ">=3.9"

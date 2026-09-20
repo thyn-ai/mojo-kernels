@@ -10,6 +10,14 @@ Entries after 0.1.0 are written by [release-please](https://github.com/googleapi
 from the Conventional Commits merged since the previous tag, in the release
 pull request that cuts the version ([RELEASING.md](RELEASING.md)).
 
+## [0.1.1](https://github.com/thyn-ai/mojo-kernels/compare/v0.1.0...v0.1.1) (2026-09-20)
+
+
+### Fixed
+
+* **bm25:** evaluate a BM25Plus term in reference order when its floor overflows ([#28](https://github.com/thyn-ai/mojo-kernels/issues/28)) ([1381151](https://github.com/thyn-ai/mojo-kernels/commit/1381151dc2c72a5d33ef8ceb300248c7fd826391))
+* **elephant:** duplicate LLVM OpenMP runtime abort on macOS CI + de-flaked occupancy z-tests ([#24](https://github.com/thyn-ai/mojo-kernels/issues/24)) ([6c6b6c5](https://github.com/thyn-ai/mojo-kernels/commit/6c6b6c58d4561590158071233d5a5427028c2a3e))
+
 ## [0.1.0] - 2026-09-20
 
 ### Added
