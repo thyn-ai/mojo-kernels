@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-09-20
+
 ### Added
 
 - `bm25-mojo` (Python) — drop-in replacement for `rank_bm25` (`BM25Okapi`,
@@ -59,6 +61,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   vendors GCC's libgomp instead, passed. The suite now runs a preflight that
   reports the runtime's own message instead of an opaque abort.
 
+- `LICENSE` is the verbatim Apache License 2.0 text (with the appendix naming
+  Algenta as the copyright holder). The previous copy paraphrased sections 4,
+  5, 7 and 9, so GitHub and license scanners could not identify it as
+  Apache-2.0; every package's declared `license` field was always Apache-2.0.
+
 ### Known issues
 
 - `bm25-mojo`: for degenerate parameters (`k1 == 0`, `b == 1` with an empty
@@ -73,11 +80,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   orders disagree (inf x 0 = NaN on one side, 0 on the other)
   ([#16](https://github.com/thyn-ai/mojo-kernels/issues/16)).
 
-### Fixed
-
-- `LICENSE` is the verbatim Apache License 2.0 text (with the appendix naming
-  Algenta as the copyright holder). The previous copy paraphrased sections 4,
-  5, 7 and 9, so GitHub and license scanners could not identify it as
-  Apache-2.0; every package's declared `license` field was always Apache-2.0.
-
-[Unreleased]: https://github.com/thyn-ai/mojo-kernels/commits/main
+[Unreleased]: https://github.com/thyn-ai/mojo-kernels/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/thyn-ai/mojo-kernels/releases/tag/v0.1.0
