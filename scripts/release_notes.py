@@ -48,12 +48,15 @@ from pathlib import Path
 HEADING_RE = re.compile(r"^## \[([^\]]+)\](.*)$")
 # Any second-level heading ends a section, whether or not it is a version.
 SECTION_END_RE = re.compile(r"^## ")
-# A link-reference definition line: `[0.1.0]: https://...`. Keep a Changelog
-# collects the version links in one block at the very end of the file, which
-# makes them the tail of the last section; only that trailing block is
-# dropped. A definition that a section's own text refers to
-# (`[text][bug-42]` ... `[bug-42]: https://...`) is content and stays.
-LINK_DEFINITION_RE = re.compile(r"^\[[^\]]+\]:\s+\S+\s*$")
+# A link-reference definition line: `[0.1.0]: https://...`, optionally with
+# CommonMark's title after the destination (`"..."`, `'...'` or `(...)`).
+# Keep a Changelog collects the version links in one block at the very end
+# of the file, which makes them the tail of the last section; only that
+# trailing block is dropped. A definition that a section's own text refers
+# to (`[text][bug-42]` ... `[bug-42]: https://...`) is content and stays.
+LINK_DEFINITION_RE = re.compile(
+    r"^\[[^\]]+\]:\s+\S+(?:\s+(?:\"[^\"]*\"|'[^']*'|\([^)]*\)))?\s*$"
+)
 
 
 class ChangelogError(ValueError):

@@ -93,6 +93,21 @@ class ExtractSection(unittest.TestCase):
         self.assertNotIn("[0.2.0]: https://", section)
         self.assertTrue(section.endswith("- the first release.\n"))
 
+    def test_titled_link_definitions_in_the_trailing_block_are_dropped_too(self):
+        # CommonMark allows a title after the destination, in any of its
+        # three quoting forms; a titled definition at the tail is still a
+        # definition, not content.
+        changelog = (
+            "## [1.0.0] - 2026-01-01\n\n- first\n\n"
+            "[1.0.0]: https://github.com/thyn-ai/mojo-kernels/releases/tag/v1.0.0 \"Release 1.0.0\"\n"
+            "[docs]: https://example.invalid/docs 'The docs'\n"
+            "[site]: https://example.invalid/ (Home page)\n"
+        )
+        section = release_notes.extract_section(changelog, "1.0.0")
+        self.assertEqual(section, "## [1.0.0] - 2026-01-01\n\n- first\n")
+        # A line with trailing text that is not a quoted title is content.
+        self.assertIsNone(release_notes.LINK_DEFINITION_RE.match("[x]: https://example.invalid see also"))
+
     def test_reference_style_links_used_inside_a_section_are_kept(self):
         changelog = (
             "## [1.1.0] - 2026-02-01\n\n"
