@@ -17,7 +17,7 @@ from ruptures_mojo._native import backend_info, native_available
 from ruptures_mojo._reference import BadSegmentationParameters
 from ruptures_mojo.core import detect, last_backend
 
-__version__ = "0.1.0"  # x-release-please-version
+__version__ = "0.1.1"  # x-release-please-version
 __all__ = [
     "BadSegmentationParameters",
     "backend_info",

@@ -124,7 +124,11 @@ on its line and an entry in `extra-files`; without one it drifts. The smoke
 scripts under `typescript/*/scripts/` read the version from
 `packages/core/package.json` and need nothing. `preflight` checks the
 packages a release ships (bm25-mojo, cclib-mojo, fuse-mojo) together with
-`pixi.toml`, `version.txt` and the manifest.
+`pixi.toml`, `version.txt` and the manifest, plus every location in the
+table above: an updater whose path stopped matching logs a warning and
+leaves its file untouched, so `preflight` checking the whole set is what
+turns that into a refusal naming the file rather than version drift that
+surfaces releases later.
 
 ### Re-running a release
 
