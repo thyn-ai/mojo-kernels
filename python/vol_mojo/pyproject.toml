@@ -1,0 +1,35 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "vol-mojo"
+version = "0.1.0"
+description = "Batch registry-hive walking and pool-header constraint validation with volatility3-compatible semantics, powered by a Mojo kernel (pure-Python fallback included)."
+readme = "README.md"
+requires-python = ">=3.9"
+license = "Apache-2.0"
+authors = [{ name = "Algenta" }]
+keywords = ["volatility3", "registry-hive", "pool-header", "memory-forensics", "dfir", "mojo"]
+classifiers = [
+  "Intended Audience :: Information Technology",
+  "License :: OSI Approved :: Apache Software License",
+  "Programming Language :: Python :: 3",
+  "Topic :: Security",
+  "Topic :: System :: Recovery Tools",
+]
+# Pure stdlib + ctypes: the wrapper needs no third-party packages at runtime,
+# and volatility3 itself is optional (integration helpers duck-type its
+# objects; it is only ever a test oracle, never a runtime dependency).
+dependencies = []
+
+[project.urls]
+Repository = "https://github.com/thyn-ai/mojo-kernels"
+
+# Wheels only: the shared library cannot rebuild from an sdist, so no sdist
+# target is offered. Per-platform wheels are produced by CI.
+[tool.hatch.build.targets.wheel]
+packages = ["vol_mojo"]
+
+[tool.hatch.build.hooks.custom]
+path = "hatch_build.py"

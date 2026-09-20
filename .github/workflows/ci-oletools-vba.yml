@@ -1,0 +1,95 @@
+name: ci-oletools-vba
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Read-only token for every job: the workflow only builds, tests and uploads a
+# build artifact (artifact upload needs no write scope).
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: oletools-mojo differential tests + wheel (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install pixi
+        uses: prefix-dev/setup-pixi@d3f436a425481402e6a95a1d1fc10331c708cd9e # v0.10.2
+        with:
+          # Install the pixi binary only. The tasks below install the environment
+          # lazily on first `pixi run`, exactly as the previous curl|bash step did;
+          # `pixi install --locked` + caching is a separate, opt-in change.
+          run-install: false
+
+      - name: Install uv (for the oracle package)
+        uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        with:
+          # The uv binary only, on PATH, as the previous curl|sh step left it;
+          # no uv cache is restored or saved.
+          enable-cache: false
+
+      - name: Install the oletools oracle into .oracle-oletools
+        # oletools is the differential-test oracle only, never a runtime
+        # dependency of oletools-mojo. pixi.toml is shared by every kernel leg
+        # in this repo, so the oracle is installed imperatively into a
+        # --target directory that pixi never touches, and put on PYTHONPATH.
+        run: |
+          pixi install
+          uv pip install --python .pixi/envs/default/bin/python --target .oracle-oletools "oletools==0.60.2"
+
+      - name: Build the oletools-vba Mojo kernel
+        run: pixi run bash kernels/oletools-vba/build.sh
+
+      - name: Differential suite (native backend, then forced fallback)
+        run: PYTHONNOUSERSITE=1 pixi run bash scripts/test_all_oletools_vba.sh
+
+      - name: Build + repair the platform wheel (delocate/auditwheel)
+        run: pixi run bash python/oletools_mojo/build_wheel.sh
+
+      - name: Smoke-test the wheel in a clean venv
+        shell: bash
+        run: |
+          set -e
+          python3 -m venv /tmp/oletools-wheel-smoke
+          /tmp/oletools-wheel-smoke/bin/pip install --quiet python/oletools_mojo/dist/*.whl
+          # Hide the pixi env for the smoke: an end user has no Mojo toolchain,
+          # so the wheel must load its kernel purely from its own vendored
+          # libraries (not via the build machine's absolute rpath).
+          repo_root="$PWD"
+          mv .pixi .pixi-hidden
+          trap 'mv "$repo_root/.pixi-hidden" "$repo_root/.pixi"' EXIT
+          cd /tmp
+          # quickstart lives under examples/ so its directory contains no
+          # oletools_mojo/ package: sys.path[0] cannot shadow the installed wheel.
+          /tmp/oletools-wheel-smoke/bin/python "$repo_root/python/oletools_mojo/examples/quickstart.py" | tee /tmp/quickstart-native.txt
+          # The forced fallback must produce identical output.
+          OLETOOLS_MOJO_DISABLE_NATIVE=1 /tmp/oletools-wheel-smoke/bin/python "$repo_root/python/oletools_mojo/examples/quickstart.py" | tee /tmp/quickstart-fallback.txt
+          /tmp/oletools-wheel-smoke/bin/python - <<'EOF'
+          import oletools_mojo
+
+          info = oletools_mojo.backend_info()
+          assert info["native_available"], f"wheel must carry the native kernel: {info}"
+
+          native = open("/tmp/quickstart-native.txt").read()
+          fallback = open("/tmp/quickstart-fallback.txt").read()
+          strip = lambda t: "\n".join(l for l in t.splitlines() if not l.startswith("oletools-mojo"))
+          assert strip(native) == strip(fallback), (native, fallback)
+          print("wheel smoke OK:", oletools_mojo.__version__, info["native_source"])
+          EOF
+
+      - name: Upload wheel
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: oletools-mojo-wheel-${{ matrix.os }}
+          path: python/oletools_mojo/dist/*.whl
+          retention-days: 14

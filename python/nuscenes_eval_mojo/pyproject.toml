@@ -1,0 +1,33 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "nuscenes-eval-mojo"
+version = "0.1.0"
+description = "Drop-in faster replacement for nuscenes-devkit's DetectionEval, powered by a Mojo kernel (pure-Python fallback included)."
+readme = "README.md"
+requires-python = ">=3.9"
+license = "Apache-2.0"
+authors = [{ name = "Algenta" }]
+keywords = ["nuscenes", "autonomous-driving", "detection", "evaluation", "mojo", "metrics"]
+classifiers = [
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: Apache Software License",
+  "Programming Language :: Python :: 3",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+# The only runtime dependency: metric data comes back as np.ndarray-backed
+# numbers, mirroring the devkit's own NumPy-based implementation.
+dependencies = ["numpy>=1.21"]
+
+[project.urls]
+Repository = "https://github.com/thyn-ai/mojo-kernels"
+
+# Wheels only: the shared library cannot rebuild from an sdist, so no sdist
+# target is offered. Per-platform wheels are produced by CI.
+[tool.hatch.build.targets.wheel]
+packages = ["nuscenes_eval_mojo"]
+
+[tool.hatch.build.hooks.custom]
+path = "hatch_build.py"
