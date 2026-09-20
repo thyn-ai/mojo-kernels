@@ -4,34 +4,48 @@ Written fresh from the textbook BM25 family of ranking functions
 (Trotman et al., "Improvements to BM25 and Language Models Examined").
 No third-party Mojo code is used or adapted.
 
-Exported C ABI (batch-shaped: the index is built once from CSR postings,
-then each call scores one whole token-id query against the whole corpus):
+Exported C ABI v2 (batch-shaped: the index is built once from doc-major
+term-frequency streams, then each call scores one whole token-id query — or
+one whole batch of queries — against the whole corpus):
 
-    int32_t  bm25mojo_abi_version(void)
+    int32_t  bm25mojo_abi_version(void)              -> 2
     void*    bm25mojo_index_create(n_docs, doc_len, avgdl, k1, b, delta,
-                                   variant, n_terms, offsets, docs, freqs, idf)
+                                   variant, n_terms, doc_offsets, doc_tids,
+                                   doc_freqs, idf)
     int32_t  bm25mojo_score(handle, qids, n_query, out_scores)
+    int32_t  bm25mojo_score_batch(handle, qids_flat, query_offsets,
+                                  n_queries, out_panel)
     void     bm25mojo_index_destroy(handle)
 
-The inverse document frequency is computed by the Python wrapper (it owns the
-vocabulary); this kernel receives one idf value per term and evaluates only the
-per-document accumulation, vectorized across postings with SIMD:
+ABI v2 changes versus v1 (motivated by benchmarks/AUTOPSY-bm25s.md):
+
+* Index-time baking. The kernel builds the CSR postings itself and bakes the
+  full per-posting contribution `idf * tf-component` into the CSR values, in
+  the same IEEE-754 float64 operation order the v1 kernel used at query time
+  (which itself matched the reference NumPy expression order). Query-time
+  scoring of Okapi/BM25L is then a pure gather-add — bit-identical results,
+  with no division, no doc_len gather, and no idf lookup on the hot path.
+* No score-buffer zeroing in the kernel. The caller passes a zeroed buffer
+  (numpy calloc), so per-query cost is O(postings), not O(n_docs).
+* A batch entry point scores many queries in one FFI call; each row is
+  computed exactly as the single-query path computes it (bit-identical).
+
+Score formulas (reference operation order, PyPI rank_bm25 0.2.2):
 
     Okapi: score[d] += idf * (qf * (k1 + 1) / (qf + k1 * (1 - b + b * dl / avgdl)))
     Plus:  score[d] += idf * (delta + qf * (k1 + 1) / (k1 * (1 - b + b * dl / avgdl) + qf))
     L:     score[d] += idf * qf * (k1 + 1) * (ctd + delta) / (k1 + ctd + delta)
                             with ctd = qf / (1 - b + b * dl / avgdl)
 
-All arithmetic is IEEE-754 float64 in the same operation order as the
-reference NumPy implementation (PyPI rank_bm25 0.2.2), with one SIMD lane per
-posting, so scores match the reference element-wise (bit-identical in
-practice). Accumulation per document is sequential in query-term order. For
-BM25Plus, whose delta term gives even unposted documents a constant per-term
-floor, the floor is added with a dense SIMD pass per query term and posted
-documents receive only their excess over it (Okapi/BM25L have a zero floor).
-When that floor is not finite (|idf * delta| overflows float64, or is NaN),
-the excess would be inf - inf = NaN, so the term is instead evaluated once per
-document in reference order, exactly as the reference does.
+BM25Plus gives even unposted documents a per-term floor idf * delta. The
+baked posting value is the posted excess `full - floor`; per query the floor
+sum F (accumulated in query-token order) is written with one dense SIMD fill,
+and posted excess is gathered on top. When idf * delta is not finite
+(|idf * delta| overflows to +-inf or is NaN), the reference's per-document
+value for that term is the same non-finite constant for EVERY document
+(posted or not, because delta + frac rounds to delta), so the term is flagged
+at index time and contributes that constant via the dense fill; its postings
+are skipped exactly as the reference's single evaluation requires.
 """
 
 from std.math import isfinite
@@ -40,7 +54,7 @@ from std.memory.alloc import unsafe_alloc
 from std.origin import MutUntrackedOrigin
 from std.sys import simd_width_of
 
-comptime ABI_VERSION: Int32 = 1
+comptime ABI_VERSION: Int32 = 2
 
 # Score-formula variants. The idf values always come from the caller.
 comptime VARIANT_OKAPI: Int32 = 0
@@ -59,7 +73,7 @@ comptime Handle = Optional[Pointer[UInt8, MutUntrackedOrigin]]
 
 
 struct BM25Index(Copyable, Movable):
-    """Owned, native copy of one corpus index (CSR postings + per-doc length)."""
+    """Owned native index: CSR postings with baked float64 contributions."""
 
     var n_docs: Int64
     var avgdl: Float64
@@ -69,11 +83,12 @@ struct BM25Index(Copyable, Movable):
     var variant: Int32
     var n_terms: Int64
     var nnz: Int64
-    var doc_len: F64Ptr  # [n_docs]
     var offsets: I64Ptr  # [n_terms + 1] CSR row offsets
     var docs: I32Ptr  # [nnz] posting doc ids (ascending per term)
-    var freqs: F64Ptr  # [nnz] posting term frequencies
+    var weights: F64Ptr  # [nnz] baked contribution (full - floor), see module docs
     var idf: F64Ptr  # [n_terms]
+    var overflow: Pointer[Bool, MutUntrackedOrigin]  # [n_terms] Plus only
+    var floor0: F64Ptr  # [n_terms] Plus only: idf * delta per term
 
     def __init__(
         out self,
@@ -85,11 +100,12 @@ struct BM25Index(Copyable, Movable):
         variant: Int32,
         n_terms: Int64,
         nnz: Int64,
-        doc_len: F64Ptr,
         offsets: I64Ptr,
         docs: I32Ptr,
-        freqs: F64Ptr,
+        weights: F64Ptr,
         idf: F64Ptr,
+        overflow: Pointer[Bool, MutUntrackedOrigin],
+        floor0: F64Ptr,
     ):
         self.n_docs = n_docs
         self.avgdl = avgdl
@@ -99,11 +115,12 @@ struct BM25Index(Copyable, Movable):
         self.variant = variant
         self.n_terms = n_terms
         self.nnz = nnz
-        self.doc_len = doc_len
         self.offsets = offsets
         self.docs = docs
-        self.freqs = freqs
+        self.weights = weights
         self.idf = idf
+        self.overflow = overflow
+        self.floor0 = floor0
 
 
 def _term_score[
@@ -164,12 +181,17 @@ def bm25mojo_index_create(
     delta: Float64,
     variant: Int32,
     n_terms: Int64,
-    offsets: I64Ptr,
-    docs: I32Ptr,
-    freqs: F64Ptr,
+    doc_offsets: I64Ptr,
+    doc_tids: I32Ptr,
+    doc_freqs: F64Ptr,
     idf: F64Ptr,
 ) abi("C") -> Handle:
-    """Copy the caller's buffers into a native index; NULL on invalid input."""
+    """Build a baked CSR index from doc-major term streams; NULL on invalid input.
+
+    `doc_offsets` has n_docs + 1 ascending entries into `doc_tids`/`doc_freqs`
+    (the unique terms of each document, any order). All buffers are validated
+    and copied; the caller may free them on return.
+    """
     if (
         n_docs <= 0
         or n_terms < 0
@@ -177,25 +199,119 @@ def bm25mojo_index_create(
         or variant > VARIANT_PLUS
     ):
         return None
+    var ntok = doc_offsets[unsafe_offset=Int(n_docs)]
+    if ntok < 0:
+        return None
 
-    var nnz = Int64(0)
-    if n_terms > 0:
-        nnz = offsets[unsafe_offset=Int(n_terms)]
-        if nnz < 0:
+    # --- pass 1: document frequencies (also validates term ids) ---
+    var df = unsafe_alloc[Int64](Int(n_terms) + 1)
+    for t in range(Int(n_terms) + 1):
+        df[unsafe_offset=t] = 0
+    var prev_off = Int64(0)
+    for d in range(Int(n_docs)):
+        var off = doc_offsets[unsafe_offset=d]
+        if off != prev_off:
+            df.unsafe_free()
+            return None  # offsets must be contiguous and ascending
+        var end = doc_offsets[unsafe_offset=d + 1]
+        if end < off or end > ntok:
+            df.unsafe_free()
             return None
+        prev_off = end
+        for e in range(Int(off), Int(end)):
+            var t = Int(doc_tids[unsafe_offset=e])
+            if t < 0 or t >= Int(n_terms):
+                df.unsafe_free()
+                return None
+            df[unsafe_offset=t] += 1
 
-    var dl_copy = unsafe_alloc[Float64](Int(n_docs))
-    unsafe_memcpy(dest=dl_copy, src=doc_len, count=Int(n_docs))
-    var off_copy = unsafe_alloc[Int64](Int(n_terms) + 1)
-    unsafe_memcpy(dest=off_copy, src=offsets, count=Int(n_terms) + 1)
+    # --- CSR offsets (exclusive prefix sum over df) ---
+    var offsets = unsafe_alloc[Int64](Int(n_terms) + 1)
+    offsets[unsafe_offset=0] = 0
+    for t in range(Int(n_terms)):
+        offsets[unsafe_offset=t + 1] = offsets[unsafe_offset=t] + df[
+            unsafe_offset=t
+        ]
+    var nnz = offsets[unsafe_offset=Int(n_terms)]
+    if nnz != ntok:
+        df.unsafe_free()
+        offsets.unsafe_free()
+        return None  # ntok must equal the total posting count
+
+    # --- scatter docs into CSR (ascending per term: docs arrive in order) ---
+    var docs = unsafe_alloc[Int32](Int(nnz))
+    var cursor = unsafe_alloc[Int64](Int(n_terms))
+    for t in range(Int(n_terms)):
+        cursor[unsafe_offset=t] = offsets[unsafe_offset=t]
+    for d in range(Int(n_docs)):
+        var e = Int(doc_offsets[unsafe_offset=d])
+        var end = Int(doc_offsets[unsafe_offset=d + 1])
+        while e < end:
+            var t = Int(doc_tids[unsafe_offset=e])
+            var pos = cursor[unsafe_offset=t]
+            cursor[unsafe_offset=t] = pos + 1
+            docs[unsafe_offset=Int(pos)] = Int32(d)
+            e += 1
+    cursor.unsafe_free()
+
+    # --- per-term floors (Plus) and overflow flags ---
     var idf_copy = unsafe_alloc[Float64](Int(n_terms))
     if n_terms > 0:
         unsafe_memcpy(dest=idf_copy, src=idf, count=Int(n_terms))
-    var docs_copy = unsafe_alloc[Int32](Int(nnz))
-    var freqs_copy = unsafe_alloc[Float64](Int(nnz))
-    if nnz > 0:
-        unsafe_memcpy(dest=docs_copy, src=docs, count=Int(nnz))
-        unsafe_memcpy(dest=freqs_copy, src=freqs, count=Int(nnz))
+    var floor0 = unsafe_alloc[Float64](Int(n_terms))
+    var overflow = unsafe_alloc[Bool](Int(n_terms))
+    for t in range(Int(n_terms)):
+        var f = Float64(0.0)
+        if variant == VARIANT_PLUS:
+            f = idf_copy[unsafe_offset=t] * delta
+        floor0[unsafe_offset=t] = f
+        overflow[unsafe_offset=t] = not isfinite(f)
+
+    # --- bake weights = full - floor per posting (reference op order) ---
+    # Copy raw frequencies into a temp CSR-ordered buffer (reusing df as the
+    # scatter cursor, reset to the row offsets), then evaluate the
+    # contribution per posting with SIMD over each term's contiguous run.
+    var freqs = unsafe_alloc[Float64](Int(nnz))
+    for t in range(Int(n_terms)):
+        df[unsafe_offset=t] = offsets[unsafe_offset=t]
+    for d in range(Int(n_docs)):
+        var e = Int(doc_offsets[unsafe_offset=d])
+        var end = Int(doc_offsets[unsafe_offset=d + 1])
+        while e < end:
+            var t = Int(doc_tids[unsafe_offset=e])
+            freqs[unsafe_offset=Int(df[unsafe_offset=t])] = doc_freqs[
+                unsafe_offset=e
+            ]
+            df[unsafe_offset=t] += 1
+            e += 1
+    df.unsafe_free()
+    var weights = unsafe_alloc[Float64](Int(nnz))
+    for t in range(Int(n_terms)):
+        var idf_t = idf_copy[unsafe_offset=t]
+        var floor_t = floor0[unsafe_offset=t]
+        var j = Int(offsets[unsafe_offset=t])
+        var end = Int(offsets[unsafe_offset=t + 1])
+        while j + WIDTH <= end:
+            var qf = freqs.unsafe_load[width=WIDTH](j)
+            var dl = SIMD[DType.float64, WIDTH]()
+            for lane in range(WIDTH):
+                dl[lane] = doc_len[unsafe_offset=Int(docs[unsafe_offset=j + lane])]
+            var w = _term_score[WIDTH](
+                variant, qf, dl, idf_t, k1, b, avgdl, delta
+            ) - SIMD[DType.float64, WIDTH](floor_t)
+            weights.unsafe_store(j, w)
+            j += WIDTH
+        while j < end:
+            var qf = SIMD[DType.float64, 1](freqs[unsafe_offset=j])
+            var dl = SIMD[DType.float64, 1](
+                doc_len[unsafe_offset=Int(docs[unsafe_offset=j])]
+            )
+            var w = _term_score[1](
+                variant, qf, dl, idf_t, k1, b, avgdl, delta
+            ) - SIMD[DType.float64, 1](floor_t)
+            weights[unsafe_offset=j] = w[0]
+            j += 1
+    freqs.unsafe_free()
 
     var idx = unsafe_alloc[BM25Index](1)
     idx[] = BM25Index(
@@ -207,13 +323,76 @@ def bm25mojo_index_create(
         variant,
         n_terms,
         nnz,
-        dl_copy,
-        off_copy,
-        docs_copy,
-        freqs_copy,
+        offsets,
+        docs,
+        weights,
         idf_copy,
+        overflow,
+        floor0,
     )
     return idx.unsafe_bitcast[UInt8]()
+
+
+def _score_one(
+    idx: Pointer[BM25Index, MutUntrackedOrigin],
+    qids: I32Ptr,
+    n_query: Int64,
+    out_scores: F64Ptr,
+) -> Int32:
+    """Accumulate one query into `out_scores` (must be pre-zeroed)."""
+    var n_docs = Int(idx[].n_docs)
+    var variant = idx[].variant
+    var n_terms = Int(idx[].n_terms)
+    var offsets = idx[].offsets
+    var docs = idx[].docs
+    var weights = idx[].weights
+    var overflow = idx[].overflow
+    var floor0 = idx[].floor0
+
+    if variant == VARIANT_PLUS:
+        # Dense floor: F = sum of per-term floors in query-token order, then
+        # one write-only SIMD fill (bit-identical to zero + F). Overflowing
+        # terms contribute their non-finite constant here; their postings are
+        # skipped below because the reference's per-document value for them
+        # is that same constant everywhere.
+        var floor_total = Float64(0.0)
+        for qi in range(Int(n_query)):
+            var t = Int(qids[unsafe_offset=qi])
+            if t < 0 or t >= n_terms:
+                return 2
+            floor_total += floor0[unsafe_offset=t]
+        var fill = SIMD[DType.float64, WIDTH](floor_total)
+        var d = 0
+        while d + WIDTH <= n_docs:
+            out_scores.unsafe_store(d, fill)
+            d += WIDTH
+        while d < n_docs:
+            out_scores[unsafe_offset=d] = floor_total
+            d += 1
+        for qi in range(Int(n_query)):
+            var t = Int(qids[unsafe_offset=qi])
+            if overflow[unsafe_offset=t]:
+                continue
+            var j = Int(offsets[unsafe_offset=t])
+            var end = Int(offsets[unsafe_offset=t + 1])
+            while j < end:
+                out_scores[unsafe_offset=Int(docs[unsafe_offset=j])] += weights[
+                    unsafe_offset=j
+                ]
+                j += 1
+    else:
+        for qi in range(Int(n_query)):
+            var t = Int(qids[unsafe_offset=qi])
+            if t < 0 or t >= n_terms:
+                return 2
+            var j = Int(offsets[unsafe_offset=t])
+            var end = Int(offsets[unsafe_offset=t + 1])
+            while j < end:
+                out_scores[unsafe_offset=Int(docs[unsafe_offset=j])] += weights[
+                    unsafe_offset=j
+                ]
+                j += 1
+    return 0
 
 
 @export
@@ -223,106 +402,58 @@ def bm25mojo_score(
     n_query: Int64,
     out_scores: F64Ptr,
 ) abi("C") -> Int32:
-    """Accumulate one query's scores over the whole corpus into `out_scores`.
+    """Score one query over the whole corpus into the PRE-ZEROED `out_scores`.
 
-    `out_scores` must hold n_docs float64 slots; it is zeroed here first.
-    Returns 0 on success, 1 on a NULL handle, 2 on a term id or query
-    length outside the indexed range.
+    The kernel does not zero the buffer (the caller's numpy calloc already
+    guarantees zeros, so per-query cost is O(postings), not O(n_docs)).
+    Returns 0 on success, 1 on a NULL handle, 2 on an out-of-range term id
+    or query length.
     """
     if not handle:
         return 1
     if n_query < 0:
         return 2
     var idx = handle.value().unsafe_bitcast[BM25Index]()
-    var n_docs = Int(idx[].n_docs)
-    for d in range(n_docs):
-        out_scores[unsafe_offset=d] = 0.0
+    return _score_one(idx, qids, n_query, out_scores)
 
-    var k1 = idx[].k1
-    var b = idx[].b
-    var avgdl = idx[].avgdl
-    var delta = idx[].delta
-    var variant = idx[].variant
-    var n_terms = Int(idx[].n_terms)
-    var doc_len = idx[].doc_len
-    var offsets = idx[].offsets
-    var docs = idx[].docs
-    var freqs = idx[].freqs
-    var idf = idx[].idf
 
-    for qi in range(Int(n_query)):
-        var t = Int(qids[unsafe_offset=qi])
-        if t < 0 or t >= n_terms:
+@export
+def bm25mojo_score_batch(
+    handle: Handle,
+    qids_flat: I32Ptr,
+    query_offsets: I64Ptr,
+    n_queries: Int64,
+    out_panel: F64Ptr,
+) abi("C") -> Int32:
+    """Score a whole batch of queries in one FFI call.
+
+    `qids_flat`/`query_offsets` are the concatenated per-query term-id lists
+    (offsets has n_queries + 1 entries); `out_panel` is a PRE-ZEROED
+    n_queries x n_docs float64 panel, row-major. Each row is computed exactly
+    as `bm25mojo_score` computes it, so batch results are bit-identical to
+    per-query calls.
+    """
+    if not handle:
+        return 1
+    if n_queries < 0:
+        return 2
+    var idx = handle.value().unsafe_bitcast[BM25Index]()
+    var n_docs = idx[].n_docs
+    var prev = Int64(0)
+    for q in range(Int(n_queries)):
+        var start = query_offsets[unsafe_offset=q]
+        var end = query_offsets[unsafe_offset=q + 1]
+        if start != prev or end < start:
             return 2
-        var idf_t = idf[unsafe_offset=t]
-        var i = Int(offsets[unsafe_offset=t])
-        var end = Int(offsets[unsafe_offset=t + 1])
-        # BM25Plus adds a constant floor to EVERY document per query term (its
-        # delta term is non-zero even when qf == 0). Add that floor densely,
-        # then add only the excess over the floor for posted docs. For Okapi
-        # and BM25L the floor is exactly 0, so the dense pass is skipped and
-        # subtracting it below is an exact no-op (x - 0.0 == x).
-        var floor_t = Float64(0.0)
-        if variant == VARIANT_PLUS:
-            floor_t = idf_t * delta
-        if not isfinite(floor_t):
-            # |idf * delta| overflowed to +-inf (or is NaN). Adding that floor
-            # densely and then a posted document's "excess over the floor"
-            # would be inf - inf = NaN, where the reference's single
-            # evaluation idf * (delta + ...) is +-inf. Evaluate the reference
-            # expression once per document instead -- posted documents with
-            # their qf, every other document with qf = 0 -- walking the
-            # corpus in tandem with the ascending posting list. Only
-            # out-of-domain parameters (|delta| near 1.8e308) reach this
-            # path, so it is scalar.
-            var d = 0
-            while d < n_docs:
-                var qf = SIMD[DType.float64, 1](0.0)
-                if i < end and Int(docs[unsafe_offset=i]) == d:
-                    qf = SIMD[DType.float64, 1](freqs[unsafe_offset=i])
-                    i += 1
-                var dl = SIMD[DType.float64, 1](doc_len[unsafe_offset=d])
-                out_scores[unsafe_offset=d] += _term_score[1](
-                    variant, qf, dl, idf_t, k1, b, avgdl, delta
-                )[0]
-                d += 1
-            continue
-        if floor_t != 0.0:
-            var floor_v = SIMD[DType.float64, WIDTH](floor_t)
-            var d = 0
-            while d + WIDTH <= n_docs:
-                out_scores.unsafe_store(
-                    d, out_scores.unsafe_load[width=WIDTH](d) + floor_v
-                )
-                d += WIDTH
-            while d < n_docs:
-                out_scores[unsafe_offset=d] += floor_t
-                d += 1
-        # Vector body: one SIMD lane per posting.
-        while i + WIDTH <= end:
-            var qf = freqs.unsafe_load[width=WIDTH](i)
-            var dl = SIMD[DType.float64, WIDTH]()
-            for lane in range(WIDTH):
-                dl[lane] = doc_len[unsafe_offset=Int(docs[unsafe_offset=i + lane])]
-            var contrib = _term_score[WIDTH](
-                variant, qf, dl, idf_t, k1, b, avgdl, delta
-            ) - SIMD[DType.float64, WIDTH](floor_t)
-            for lane in range(WIDTH):
-                out_scores[unsafe_offset=Int(docs[unsafe_offset=i + lane])] += contrib[
-                    lane
-                ]
-            i += WIDTH
-        # Scalar tail (width-1 keeps one code path for the formula).
-        while i < end:
-            var qf = SIMD[DType.float64, 1](freqs[unsafe_offset=i])
-            var dl = SIMD[DType.float64, 1](
-                doc_len[unsafe_offset=Int(docs[unsafe_offset=i])]
-            )
-            var contrib = _term_score[1](
-                variant, qf, dl, idf_t, k1, b, avgdl, delta
-            ) - SIMD[DType.float64, 1](floor_t)
-            out_scores[unsafe_offset=Int(docs[unsafe_offset=i])] += contrib[0]
-            i += 1
+        prev = end
+        var rc = _score_one(
+            idx,
+            qids_flat.unsafe_offset(Int(start)),
+            end - start,
+            out_panel.unsafe_offset(Int(Int64(q) * n_docs)),
+        )
+        if rc != 0:
+            return rc
     return 0
 
 
@@ -331,9 +462,10 @@ def bm25mojo_index_destroy(handle: Handle) abi("C"):
     if not handle:
         return
     var idx = handle.value().unsafe_bitcast[BM25Index]()
-    idx[].doc_len.unsafe_free()
     idx[].offsets.unsafe_free()
     idx[].docs.unsafe_free()
-    idx[].freqs.unsafe_free()
+    idx[].weights.unsafe_free()
     idx[].idf.unsafe_free()
+    idx[].overflow.unsafe_free()
+    idx[].floor0.unsafe_free()
     idx.unsafe_free()
