@@ -220,6 +220,11 @@ def test_oracle_mining_extension_starts_beside_numpy():
     matrix that reaches `fim`: identical transactions short-circuit before it,
     so the third window differs from the other two.
     """
+    if not espade.HAVE_FIM:
+        # Without the compiled extension elephant mines in pure Python and
+        # there is no second runtime to start; the published wheels for the
+        # two supported platforms always ship it, so CI never takes this path.
+        pytest.skip("the elephant oracle has no compiled fim extension")
     child = textwrap.dedent(
         """
         import numpy as np
@@ -227,7 +232,6 @@ def test_oracle_mining_extension_starts_beside_numpy():
         from elephant import conversion as conv
         import elephant.spade as espade
 
-        assert espade.HAVE_FIM, "oracle has no compiled fim extension"
         # Two neurons, four bins: windows 0 and 2 hold both neurons, window 3
         # only the first, so the transactions differ and fim is called.
         binned = np.array([[1, 0, 1, 1], [1, 0, 1, 0]], dtype=bool)
@@ -240,7 +244,9 @@ def test_oracle_mining_extension_starts_beside_numpy():
         print(concepts.tolist())
         """
     )
-    proc = subprocess.run([sys.executable, "-c", child], capture_output=True, text=True, timeout=300)
+    # The child imports the scipy stack cold and mines a 2x4 matrix: seconds,
+    # so a hang (rather than an abort) surfaces within a minute.
+    proc = subprocess.run([sys.executable, "-c", child], capture_output=True, text=True, timeout=60)
     assert proc.returncode == 0, (
         f"oracle mining did not survive in a child interpreter "
         f"(returncode {proc.returncode}); stderr:\n{proc.stderr}"
