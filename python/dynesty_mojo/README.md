@@ -183,12 +183,11 @@ go missing — so the wrapper **falls back to a vendored NumPy reference**
 ## Differential tests
 
 ```
-# interpreter with numpy + pytest + dynesty (the oracle) on PATH:
-python3 -m venv /tmp/dynesty-venv
-/tmp/dynesty-venv/bin/pip install "dynesty==3.1.0" numpy pytest
+# the oracle (dynesty==3.1.0) comes from the repo pixi environment
+# (pixi.toml [pypi-dependencies], pinned and lock-verified):
 pixi run bash kernels/dynesty/build.sh
-PYTHONPATH=python/dynesty_mojo PATH=/tmp/dynesty-venv/bin:$PATH \
-  bash scripts/test_all_dynesty.sh   # native pass, then forced fallback
+PYTHONPATH=python/dynesty_mojo PYTHONNOUSERSITE=1 \
+  pixi run bash scripts/test_all_dynesty.sh   # native pass, then forced fallback
 ```
 
 The suite (`tests/test_dynesty_differential.py`,

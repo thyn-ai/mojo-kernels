@@ -6,6 +6,12 @@
 # unsupported platform, where the vendored simple-statistics fallback IS the
 # product). Both runs must print byte-identical cluster results.
 #
+# Each fresh project is installed with `npm ci` against a lockfile written by
+# typescript/scripts/consumer-lockfile.cjs: the tarballs pinned by the sha512
+# of what was just packed, koffi pinned to the entry in the committed
+# workspace lockfile. Every package is hash-verified on install; nothing is
+# resolved at install time.
+#
 # Run from anywhere: bash typescript/ckmeans-mojo/scripts/smoke.sh
 set -euo pipefail
 
@@ -33,20 +39,22 @@ ls "$dist"
 
 echo "== native smoke (fresh project, core + platform tarballs) =="
 rm -rf /tmp/ckmeans-mojo-smoke-native
-mkdir -p /tmp/ckmeans-mojo-smoke-native
+mkdir -p /tmp/ckmeans-mojo-smoke-native/vendor
+cp "$dist/ckmeans-mojo-core-0.1.0.tgz" "$dist/$platform_pkg" /tmp/ckmeans-mojo-smoke-native/vendor/
 cd /tmp/ckmeans-mojo-smoke-native
-npm init -y >/dev/null 2>&1
-npm install --silent "$dist/ckmeans-mojo-core-0.1.0.tgz" "$dist/$platform_pkg" >/dev/null 2>&1
+node "$here/../scripts/consumer-lockfile.cjs" "$here/package-lock.json" vendor/*.tgz
+npm ci --no-audit --no-fund --loglevel=error
 cp "$here/quickstart.mjs" .
 node quickstart.mjs --assert-native > native.json
 head -3 native.json
 
 echo "== simulated-Windows smoke (core tarball only; fallback engages) =="
 rm -rf /tmp/ckmeans-mojo-smoke-win
-mkdir -p /tmp/ckmeans-mojo-smoke-win
+mkdir -p /tmp/ckmeans-mojo-smoke-win/vendor
+cp "$dist/ckmeans-mojo-core-0.1.0.tgz" /tmp/ckmeans-mojo-smoke-win/vendor/
 cd /tmp/ckmeans-mojo-smoke-win
-npm init -y >/dev/null 2>&1
-npm install --silent "$dist/ckmeans-mojo-core-0.1.0.tgz" >/dev/null 2>&1
+node "$here/../scripts/consumer-lockfile.cjs" "$here/package-lock.json" vendor/*.tgz
+npm ci --no-audit --no-fund --loglevel=error
 cp "$here/quickstart.mjs" .
 node quickstart.mjs --assert-fallback > fallback.json
 head -3 fallback.json

@@ -16,10 +16,10 @@ The oracle is invoked as `jsonpath_ng.ext.parse(expr).find(data)` per query —
 exactly how the library is used; jsonpath_mojo is invoked as
 `jsonpath_mojo.find(expr, data)`.
 
-Run from the repository root (oracle must be importable, see
-scripts/test_all_jsonpath.sh):
+Run from the repository root (the oracle comes from the pixi environment,
+see scripts/test_all_jsonpath.sh):
 
-    PYTHONPATH=python/jsonpath_mojo:/tmp/jporacle-lib python benchmarks/bench_jsonpath.py
+    PYTHONPATH=python/jsonpath_mojo pixi run python benchmarks/bench_jsonpath.py
 """
 
 from __future__ import annotations

@@ -11,19 +11,20 @@ cd "$(dirname "$0")/.."
 export PYTHONPATH="python/elephant_mojo${PYTHONPATH:+:$PYTHONPATH}"
 export PYTHONNOUSERSITE=1
 
-# Test oracle: the published PyPI release of elephant. It is never a
-# runtime dependency of the wrapper — only the differential suite compares
-# against it. The pixi env may be re-solved by other work, so self-heal:
-# ensure pip exists, then ensure the pinned oracle is importable. A
-# pre-seeded site can be supplied via ELEPHANT_ORACLE_SITE (appended to
-# PYTHONPATH) to avoid reinstalling.
+# Test oracle: the published PyPI release elephant==1.2.1, provided by the
+# repo pixi environment (pixi.toml [pypi-dependencies], pinned and
+# lock-verified). It is never a runtime dependency of the wrapper — only the
+# differential suite compares against it. An installation outside the
+# environment can be put first via ELEPHANT_ORACLE_SITE (prepended to
+# PYTHONPATH); the version check below applies to it all the same.
 if [ -n "${ELEPHANT_ORACLE_SITE:-}" ]; then
   export PYTHONPATH="${ELEPHANT_ORACLE_SITE}:$PYTHONPATH"
 fi
-if ! python -c "import elephant" 2>/dev/null; then
-  python -c "import pip" 2>/dev/null || python -m ensurepip
-  python -m pip install --quiet "elephant==1.2.1"
-fi
+python -c "import elephant" 2>/dev/null || {
+  echo "error: the elephant oracle package is not importable;" >&2
+  echo "       run inside the pixi environment (pixi install)" >&2
+  exit 1
+}
 python -c "import elephant; assert elephant.__version__ == '1.2.1', elephant.__version__"
 
 SUITE="tests/test_elephant_surrogates_differential.py tests/test_elephant_surrogates_loader.py"

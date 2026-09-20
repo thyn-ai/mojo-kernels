@@ -2,25 +2,22 @@
 # Full jsonpath-mojo differential suite: once against the native kernel, once
 # with the pure-Python fallback forced on.
 #
-# The oracle (jsonpath_ng==1.7.0) is not in pixi.toml (this leg may not edit
-# that file); it is bootstrapped into a throwaway target dir if missing.
+# The oracle (jsonpath_ng==1.7.0) comes from the repo pixi environment
+# (pixi.toml [pypi-dependencies], pinned and lock-verified). Run from the
+# repository root inside the pixi environment:
+#   pixi run bash scripts/test_all_jsonpath.sh
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-ORACLE_DIR="${JSONPATH_ORACLE_DIR:-/tmp/jporacle-lib}"
-if ! PYTHONPATH="${ORACLE_DIR}" python -c "import jsonpath_ng" >/dev/null 2>&1; then
-  echo "bootstrapping oracle jsonpath_ng==1.7.0 into ${ORACLE_DIR}"
-  if command -v uv >/dev/null 2>&1; then
-    uv pip install --python "$(command -v python)" --target "${ORACLE_DIR}" "jsonpath_ng==1.7.0"
-  else
-    python -m ensurepip --upgrade >/dev/null 2>&1 || true
-    python -m pip install --quiet --target "${ORACLE_DIR}" "jsonpath_ng==1.7.0"
-  fi
-fi
-
-export PYTHONPATH="python/jsonpath_mojo:${ORACLE_DIR}"
+export PYTHONPATH="python/jsonpath_mojo"
 export PYTHONNOUSERSITE=1
+
+python -c "import jsonpath_ng" 2>/dev/null || {
+  echo "error: the jsonpath_ng oracle package is not importable;" >&2
+  echo "       run inside the pixi environment (pixi install)" >&2
+  exit 1
+}
 
 SUITE="tests/test_jsonpath_differential.py tests/test_jsonpath_loader.py"
 

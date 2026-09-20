@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 /**
  * Write the package.json and package-lock.json of a scratch consumer project
- * that depends on locally built fuse-mojo tarballs, so the project can be
- * installed with `npm ci`.
+ * that depends on the locally built tarballs of one of this repository's
+ * TypeScript kernels (fuse-mojo, ckmeans-mojo, minisearch-mojo,
+ * natural-mojo), so the project can be installed with `npm ci`.
  *
  * `npm ci` installs exactly what the lockfile records and verifies every
  * package against its integrity hash. `npm install <tarball>` cannot do that:
@@ -11,23 +12,23 @@
  * lockfile first, from data we already trust, turns the end-user smoke into a
  * hash-verified install.
  *
- * Usage, from the consumer directory:
+ * Usage, from the consumer directory (its basename names the consumer):
  *
- *   node consumer-lockfile.cjs <workspace package-lock.json> <tarball>...
+ *   node typescript/scripts/consumer-lockfile.cjs <workspace package-lock.json> <tarball>...
  *
  * Each tarball path is relative to the consumer directory and becomes a
  * `file:` dependency whose integrity is the sha512 of the tarball as built.
  * Every registry dependency the tarballs pull in (koffi and its per-platform
  * binaries) is copied verbatim -- version, resolved URL, integrity -- from the
- * committed workspace lockfile, so the smoke installs the same koffi the
- * differential suite ran against. An optional dependency with no pinned entry
+ * committed workspace lockfile of that kernel, so the smoke installs the same
+ * koffi the differential suite ran against. An optional dependency with no pinned entry
  * (the platform package for another operating system) is left out, exactly as
  * npm leaves it out of node_modules.
  *
  * Both files are written into the current directory, which must not already
  * hold a package.json or package-lock.json: the script refuses to run
  * otherwise, so it can never overwrite a real project's manifest or lockfile.
- * The smoke scripts call it from a directory they have just created.
+ * Each kernel's scripts/smoke.sh calls it from a directory it has just created.
  *
  * Node built-ins and `tar` only; npm itself is never invoked.
  */
@@ -35,9 +36,13 @@
 
 const crypto = require('node:crypto')
 const fs = require('node:fs')
+const path = require('node:path')
 const { execFileSync } = require('node:child_process')
 
-const ROOT_NAME = 'fuse-mojo-smoke'
+// The consumer project is named after the directory it is written into
+// (e.g. fuse-mojo-smoke-native); the name is recorded in both files and
+// nothing else depends on it.
+const ROOT_NAME = path.basename(process.cwd())
 const ROOT_VERSION = '0.0.0'
 const PACKAGE_JSON = 'package.json'
 const PACKAGE_LOCK = 'package-lock.json'
@@ -63,7 +68,7 @@ function manifestOf(tarball) {
 function main(argv) {
   const [workspaceLockfile, ...tarballs] = argv
   if (!workspaceLockfile || tarballs.length === 0) {
-    fail('usage: node consumer-lockfile.cjs <workspace package-lock.json> <tarball>...')
+    fail('usage: node typescript/scripts/consumer-lockfile.cjs <workspace package-lock.json> <tarball>...')
   }
   for (const output of [PACKAGE_JSON, PACKAGE_LOCK]) {
     if (fs.existsSync(output)) {

@@ -1,0 +1,8 @@
+# Packages the uproot-mojo wheel smoke installs beside the wheel, hash-pinned.
+# uproot creates the quickstart fixture and cross-checks the branches through
+# awkward; both at the oracle versions pinned in pixi.toml. Compile with
+#   uv pip compile --generate-hashes --universal --python-version 3.10 \
+#     -o smoke-requirements.txt smoke-requirements.in
+# (from python/uproot-branches_mojo/) after changing a pin here.
+uproot==5.7.6
+awkward==2.14.0
