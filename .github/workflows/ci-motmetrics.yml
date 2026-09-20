@@ -1,0 +1,127 @@
+name: ci-motmetrics
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Read-only token for every job: the workflow only builds, tests and uploads a
+# build artifact (artifact upload needs no write scope).
+permissions:
+  contents: read
+
+# One run per ref; a newer push to a pull request cancels the run it supersedes.
+# Pushes to main always run to completion.
+concurrency:
+  group: ci-motmetrics-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  test:
+    name: motmetrics-mojo differential tests + wheel (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install pixi
+        uses: prefix-dev/setup-pixi@d3f436a425481402e6a95a1d1fc10331c708cd9e # v0.10.2
+        with:
+          # Install the pixi binary only. The tasks below install the environment
+          # lazily on first `pixi run`, exactly as the previous curl|bash step did;
+          # `pixi install --locked` + caching is a separate, opt-in change.
+          run-install: false
+
+      - name: Install the pinned oracle into .oracle-motmetrics/
+        # motmetrics is a test/benchmark oracle only (the differential suite
+        # compares motmetrics_mojo against it metric-for-metric); it is not a
+        # runtime dependency of the published wrapper. Installed with
+        # `pip --target` into an unmanaged directory because `pixi run` prunes
+        # pip-installed packages from the pixi env. Pinned (with its resolved
+        # dependencies): the oracle must be the published PyPI release these
+        # numbers were measured against.
+        run: |
+          pixi run python -m ensurepip --upgrade
+          pixi run python -m pip install --target .oracle-motmetrics \
+            "motmetrics==1.4.0" "numpy==2.5.3" "pandas==3.0.6" "scipy==1.18.1"
+
+      - name: Build the motmetrics Mojo kernel
+        run: pixi run bash kernels/motmetrics/build.sh
+
+      - name: Differential suite (native backend, then forced fallback)
+        run: |
+          PYTHONPATH="python/motmetrics_mojo:.oracle-motmetrics" PYTHONNOUSERSITE=1 pixi run python -m pytest tests/test_motmetrics_differential.py tests/test_motmetrics_loader.py -q
+          PYTHONPATH="python/motmetrics_mojo:.oracle-motmetrics" PYTHONNOUSERSITE=1 MOTMETRICS_MOJO_DISABLE_NATIVE=1 pixi run python -m pytest tests/test_motmetrics_differential.py tests/test_motmetrics_loader.py -q
+
+      - name: Build + repair the platform wheel (delocate/auditwheel)
+        run: PYTHONNOUSERSITE=1 pixi run bash python/motmetrics_mojo/build_wheel.sh
+
+      - name: Smoke-test the wheel in a clean venv
+        shell: bash
+        run: |
+          set -e
+          python3 -m venv /tmp/motmetrics-wheel-smoke
+          /tmp/motmetrics-wheel-smoke/bin/pip install --quiet python/motmetrics_mojo/dist/*.whl
+          # Hide the pixi env for the smoke: an end user has no Mojo toolchain,
+          # so the wheel must load its kernel purely from its own vendored
+          # libraries (not via the build machine's absolute rpath).
+          repo_root="$PWD"
+          mv .pixi .pixi-hidden
+          trap 'mv "$repo_root/.pixi-hidden" "$repo_root/.pixi"' EXIT
+          cd /tmp && /tmp/motmetrics-wheel-smoke/bin/python - <<'EOF'
+          import math
+
+          import motmetrics_mojo as M
+
+          # Deterministic quickstart values (same on both backends).
+          acc = M.MOTAccumulator(auto_id=True)
+          acc.update([1, 2], [10, 20], [[0.1, 0.9], [0.8, 0.2]])
+          acc.update([1, 2], [10, 20], [[0.2, 0.9], [0.9, 0.1]])
+          acc.update([1], [20], [[0.3]])  # ID switch 1: 10 -> 20
+          s = M.compute(acc, metrics=["mota", "motp", "idf1", "num_switches"])
+          assert s["num_switches"] == 1, s
+          assert s["mota"] == 1.0 - 1.0 / 5.0, s
+          assert math.isclose(s["motp"], 0.9 / 5.0, rel_tol=0, abs_tol=1e-12), s
+          assert s["idf1"] == 1.0, s
+          info = M.backend_info()
+          assert info["native_available"], f"wheel must carry the native kernel: {info}"
+          print("wheel smoke OK:", M.__version__, info["native_source"])
+          EOF
+
+      - name: Smoke-test the pure wheel (fallback-only) in a clean venv
+        shell: bash
+        run: |
+          set -e
+          cd python/motmetrics_mojo
+          MOTMETRICS_MOJO_ALLOW_PURE_WHEEL=1 pixi run python -m build --wheel --no-isolation --outdir dist-pure .
+          python3 -m venv /tmp/motmetrics-pure-wheel-smoke
+          /tmp/motmetrics-pure-wheel-smoke/bin/pip install --quiet dist-pure/*.whl
+          cd /tmp && /tmp/motmetrics-pure-wheel-smoke/bin/python - <<'EOF'
+          import math
+
+          import motmetrics_mojo as M
+
+          acc = M.MOTAccumulator(auto_id=True)
+          acc.update([1, 2], [10, 20], [[0.1, 0.9], [0.8, 0.2]])
+          acc.update([1, 2], [10, 20], [[0.2, 0.9], [0.9, 0.1]])
+          acc.update([1], [20], [[0.3]])
+          s = M.compute(acc, metrics=["mota", "motp", "idf1", "num_switches"])
+          assert s["num_switches"] == 1, s
+          assert math.isclose(s["motp"], 0.9 / 5.0, rel_tol=0, abs_tol=1e-12), s
+          assert s["idf1"] == 1.0, s
+          info = M.backend_info()
+          assert not info["native_available"], f"pure wheel must use the fallback: {info}"
+          print("pure-wheel smoke OK:", M.__version__)
+          EOF
+
+      - name: Upload wheel
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: motmetrics-mojo-wheel-${{ matrix.os }}
+          path: python/motmetrics_mojo/dist/*.whl
+          retention-days: 14
