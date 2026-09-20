@@ -73,4 +73,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   orders disagree (inf x 0 = NaN on one side, 0 on the other)
   ([#16](https://github.com/thyn-ai/mojo-kernels/issues/16)).
 
+### Fixed
+
+- `LICENSE` is the verbatim Apache License 2.0 text (with the appendix naming
+  Algenta as the copyright holder). The previous copy paraphrased sections 4,
+  5, 7 and 9, so GitHub and license scanners could not identify it as
+  Apache-2.0; every package's declared `license` field was always Apache-2.0.
+
 [Unreleased]: https://github.com/thyn-ai/mojo-kernels/commits/main
