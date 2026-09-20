@@ -1,0 +1,121 @@
+name: ci-volatility3-hive
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Read-only token for every job: the workflow only builds, tests and uploads a
+# build artifact (artifact upload needs no write scope).
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: vol-mojo differential tests + wheel (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install pixi
+        uses: prefix-dev/setup-pixi@d3f436a425481402e6a95a1d1fc10331c708cd9e # v0.10.2
+        with:
+          # Install the pixi binary only. The tasks below install the environment
+          # lazily on first `pixi run`, exactly as the previous curl|bash step did;
+          # `pixi install --locked` + caching is a separate, opt-in change.
+          run-install: false
+
+      - name: Install the pinned oracle into .oracle-volatility3/
+        # volatility3 is a test/benchmark oracle only (the differential
+        # suite compares vol_mojo against it); it is not a runtime
+        # dependency of the published wrapper. Installed with `pip --target`
+        # into an unmanaged directory because `pixi run` prunes pip-installed
+        # packages from the pixi env. Pinned: the oracle must be the published
+        # PyPI release these numbers were measured against.
+        run: |
+          pixi run python -m ensurepip --upgrade
+          pixi run python -m pip install --target .oracle-volatility3 "volatility3==2.28.2"
+
+      - name: Build the volatility3-hive Mojo kernel
+        run: pixi run bash kernels/volatility3-hive/build.sh
+
+      - name: Differential suite (native backend, then forced fallback)
+        run: PYTHONPATH="python/vol_mojo:.oracle-volatility3" PYTHONNOUSERSITE=1 pixi run bash scripts/test_all_volatility3_hive.sh
+
+      - name: Build + repair the platform wheel (delocate/auditwheel)
+        run: PYTHONNOUSERSITE=1 pixi run bash python/vol_mojo/build_wheel.sh
+
+      - name: Smoke-test the wheel in a clean venv
+        shell: bash
+        run: |
+          set -e
+          python3 -m venv /tmp/vol-wheel-smoke
+          /tmp/vol-wheel-smoke/bin/pip install --quiet python/vol_mojo/dist/*.whl
+          # Hide the pixi env for the smoke: an end user has no Mojo toolchain,
+          # so the wheel must load its kernel purely from its own vendored
+          # libraries (not via the build machine's absolute rpath).
+          repo_root="$PWD"
+          mv .pixi .pixi-hidden
+          trap 'mv "$repo_root/.pixi-hidden" "$repo_root/.pixi"' EXIT
+          cd /tmp
+          /tmp/vol-wheel-smoke/bin/python "$repo_root/python/vol_mojo/examples/quickstart.py" | tee /tmp/quickstart-native.txt
+          # The forced fallback must produce byte-identical deterministic
+          # checksums on both backends.
+          VOL_MOJO_DISABLE_NATIVE=1 /tmp/vol-wheel-smoke/bin/python "$repo_root/python/vol_mojo/examples/quickstart.py" | tee /tmp/quickstart-fallback.txt
+          /tmp/vol-wheel-smoke/bin/python - <<'EOF'
+          import re
+
+          import vol_mojo
+
+          info = vol_mojo.backend_info()
+          assert info["native_available"], f"wheel must carry the native kernel: {info}"
+
+          def checksums(path):
+              text = open(path).read()
+              walk = re.search(r"walk checksum: ([0-9a-f]+)", text)
+              scan = re.search(r"scan checksum: ([0-9a-f]+)", text)
+              assert walk and scan, f"missing checksums in {path}"
+              return walk.group(1), scan.group(1)
+
+          native = checksums("/tmp/quickstart-native.txt")
+          fallback = checksums("/tmp/quickstart-fallback.txt")
+          assert native == fallback, (native, fallback)  # deterministic: exact
+          print("wheel smoke OK:", vol_mojo.__version__, info["native_source"])
+          EOF
+
+      - name: Smoke-test the pure wheel (fallback-only) in a clean venv
+        shell: bash
+        run: |
+          set -e
+          repo_root="$PWD"
+          cd python/vol_mojo
+          VOL_MOJO_ALLOW_PURE_WHEEL=1 pixi run python -m build --wheel --no-isolation --outdir dist-pure .
+          python3 -m venv /tmp/vol-pure-wheel-smoke
+          /tmp/vol-pure-wheel-smoke/bin/pip install --quiet dist-pure/*.whl
+          cd /tmp
+          /tmp/vol-pure-wheel-smoke/bin/python "$repo_root/python/vol_mojo/examples/quickstart.py" > /tmp/quickstart-pure.txt
+          /tmp/vol-pure-wheel-smoke/bin/python - <<'EOF'
+          import re
+
+          import vol_mojo
+
+          info = vol_mojo.backend_info()
+          assert not info["native_available"], f"pure wheel must use the fallback: {info}"
+          text = open("/tmp/quickstart-pure.txt").read()
+          assert re.search(r"walk checksum: [0-9a-f]+", text)
+          assert re.search(r"scan checksum: [0-9a-f]+", text)
+          print("pure-wheel smoke OK:", vol_mojo.__version__)
+          EOF
+
+      - name: Upload wheel
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: vol-mojo-wheel-${{ matrix.os }}
+          path: python/vol_mojo/dist/*.whl
+          retention-days: 14
