@@ -7,7 +7,7 @@ name = "toml-mojo"
 version = "0.1.2"
 description = "Drop-in faster replacement for stdlib tomllib, powered by a Mojo kernel (tomllib fallback included)."
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 license = "Apache-2.0"
 authors = [{ name = "Algenta" }]
 keywords = ["toml", "parser", "config", "mojo", "tomllib", "tomlkit"]

@@ -7,7 +7,7 @@ name = "sacrebleu-mojo"
 version = "0.1.2"
 description = "Drop-in faster replacement for sacrebleu's BLEU and chrF corpus metrics, powered by a Mojo kernel (pure-Python fallback included)."
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.12"
 license = "Apache-2.0"
 authors = [{ name = "Algenta" }]
 keywords = ["bleu", "chrf", "sacrebleu", "mt", "evaluation", "metrics", "mojo"]

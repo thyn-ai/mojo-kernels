@@ -7,7 +7,7 @@ name = "vol-mojo"
 version = "0.1.2"
 description = "Batch registry-hive walking and pool-header constraint validation with volatility3-compatible semantics, powered by a Mojo kernel (pure-Python fallback included)."
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.12"
 license = "Apache-2.0"
 authors = [{ name = "Algenta" }]
 keywords = ["volatility3", "registry-hive", "pool-header", "memory-forensics", "dfir", "mojo"]

@@ -7,7 +7,7 @@ name = "langdetect-mojo"
 version = "0.1.2"
 description = "Drop-in faster replacement for langdetect, powered by a Mojo kernel (pure-Python fallback included)."
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.12"
 license = "Apache-2.0"
 authors = [{ name = "Algenta" }]
 keywords = ["language-detection", "langdetect", "ngrams", "mojo", "text-processing"]

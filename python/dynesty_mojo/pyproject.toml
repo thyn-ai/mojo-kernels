@@ -7,7 +7,7 @@ name = "dynesty-mojo"
 version = "0.1.2"
 description = "Nested sampling with a Mojo bounding/proposal kernel and a dynesty-shaped API (pure-Python fallback included)."
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.12"
 license = "Apache-2.0"
 authors = [{ name = "Algenta" }]
 keywords = ["nested-sampling", "bayesian-inference", "evidence", "mojo", "mcmc"]

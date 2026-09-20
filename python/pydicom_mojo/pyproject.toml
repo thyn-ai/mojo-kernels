@@ -7,7 +7,7 @@ name = "pydicom-mojo"
 version = "0.1.2"
 description = "Mojo-accelerated DICOM RLE Lossless codec (decode + encode), byte-compatible with pydicom, with a vendored pure-Python fallback."
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.12"
 license = "Apache-2.0"
 authors = [{ name = "Algenta" }]
 keywords = ["dicom", "pydicom", "rle", "packbits", "medical-imaging", "mojo", "codec"]

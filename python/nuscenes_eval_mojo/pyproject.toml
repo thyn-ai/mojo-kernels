@@ -7,7 +7,7 @@ name = "nuscenes-eval-mojo"
 version = "0.1.2"
 description = "Drop-in faster replacement for nuscenes-devkit's DetectionEval, powered by a Mojo kernel (pure-Python fallback included)."
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.12"
 license = "Apache-2.0"
 authors = [{ name = "Algenta" }]
 keywords = ["nuscenes", "autonomous-driving", "detection", "evaluation", "mojo", "metrics"]
