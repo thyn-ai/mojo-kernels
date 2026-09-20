@@ -27,6 +27,7 @@ the test runner); tests that need it skip cleanly when it is absent.
 from __future__ import annotations
 
 import os
+import random
 import subprocess
 import sys
 import textwrap
@@ -477,7 +478,14 @@ def test_dither_refractory_matches_oracle_distribution():
     train = np.sort(rng.uniform(T_START, T_STOP, 30))
     n_surr = 2500
     refr_ms = 5.0
+    # The oracle's refractory path draws its perturbation order from
+    # np.random but each dither offset from the stdlib `random` module
+    # (elephant 1.2.1, spike_train_surrogates.py:107); seed both, or the
+    # oracle's occupancy differs run to run and this Bonferroni z-test
+    # keeps its nominal ~5% false-positive rate instead of being a fixed,
+    # reproducible comparison.
     np.random.seed(0)
+    random.seed(0)
     st = _neo_trains([train])[0]
     oracle = np.zeros((n_surr, N_BINS), dtype=bool)
     for k in range(n_surr):
