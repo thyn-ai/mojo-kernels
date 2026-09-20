@@ -42,10 +42,13 @@ from __future__ import annotations
 
 import argparse
 import os
-# The only XML parsed here is the MAVLink dialect specification, a trusted,
-# repo-vendored protocol-definition file (never user/network input), and
-# ElementTree does not resolve external entities. nosemgrep: use-defused-xml-parse
-import xml.etree.ElementTree as ET
+try:
+    from defusedxml import ElementTree as ET
+except ImportError:  # dev-time tool only — never shipped or run by end users
+    raise SystemExit(
+        "gen_tables_pymavlink.py requires defusedxml (pip install defusedxml). "
+        "It parses XML protocol specs, so the hardened parser is mandatory."
+    )
 
 # XML type -> (type code, scalar size, struct char)
 # Type codes are shared with the Mojo kernel and the Python wrapper.
@@ -168,8 +171,6 @@ def load_messages(xml_path: str) -> list[Message]:
         if abspath in seen:
             return
         seen.add(abspath)
-        # Trusted, repo-vendored protocol spec only (never user/network input);
-        # ElementTree resolves no external entities. nosemgrep: use-defused-xml-parse
         root = ET.parse(abspath).getroot()
         for inc in root.findall("include"):
             walk(os.path.join(os.path.dirname(abspath), inc.text))
