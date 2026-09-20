@@ -86,6 +86,30 @@ def _bm25_reproducers(harness) -> dict[str, bytes]:
             vocab_size=2, with_unicode=False,
             corpus=(("w00", "w01"), ("w00",), ("w01",)), queries=(("w00",),),
         ),
+        # Finite epsilon of extreme magnitude: every idf here is negative, so
+        # rank_bm25 floors them all to epsilon * average_idf, and
+        # -1.8e308 * -1.18 overflows to +inf. The reference then computes
+        # inf * 0 == NaN for document 2 (no "w02") where the kernel yields
+        # inf; the posted documents are inf on both sides. Verbatim the unit
+        # the 60 s coverage-guided run found on 2026-09-20 (mojo-kernels#43),
+        # kept whole because its kernel-side outcome is the observed one.
+        "known-issue-degenerate-nan-7.bin": Case(
+            variant=0, raw_params=True, k1=1.5, b=0.75000000000108,
+            third=-1.7976931348623157e308, vocab_size=4, with_unicode=False,
+            corpus=(
+                ("w03", "w01", "w01", "w02", "w03", "w03", "w01", "w02", "w03", "w00"),
+                ("w03", "w00", "w00", "w01", "w01", "w02", "w03", "w03", "w01", "w02",
+                 "w03", "w00", "w02", "w03", "w00"),
+                ("w00",),
+                ("w03", "w00", "w02", "w01", "w01", "w01", "w00", "w01", "w00"),
+            ),
+            queries=(
+                ("w02", "w02", "w00", "zzz-unseen"),
+                ("w03", "w02", "zzz-unseen"),
+                ("w02", "w03", "w03", "w02", "w03"),
+                ("w01", "w01", "w02", "w01", "zzz-unseen"),
+            ),
+        ),
     }
     return {name: harness.encode(case) for name, case in cases.items()}
 
