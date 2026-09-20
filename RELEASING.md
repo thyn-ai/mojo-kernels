@@ -58,8 +58,9 @@ release-please writes and a maintainer merges.
 
 2. **The release pull request.** On every push to `main`,
    [`release-please.yml`](./.github/workflows/release-please.yml) opens or
-   rewrites `chore(release): vX.Y.Z` (branch `release-please--branches--main`,
-   label `autorelease: pending`) from the commits merged since the previous
+   rewrites `chore(release): vX.Y.Z` (branch
+   `release-please--branches--main--components--mojo-kernels`, label
+   `autorelease: pending`) from the commits merged since the previous
    tag. Its diff is exactly: the next entry at the top of
    [`CHANGELOG.md`](./CHANGELOG.md), `version.txt`,
    `.release-please-manifest.json`, and every version location listed under
