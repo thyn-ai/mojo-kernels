@@ -42,8 +42,8 @@ jobs:
         run: bash typescript/minisearch_fuzzy_mojo/scripts/test_all.sh
 
       - name: Pack + repair the platform package (delocate/patchelf)
-        shell: bash
-        run: bash typescript/minisearch_fuzzy_mojo/scripts/pack-platform.sh
+        # delocate (macOS) and patchelf (Linux) come from the pixi environment.
+        run: pixi run bash typescript/minisearch_fuzzy_mojo/scripts/pack-platform.sh
 
       - name: End-user smoke (fresh npm project; native + simulated-Windows fallback)
         shell: bash
