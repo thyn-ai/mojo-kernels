@@ -32,8 +32,17 @@ for that tag:
 The Release is the one release-please published when the release pull
 request merged, with that pull request's CHANGELOG entry as its notes.
 Creating it is what pushes the tag that starts `release.yml`, which attaches
-the assets to it and never creates a second one. (A tag with no release at
-all, which is not a supported path, gets one with generated notes.)
+the assets to it and never creates a second one. Where there are no such
+notes, `release.yml` composes them itself from the tagged commit's
+`CHANGELOG.md` entry followed by GitHub's generated list of merged pull
+requests (`scripts/release_notes.py`): a Release whose body is blank gets
+them, a same-tag draft is published with them (a draft's body is never
+published), and a tag with no release at all, which is not a supported path,
+gets one created with them. `preflight` reports a tree whose `CHANGELOG.md`
+has no entry for the version, before anything is built: that fails a dry
+run, where it is fixable, and only warns on a real release, where the
+Release is already published and the composed notes degrade to the
+generated list rather than leaving it without its assets.
 
 Registries are gated. The wheels are published to PyPI and the tarballs to
 npm **only** when the repository variables `PUBLISH_PYPI` / `PUBLISH_NPM`
@@ -91,10 +100,10 @@ release-please writes and a maintainer merges.
 
    | Job | Runs when | What it does |
    | --- | --- | --- |
-   | `preflight` | always | validates the tag (and, on a re-run, that the run was dispatched on it), checks that every package version equals the tag's |
+   | `preflight` | always | validates the tag (and, on a re-run, that the run was dispatched on it), checks that every package version equals the tag's, and that `CHANGELOG.md` has a `## [X.Y.Z]` entry for it (fatal on a dry run, a warning on a release) |
    | `build` (ubuntu, macos) | always | kernels, differential suites, wheels, npm tarballs, smoke tests; each runner keeps the assets it can vouch for |
    | `sign` | always | `SHA256SUMS`; `cosign sign-blob` per asset with the job's OIDC identity; verifies every bundle; computes the provenance subjects |
-   | `release` | not on a dry run | finds the GitHub Release release-please published for the tag (creates one only if none exists), uploads assets and bundles |
+   | `release` | not on a dry run | finds the GitHub Release release-please published for the tag and keeps its notes (a blank body, a same-tag draft or no release at all gets notes composed from `CHANGELOG.md`), uploads assets and bundles |
    | `provenance` | always | SLSA generic generator; `multiple.intoto.jsonl` to the Release (or a workflow artifact on a dry run) |
    | `publish-pypi` | `PUBLISH_PYPI == "true"` | `pypa/gh-action-pypi-publish`, Trusted Publishing, PEP 740 attestations, `skip-existing` |
    | `publish-npm` | `PUBLISH_NPM == "true"` | `npm publish --provenance`, platform packages then core, versions already on the registry skipped |
@@ -172,6 +181,11 @@ Download them with `gh run download <run-id>` and verify them as below, with
   on; a dry run dispatched on a tag.
 - A tag whose version differs from any package version in the tree, or a
   tree whose packages disagree with each other.
+- A **dry run** whose `CHANGELOG.md` has no non-empty `## [X.Y.Z]` entry for
+  the version. A real release is never refused for this: the Release is
+  already published by then, so the notes fall back to GitHub's generated
+  list instead (a `Release-As:` override over commits that are all hidden
+  types is how an entry ends up empty).
 - An asset set that is not exactly four wheels and three tarballs, all
   carrying the version.
 - A signature bundle that does not verify against the run's own identity.
