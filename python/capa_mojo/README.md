@@ -2,7 +2,7 @@
 
 An accelerated **rule-evaluation engine** for [capa](https://github.com/mandiant/capa)-style
 rule sets, powered by a clean-room Mojo kernel — with a pure-Python fallback
-for platforms without a native build (including Windows).
+for platforms without a native build (including Windows — tested there in CI: [`windows-fallback`](https://github.com/thyn-ai/mojo-kernels/actions/workflows/windows-fallback.yml)).
 
 Given a rule set (capa's documented YAML format) and a feature map per scope,
 `capa_mojo.match(rules, features)` produces match results identical to the

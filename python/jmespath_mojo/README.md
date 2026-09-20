@@ -2,7 +2,7 @@
 
 A drop-in faster replacement for the [`jmespath`](https://pypi.org/project/jmespath/)
 package, powered by a clean-room Mojo kernel — with a vendored pure-Python
-fallback for platforms without a native build (including Windows).
+fallback for platforms without a native build (including Windows — tested there in CI: [`windows-fallback`](https://github.com/thyn-ai/mojo-kernels/actions/workflows/windows-fallback.yml)).
 
 ```python
 import jmespath_mojo  # same call shape as jmespath.search

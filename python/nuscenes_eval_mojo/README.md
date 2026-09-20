@@ -4,7 +4,7 @@ Fast nuScenes 3D object **detection evaluation** — a drop-in-shaped
 replacement for the `DetectionEval` accumulate path of
 [`nuscenes-devkit`](https://pypi.org/project/nuscenes-devkit/) — powered by a
 clean-room Mojo kernel, with a vendored pure-Python fallback for platforms
-without a native build (including Windows).
+without a native build (including Windows — tested there in CI: [`windows-fallback`](https://github.com/thyn-ai/mojo-kernels/actions/workflows/windows-fallback.yml)).
 
 The official evaluator re-runs a Python-level greedy matching loop for every
 class × distance-threshold pair (10 classes × 4 thresholds — a ×40 fan-out),
@@ -52,7 +52,8 @@ pip install nuscenes-eval-mojo
 ```
 
 Per-platform wheels (macOS arm64, Linux x86_64) carry the native kernel. On
-any other platform — including Windows — the same wheel API runs on the
+any other platform — including Windows, where CI runs this package's fallback suite
+([`windows-fallback`](https://github.com/thyn-ai/mojo-kernels/actions/workflows/windows-fallback.yml)) — the same wheel API runs on the
 vendored pure-Python fallback, silently and correctly. There is no sdist: a
 source tarball cannot rebuild the native library. The only runtime dependency
 is NumPy.

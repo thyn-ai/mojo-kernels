@@ -21,7 +21,7 @@ boundaries with zoneinfo (spring-forward gaps + fall-back folds).
 from __future__ import annotations
 
 import random
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from croniter import croniter
@@ -31,6 +31,32 @@ import croniter_mojo
 from croniter_mojo import CroniterBadDateError, CroniterMojoError
 
 ORACLE_ERRORS = (Exception,)  # oracle raises croniter.Croniter* subclasses of Exception
+
+EPOCH = datetime(1970, 1, 1)
+
+
+def _platform_converts_pre_epoch_timestamps() -> bool:
+    """Whether datetime.fromtimestamp() reaches the earliest instant this suite needs.
+
+    The oracle converts every step through datetime.fromtimestamp(), so a
+    get_prev chain that crosses the epoch depends on the C runtime's gmtime
+    accepting the timestamp. Windows' UCRT stops at -43200 s (12 hours before
+    1970-01-01T00:00Z) and returns EINVAL below that, which is a limit of the
+    oracle's platform, not a verdict on the expression; the cases that cross
+    the epoch are therefore a separate test, skipped where the oracle cannot
+    produce its side. Probed at the suite's earliest expected result (year 8,
+    test_year_bound_edges) rather than inferred from sys.platform, so a
+    runtime that clears it clears every pre-epoch case in the corpus.
+    """
+    try:
+        earliest = datetime(8, 2, 29, tzinfo=timezone.utc).timestamp()
+        datetime.fromtimestamp(earliest, tz=timezone.utc)
+    except (OSError, OverflowError, ValueError):
+        return False
+    return True
+
+
+ORACLE_CONVERTS_PRE_EPOCH = _platform_converts_pre_epoch_timestamps()
 
 NAIVE_STARTS = [
     datetime(2026, 9, 19, 14, 30, 45, 123456),  # Saturday, sub-minute noise
@@ -217,6 +243,22 @@ def test_naive_corpus_next(expr):
 @pytest.mark.parametrize("expr", EXPR_CORPUS)
 def test_naive_corpus_prev(expr):
     for start in NAIVE_STARTS:
+        if start <= EPOCH:
+            continue  # test_naive_corpus_prev_crosses_epoch
+        _check_chain(expr, start, -1, count=4)
+        _check_chain(expr, start, -1, count=4, day_or=False)
+
+
+@pytest.mark.skipif(
+    not ORACLE_CONVERTS_PRE_EPOCH,
+    reason="the croniter oracle cannot represent pre-epoch timestamps on this platform",
+)
+@pytest.mark.parametrize("expr", EXPR_CORPUS)
+def test_naive_corpus_prev_crosses_epoch(expr):
+    # Walking back from 1970-01-01 lands before the epoch on the first step.
+    for start in NAIVE_STARTS:
+        if start > EPOCH:
+            continue  # test_naive_corpus_prev
         _check_chain(expr, start, -1, count=4)
         _check_chain(expr, start, -1, count=4, day_or=False)
 
@@ -328,12 +370,17 @@ def test_year_bound_edges():
     with pytest.raises(CroniterBadDateError):
         croniter_mojo.get_next("* * * * *", datetime(9999, 12, 31, 23, 59))
     # get_prev near year 1: a matching date within 50 years is still found.
-    o = croniter("0 0 29 2 *", datetime(10, 1, 1)).get_prev(datetime)
+    # (Pre-epoch: the oracle's side exists only where the platform converts
+    # such timestamps; ours is asserted against the value it gives there.)
     m = croniter_mojo.get_prev("0 0 29 2 *", datetime(10, 1, 1))
-    assert m == o == datetime(8, 2, 29)
+    assert m == datetime(8, 2, 29)
+    if ORACLE_CONVERTS_PRE_EPOCH:
+        o = croniter("0 0 29 2 *", datetime(10, 1, 1)).get_prev(datetime)
+        assert o == m
     # ... and a genuinely unmatchable expression raises on both sides.
-    with pytest.raises(ORACLE_ERRORS):
-        croniter("0 0 31 2 *", datetime(10, 1, 1)).get_prev(datetime)
+    if ORACLE_CONVERTS_PRE_EPOCH:
+        with pytest.raises(ORACLE_ERRORS):
+            croniter("0 0 31 2 *", datetime(10, 1, 1)).get_prev(datetime)
     with pytest.raises(CroniterBadDateError):
         croniter_mojo.get_prev("0 0 31 2 *", datetime(10, 1, 1))
     # 2100 is not a leap year: next Feb 29 after 2096 is 2104.

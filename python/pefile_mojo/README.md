@@ -4,8 +4,7 @@ Bit-exact, much faster replacements for the two hot loops of the
 [`pefile`](https://pypi.org/project/pefile/) package — `PE.generate_checksum`
 and the import-directory walk behind `PE.parse_data_directories()` /
 `PE.parse_import_directory()` — powered by a clean-room Mojo kernel, with a
-vendored pure-Python fallback for platforms without a native build (including
-Windows).
+vendored pure-Python fallback for platforms without a native build (including Windows — tested there in CI: [`windows-fallback`](https://github.com/thyn-ai/mojo-kernels/actions/workflows/windows-fallback.yml)).
 
 This is **not** a full `pefile` drop-in: it does not parse whole PE images.
 It replaces the two expensive loops with identical results (see
@@ -84,7 +83,8 @@ does — is identical. If you modified header fields through pefile, call
   itself is a pure function of the bytes and the offset and never validates
   PE structure.
 - **Windows native kernel**: no Mojo toolchain builds `pefilemojo.dll`
-  today; the Windows wheel is the pure-Python fallback (silently correct).
+  today; the Windows wheel is the pure-Python fallback (silently correct,
+  and tested on Windows in CI: [`windows-fallback`](https://github.com/thyn-ai/mojo-kernels/actions/workflows/windows-fallback.yml)).
 - `bound` values of exactly `0xFFFFFFFFFFFFFFFF` cannot be distinguished from
   "not bound" (sentinel).
 

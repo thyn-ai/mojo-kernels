@@ -47,6 +47,12 @@ def test_broken_override_falls_back_to_candidates(monkeypatch, tmp_path):
     bogus.write_text("definitely not a mach-o")
     monkeypatch.setenv("UPROOT_MOJO_NATIVE_LIB", str(bogus))
     monkeypatch.delenv("UPROOT_MOJO_DISABLE_NATIVE", raising=False)
+    if not any(
+        os.path.exists(path)
+        for label, path in _native._candidate_paths()
+        if not label.startswith("env ")
+    ):
+        pytest.skip("native kernel not built on this machine (nothing after the override)")
     _native._LIB, _native._LIB_SOURCE = None, None  # reset module cache
     try:
         data, borders = _one_basket()

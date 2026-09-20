@@ -50,7 +50,8 @@ pip install elephant-mojo
 
 Per-platform wheels (macOS arm64, Linux x86_64) carry the native kernel,
 self-contained (the Mojo runtime is vendored into the wheel; nothing to
-compile, no absolute rpaths). On any other platform — including Windows —
+compile, no absolute rpaths). On any other platform — including Windows, where CI runs this package's fallback suite
+([`windows-fallback`](https://github.com/thyn-ai/mojo-kernels/actions/workflows/windows-fallback.yml)) —
 the same wheel API runs on the vendored NumPy fallback, silently and
 correctly. There is no sdist: a source tarball cannot rebuild the native
 library.
@@ -243,7 +244,7 @@ go missing — so the wrapper **falls back to a vendored NumPy reference**
   wheel-relative. (Redistribution terms for Modular's runtime binaries
   should be confirmed with Modular before any public release.) A pure
   `py3-none-any` fallback wheel can be produced with
-  `ELEPHANT_MOJO_ALLOW_PURE_WHEEL=1` (e.g. for Windows).
+  `ELEPHANT_MOJO_ALLOW_PURE_WHEEL=1` (the wheel CI builds and tests on Windows: [`windows-fallback`](https://github.com/thyn-ai/mojo-kernels/actions/workflows/windows-fallback.yml)).
 
 ## Differential tests
 

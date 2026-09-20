@@ -2,8 +2,7 @@
 
 Fast, MetPy-compatible parcel **CAPE/CIN** for standard atmospheric
 soundings — powered by a clean-room Mojo kernel, with a vendored
-pure-Python fallback for platforms without a native build (including
-Windows).
+pure-Python fallback for platforms without a native build (including Windows — tested there in CI: [`windows-fallback`](https://github.com/thyn-ai/mojo-kernels/actions/workflows/windows-fallback.yml)).
 
 ```python
 import numpy as np
@@ -117,7 +116,7 @@ NumPy-only, same algorithm):
   needed at install time. (Redistribution terms for Modular's runtime
   binaries should be confirmed with Modular before any public release.)
   A pure `py3-none-any` fallback wheel can be produced with
-  `METPY_MOJO_ALLOW_PURE_WHEEL=1` (e.g. for Windows).
+  `METPY_MOJO_ALLOW_PURE_WHEEL=1` (the wheel CI builds and tests on Windows: [`windows-fallback`](https://github.com/thyn-ai/mojo-kernels/actions/workflows/windows-fallback.yml)).
 
 ## Scope
 

@@ -1,0 +1,387 @@
+name: windows-fallback
+
+# Evidence for the READMEs' Windows claim.
+#
+# There is no Windows Mojo toolchain, so no kernel is ever compiled here. What
+# a Windows user gets is the pure-language fallback every package vendors, and
+# this workflow is the only place that fallback runs on Windows: it builds each
+# Python package's `py3-none-any` wheel with the package's
+# `<NAME>_MOJO_ALLOW_PURE_WHEEL=1` escape hatch (plain `python -m build`, no
+# pixi, no Mojo), installs it into a fresh venv next to the same pinned oracle
+# the Linux/macOS suites compare against, and runs the forced-fallback pass of
+# that package's differential suite (`<NAME>_MOJO_DISABLE_NATIVE=1`, the second
+# half of scripts/test_all_<kernel>.sh). Each TypeScript package runs its
+# `test:fallback` script the same way. A README may say "tested on Windows in
+# CI" only for a package with a leg in this file.
+#
+# Deliberately not a required status check: it is path-filtered (a required
+# check that never reports would block every unrelated pull request), it
+# certifies a claim rather than gating a kernel change, and the fallback code
+# it runs is already exercised on both other platforms by the ci-<kernel>
+# workflows the ruleset does require.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "python/**"
+      - "typescript/**"
+      - "tests/**"
+      - "fuzz/**"
+      - ".github/workflows/windows-fallback.yml"
+  pull_request:
+    paths:
+      - "python/**"
+      - "typescript/**"
+      - "tests/**"
+      - "fuzz/**"
+      - ".github/workflows/windows-fallback.yml"
+  workflow_dispatch:
+
+# Read-only token for every job: the workflow only builds and tests.
+permissions:
+  contents: read
+
+# One run per ref; a newer push to a pull request cancels the run it supersedes.
+# Pushes to main always run to completion.
+concurrency:
+  group: windows-fallback-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  python:
+    name: ${{ matrix.module }} pure-wheel fallback (windows-latest)
+    runs-on: windows-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # package: directory under python/; module: the wheel's import name;
+          # prefix: the package's environment-variable prefix
+          # (<prefix>_ALLOW_PURE_WHEEL / <prefix>_DISABLE_NATIVE);
+          # oracles: the pinned reference package(s) the suite compares
+          # against, exactly as the ci-<kernel> workflow / pixi.lock pins them;
+          # suite: the files scripts/test_all_<kernel>.sh runs.
+          - package: ase_mojo
+            module: ase_mojo
+            prefix: ASE_MOJO
+            oracles: ase==3.26.0
+            suite: tests/test_ase_neighborlist_differential.py tests/test_ase_neighborlist_loader.py
+          - package: bio_mojo
+            module: bio_mojo
+            prefix: BIO_MOJO
+            oracles: biopython==1.88
+            suite: tests/test_biopython_differential.py tests/test_biopython_loader.py
+          - package: bm25_mojo
+            module: bm25_mojo
+            prefix: BM25_MOJO
+            oracles: rank_bm25==0.2.2
+            suite: tests/test_differential.py tests/test_loader.py tests/test_fuzz_regression_bm25.py
+          - package: capa_mojo
+            module: capa_mojo
+            prefix: CAPA_MOJO
+            oracles: flare-capa==9.2.0
+            suite: tests/test_capa_match_differential.py tests/test_capa_match_loader.py
+          # cclib's second, independent oracle (pyquante2==0.2.0, sdist only)
+          # does not compile with MSVC (C2129 in its crys.h), so this leg has
+          # cclib itself and the PyQuante1 transcription in tests/; the one
+          # pyquante2 test skips via importorskip.
+          - package: cclib_mojo
+            module: cclib_mojo
+            prefix: CCLIB_MOJO
+            oracles: cclib==1.8.1
+            suite: tests/test_gaussgrid_differential.py tests/test_gaussgrid_loader.py tests/test_fuzz_regression_cclib.py
+          # tzdata: the suite's aware cases use zoneinfo, which has no
+          # system zone database to read on Windows.
+          - package: croniter_mojo
+            module: croniter_mojo
+            prefix: CRONITER_MOJO
+            oracles: croniter==6.2.4 tzdata
+            suite: tests/test_croniter_differential.py tests/test_croniter_loader.py
+          # dynesty_mojo has no leg: its suite's sanity check on the ORACLE
+          # (dynesty 3.1.0's own logz against the analytic truth, within
+          # 4 sigma + 0.15) fails on windows-latest by 0.04 for the shared
+          # seed (run 35540328280: |-20.7991 - -21.4793| = 0.680 > 0.643),
+          # so the suite cannot go green there and dynesty-mojo's README
+          # does not claim Windows. The fallback itself matched the oracle
+          # and the truth in that run.
+          - package: elephant_mojo
+            module: elephant_mojo
+            prefix: ELEPHANT_MOJO
+            oracles: elephant==1.2.1
+            suite: tests/test_elephant_surrogates_differential.py tests/test_elephant_surrogates_loader.py
+          - package: jmespath_mojo
+            module: jmespath_mojo
+            prefix: JMESPATH_MOJO
+            oracles: jmespath==1.0.1
+            suite: tests/test_jmespath_differential.py tests/test_jmespath_loader.py
+          - package: jsonpath_mojo
+            module: jsonpath_mojo
+            prefix: JSONPATH_MOJO
+            oracles: jsonpath-ng==1.7.0
+            suite: tests/test_jsonpath_differential.py tests/test_jsonpath_loader.py
+          - package: jsonschema_mojo
+            module: jsonschema_mojo
+            prefix: JSONSCHEMA_MOJO
+            oracles: jsonschema==4.26.0
+            suite: tests/test_jsonschema_differential.py tests/test_jsonschema_loader.py
+          - package: langdetect_mojo
+            module: langdetect_mojo
+            prefix: LANGDETECT_MOJO
+            oracles: langdetect==1.0.9
+            suite: tests/test_langdetect_differential.py tests/test_langdetect_loader.py
+          - package: metpy_mojo
+            module: metpy_mojo
+            prefix: METPY_MOJO
+            oracles: metpy==1.7.1
+            suite: tests/test_metpy_cape_differential.py tests/test_metpy_cape_loader.py
+          - package: motmetrics_mojo
+            module: motmetrics_mojo
+            prefix: MOTMETRICS_MOJO
+            oracles: motmetrics==1.4.0 pandas==3.0.6 scipy==1.18.1
+            suite: tests/test_motmetrics_differential.py tests/test_motmetrics_loader.py
+          # nuscenes-devkit pins numpy<2 (the Linux/macOS legs satisfy it
+          # from a separate --target dir), so this leg lets the oracle's
+          # constraint pick numpy instead of the shared pin.
+          - package: nuscenes_eval_mojo
+            module: nuscenes_eval_mojo
+            prefix: NUSCENES_EVAL_MOJO
+            oracles: nuscenes-devkit==1.2.0
+            numpy: numpy<2
+            suite: tests/test_nuscenes_eval_differential.py tests/test_nuscenes_eval_loader.py
+          - package: nx_mojo
+            module: nx_mojo
+            prefix: NX_MOJO
+            oracles: networkx==3.5
+            suite: tests/test_networkx_graph_differential.py tests/test_networkx_graph_loader.py
+          - package: obspy_mojo
+            module: obspy_mojo
+            prefix: OBSPY_MOJO
+            oracles: obspy==1.5.1
+            suite: tests/test_obspy_konno.py tests/test_obspy_konno_loader.py
+          - package: oletools_mojo
+            module: oletools_mojo
+            prefix: OLETOOLS_MOJO
+            oracles: oletools==0.60.2
+            suite: tests/test_oletools_vba_differential.py tests/test_oletools_vba_loader.py
+          - package: pefile_mojo
+            module: pefile_mojo
+            prefix: PEFILE_MOJO
+            oracles: pefile==2024.8.26
+            suite: tests/test_pefile_fixtures.py tests/test_pefile_differential.py tests/test_pefile_loader.py
+          - package: pydicom_mojo
+            module: pydicom_mojo
+            prefix: PYDICOM_MOJO
+            oracles: pydicom==3.0.2
+            suite: tests/test_pydicom_rle_differential.py tests/test_pydicom_rle_loader.py
+          - package: pykalman_mojo
+            module: pykalman_mojo
+            prefix: PYKALMAN_MOJO
+            oracles: pykalman==0.11.2
+            suite: tests/test_pykalman_differential.py tests/test_pykalman_loader.py
+          - package: pymavlink_mojo
+            module: pymavlink_mojo
+            prefix: PYMAVLINK_MOJO
+            oracles: pymavlink==2.4.47
+            suite: tests/test_pymavlink_differential.py tests/test_pymavlink_loader.py
+          - package: pypdf_filters_mojo
+            module: pdf_mojo
+            prefix: PDF_MOJO
+            oracles: pypdf==6.19.0
+            suite: tests/test_pypdf_filters_differential.py tests/test_pypdf_filters_loader.py
+          - package: ruptures_mojo
+            module: ruptures_mojo
+            prefix: RUPTURES_MOJO
+            oracles: ruptures==1.1.10
+            suite: tests/test_ruptures_differential.py tests/test_ruptures_loader.py
+          - package: sacrebleu_mojo
+            module: sacrebleu_mojo
+            prefix: SACREBLEU_MOJO
+            oracles: sacrebleu==2.5.1
+            suite: tests/test_sacrebleu_differential.py tests/test_sacrebleu_loader.py
+          - package: spatialmath_mojo
+            module: spatialmath_mojo
+            prefix: SPATIALMATH_MOJO
+            oracles: spatialmath-python==1.1.18
+            suite: tests/test_spatialmath_differential.py tests/test_spatialmath_loader.py
+          - package: ta_mojo
+            module: ta_mojo
+            prefix: TA_MOJO
+            oracles: pandas==3.0.6 pandas-ta-classic==0.8.32
+            suite: tests/test_ta_differential.py tests/test_ta_loader.py
+          # tomlkit at pixi.lock's version: the suite's optional second oracle
+          # (test_generated_docs_accepted_by_tomlkit_if_installed) runs on the
+          # Linux/macOS legs, so it runs here too.
+          - package: toml_mojo
+            module: toml_mojo
+            prefix: TOML_MOJO
+            oracles: tomlkit==0.15.1
+            suite: tests/test_toml_differential.py tests/test_toml_loader.py
+          - package: uproot-branches_mojo
+            module: uproot_mojo
+            prefix: UPROOT_MOJO
+            oracles: uproot==5.7.6 awkward==2.14.0
+            suite: tests/test_uproot-branches_differential.py tests/test_uproot-branches_loader.py
+          - package: vader_mojo
+            module: vader_mojo
+            prefix: VADER_MOJO
+            oracles: vaderSentiment==3.3.2
+            suite: tests/test_vader_differential.py tests/test_vader_loader.py
+          - package: vol_mojo
+            module: vol_mojo
+            prefix: VOL_MOJO
+            oracles: volatility3==2.28.2
+            suite: tests/test_volatility3_hive_differential.py tests/test_volatility3_hive_loader.py
+    env:
+      PACKAGE: ${{ matrix.package }}
+      MODULE: ${{ matrix.module }}
+      PREFIX: ${{ matrix.prefix }}
+      ORACLES: ${{ matrix.oracles }}
+      SUITE: ${{ matrix.suite }}
+      # A leg may override the shared numpy pin (see the nuscenes entry).
+      NUMPY_PIN: ${{ matrix.numpy }}
+      # Keep the runner's user site-packages out of every interpreter below.
+      PYTHONNOUSERSITE: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Python 3.12
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Build the pure wheel (no Mojo toolchain, no pixi)
+        # `build` at the version pixi.lock resolves. The isolated build
+        # environment installs hatchling from the package's own
+        # `[build-system] requires`, as any consumer's `pip wheel` would.
+        run: |
+          set -e
+          python -m pip install --quiet "build==1.6.1"
+          export "${PREFIX}_ALLOW_PURE_WHEEL=1"
+          python -m build --wheel --outdir "dist-pure-windows" "python/${PACKAGE}"
+          ls dist-pure-windows
+          for whl in dist-pure-windows/*.whl; do
+            case "$whl" in
+              *-py3-none-any.whl) ;;
+              *) echo "expected a py3-none-any wheel, got $whl" >&2; exit 1 ;;
+            esac
+          done
+
+      - name: Install the wheel + pinned oracle into a fresh venv
+        # numpy at pixi.lock's version (unless the leg overrides it) because
+        # tests/conftest.py imports it for every suite; pytest likewise.
+        # Everything else the suite needs is the package's own runtime
+        # dependency (pulled by the wheel) or the oracle pinned in the matrix.
+        run: |
+          set -e
+          python -m venv .venv-windows
+          .venv-windows/Scripts/python.exe -m pip install --quiet --upgrade pip
+          # shellcheck disable=SC2086  # ORACLES is a space-separated list of pins
+          .venv-windows/Scripts/python.exe -m pip install --quiet dist-pure-windows/*.whl "${NUMPY_PIN:-numpy==2.5.3}" "pytest==9.1.1" $ORACLES
+          .venv-windows/Scripts/python.exe -m pip list --format=columns
+
+      - name: "End-user path: import with no environment variable set, expect the fallback"
+        # Nothing forces the fallback here. On Windows there is no native
+        # library to find, so the wrapper must report the fallback on its own.
+        run: |
+          set -e
+          cd "$RUNNER_TEMP"
+          "$GITHUB_WORKSPACE/.venv-windows/Scripts/python.exe" - <<EOF
+          import importlib, json, sys
+          mod = importlib.import_module("$MODULE")
+          info = mod.backend_info()
+          print(json.dumps(info, indent=2, default=str))
+          assert sys.platform == "win32", sys.platform
+          assert info["native_available"] is False, "a pure wheel must not find a native kernel"
+          assert info["disabled_by_env"] is False, "the fallback must be selected without any override"
+          print("end-user fallback OK:", "$MODULE", mod.__version__)
+          EOF
+
+      - name: Forced-fallback differential suite against the pinned oracle
+        # The second half of scripts/test_all_<kernel>.sh, verbatim: the
+        # in-repo suite, the repository's own oracle pin, and
+        # <PREFIX>_DISABLE_NATIVE=1 so every loader assertion expects the
+        # fallback. The wrapper under test is the installed wheel (the source
+        # tree is not on sys.path), so this is what a Windows user runs.
+        run: |
+          set -e
+          export "${PREFIX}_DISABLE_NATIVE=1"
+          # shellcheck disable=SC2086  # SUITE is a space-separated list of test files
+          .venv-windows/Scripts/python.exe -m pytest $SUITE -q -p no:cacheprovider -rs
+
+  typescript:
+    name: ${{ matrix.package }} vendored fallback (windows-latest)
+    runs-on: windows-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # package: directory under typescript/; scope: the npm scope of the
+          # core package; prefix: the package's environment-variable prefix.
+          - package: ckmeans-mojo
+            scope: "@ckmeans-mojo"
+            prefix: CKMEANS_MOJO
+          - package: fuse-mojo
+            scope: "@fuse-mojo"
+            prefix: FUSE_MOJO
+          - package: minisearch_fuzzy_mojo
+            scope: "@minisearch-mojo"
+            prefix: MINISEARCH_MOJO
+          - package: natural-mojo
+            scope: "@natural-mojo"
+            prefix: NATURAL_MOJO
+    env:
+      PACKAGE: ${{ matrix.package }}
+      SCOPE: ${{ matrix.scope }}
+      PREFIX: ${{ matrix.prefix }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 20
+
+      - name: npm ci (the darwin/linux platform packages are optional and skipped here)
+        working-directory: typescript/${{ matrix.package }}
+        run: npm ci --no-audit --no-fund
+
+      - name: "End-user path: require with no environment variable set, expect the fallback"
+        working-directory: typescript/${{ matrix.package }}
+        run: |
+          set -e
+          node - <<EOF
+          const core = require("${SCOPE}/core")
+          const info = core.backendInfo()
+          console.log(JSON.stringify(info, null, 2))
+          if (process.platform !== "win32") throw new Error("expected win32, got " + process.platform)
+          if (info.native_available !== false) throw new Error("a Windows install must not find a native kernel")
+          if (info.disabled_by_env !== false) throw new Error("the fallback must be selected without any override")
+          console.log("end-user fallback OK:", "${SCOPE}/core", require("${SCOPE}/core/package.json").version)
+          EOF
+
+      - name: Forced-fallback differential suite (npm run test:fallback)
+        # The package's own `test:fallback` script is written for a POSIX
+        # shell (`<PREFIX>_DISABLE_NATIVE=1 node --test tests/*.test.cjs`), so
+        # npm runs it through the runner's Git Bash instead of cmd.exe. The
+        # script itself is unchanged: what runs here is what runs on Linux
+        # and macOS.
+        working-directory: typescript/${{ matrix.package }}
+        run: |
+          set -e
+          npm_config_script_shell="$(cygpath -w "$(command -v bash)")"
+          export npm_config_script_shell
+          echo "npm script shell: $npm_config_script_shell"
+          npm run test:fallback

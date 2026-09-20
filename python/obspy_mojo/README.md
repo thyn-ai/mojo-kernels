@@ -3,7 +3,7 @@
 Drop-in faster [Konno-Ohmachi smoothing](https://doi.org/10.1785/BSSA0880010228)
 for [ObsPy](https://pypi.org/project/obspy/) users, powered by a clean-room
 Mojo kernel — with a vendored pure-NumPy fallback for platforms without a
-native build (including Windows).
+native build (including Windows — tested there in CI: [`windows-fallback`](https://github.com/thyn-ai/mojo-kernels/actions/workflows/windows-fallback.yml)).
 
 ```python
 import numpy as np
@@ -117,7 +117,8 @@ build):
 | 512 | 8.65 | 1.85 | 4.7x |
 | 2,048 | 87.71 | 28.90 | 3.0x |
 
-The pure-NumPy fallback (used on Windows and other unsupported platforms)
+The pure-NumPy fallback (used on Windows and other unsupported platforms;
+tested on Windows in CI: [`windows-fallback`](https://github.com/thyn-ai/mojo-kernels/actions/workflows/windows-fallback.yml))
 measured in the same runs: 5.23 / 99.16 / 1283.87 ms (normalize=False) and
 7.35 / 110.94 / 1444.76 ms (normalize=True) at 512 / 2,048 / 8,192 bins —
 i.e. 0.9x-2.5x obspy's own loop, and always bit-faithful to it within the

@@ -13,8 +13,10 @@ results — measured **70x–13,137x** speedups with bit-exact-to-last-ulp parit
 against the reference packages, asserted by differential test suites that run
 on both backends. Prebuilt per-platform binaries mean **no Mojo toolchain is
 ever required** on an end user's machine, and every package ships a vendored
-pure-language (Python / JavaScript) fallback, so unsupported platforms —
-including Windows — get silently correct behavior. Raw Mojo source lives open
+pure-language (Python / JavaScript) fallback, so unsupported platforms get
+silently correct behavior. Windows has no Mojo toolchain, so the fallback is
+what runs there; CI runs it on Windows for every package but one
+([`windows-fallback`](https://github.com/thyn-ai/mojo-kernels/actions/workflows/windows-fallback.yml)). Raw Mojo source lives open
 in this repo; the reference libraries are used only as test and benchmark
 oracles, never as runtime dependencies.
 
@@ -308,6 +310,15 @@ implementation**, silently and correctly:
   the real reference package.
 - The wrapper checks an `<name>mojo_abi_version()` handshake before any
   native call; a mismatch falls back cleanly.
+- Windows: no Mojo toolchain exists, so the pure fallback is what runs
+  there. [`windows-fallback.yml`](.github/workflows/windows-fallback.yml)
+  builds every Python package's `py3-none-any` wheel with its
+  `<NAME>_MOJO_ALLOW_PURE_WHEEL=1` escape hatch, installs it into a fresh
+  venv beside the pinned oracle and runs the forced-fallback suite on
+  `windows-latest`; every TypeScript package runs its `test:fallback`
+  script there. The one exception is `dynesty-mojo`: its suite's sanity check on the
+  *oracle* does not hold on Windows, so it makes no Windows claim (its
+  README says why).
 - Wheels and platform packages are **per-platform and self-contained**:
   `delocate` (macOS) / `auditwheel repair` / `patchelf` (Linux) vendor the
   Mojo runtime libraries and rewrite load paths to be package-relative.

@@ -8,7 +8,8 @@ validated by a differential test suite against the published `jsonschema`
 package on both backends. The native Mojo kernel runs on macOS arm64 and
 Linux x86_64; everywhere else (Windows, missing/unloadable kernel, or values
 the native path cannot represent exactly) the package transparently uses a
-vendored pure-Python fallback with identical semantics. Zero dependencies.
+vendored pure-Python fallback with identical semantics — tested on Windows
+in CI ([`windows-fallback`](https://github.com/thyn-ai/mojo-kernels/actions/workflows/windows-fallback.yml)). Zero dependencies.
 
 ```python
 import jsonschema_mojo

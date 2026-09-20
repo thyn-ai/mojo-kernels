@@ -4,7 +4,7 @@ Mojo-accelerated MS-OVBA VBA decompression — a drop-in faster replacement
 for [oletools](https://pypi.org/project/oletools/)'
 `olevba.decompress_stream`, the pure-Python LZ decoder every `VBA_Parser`
 macro extraction goes through — with a vendored pure-Python fallback for
-platforms without a native build (including Windows).
+platforms without a native build (including Windows — tested there in CI: [`windows-fallback`](https://github.com/thyn-ai/mojo-kernels/actions/workflows/windows-fallback.yml)).
 
 ```python
 from oletools_mojo import decompress_stream
@@ -106,8 +106,8 @@ oracle:
   from the oracle. The boundary is pinned by a test so it is explicit, not
   accidental.
 - **Platforms**: native wheels are built for macOS arm64 and Linux x86_64.
-  Everywhere else (Windows included) the package installs fine and uses
-  the vendored pure-Python fallback — identical output, oracle-level
+  Everywhere else (Windows included — tested there in CI: [`windows-fallback`](https://github.com/thyn-ai/mojo-kernels/actions/workflows/windows-fallback.yml))
+  the package installs fine and uses the vendored pure-Python fallback — identical output, oracle-level
   speed.
 
 ## Benchmarks

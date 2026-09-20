@@ -4,7 +4,7 @@ A drop-in faster replacement for the stdlib [`tomllib`](https://docs.python.org/
 parser (and a much faster alternative to [`tomlkit`](https://pypi.org/project/tomlkit/),
 Poetry's parser), powered by a clean-room Mojo kernel — with the stdlib
 `tomllib` itself as the transparent fallback on platforms without a native
-build (including Windows).
+build (including Windows — tested there in CI: [`windows-fallback`](https://github.com/thyn-ai/mojo-kernels/actions/workflows/windows-fallback.yml)).
 
 ```python
 import toml_mojo
@@ -99,7 +99,8 @@ resolver, i.e. the worst case on an unsupported platform.
 - Error *messages* are not byte-identical to `tomllib`'s (only the
   exception type and the accept/reject verdict match).
 - Windows: no Mojo toolchain exists there; the package transparently uses
-  the `tomllib` fallback (correct, just not accelerated).
+  the `tomllib` fallback (correct, just not accelerated) — tested on Windows
+  in CI ([`windows-fallback`](https://github.com/thyn-ai/mojo-kernels/actions/workflows/windows-fallback.yml)).
 
 Source, benchmarks, and development: <https://github.com/thyn-ai/mojo-kernels>
 

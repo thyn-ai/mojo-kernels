@@ -2,7 +2,7 @@
 
 [NetworkX](https://networkx.org/) graph algorithms accelerated by a clean-room
 Mojo kernel — with networkx-identical results, and a vendored pure-Python
-fallback for platforms without a native build (including Windows).
+fallback for platforms without a native build (including Windows — tested there in CI: [`windows-fallback`](https://github.com/thyn-ai/mojo-kernels/actions/workflows/windows-fallback.yml)).
 
 ```python
 import networkx as nx

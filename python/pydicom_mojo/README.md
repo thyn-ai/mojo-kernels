@@ -4,7 +4,7 @@ Mojo-accelerated **DICOM RLE Lossless** codec — decode AND encode — the two
 pure-Python PackBits hot loops in [pydicom](https://pypi.org/project/pydicom/)'s
 native RLE plugin (`pydicom.pixels.decoders.rle` /
 `pydicom.pixels.encoders.native`) — with a vendored pure-Python fallback for
-platforms without a native build (including Windows).
+platforms without a native build (including Windows — tested there in CI: [`windows-fallback`](https://github.com/thyn-ai/mojo-kernels/actions/workflows/windows-fallback.yml)).
 
 ```python
 import pydicom_mojo
@@ -138,7 +138,7 @@ spec and pydicom's observable behaviour differ, we match pydicom:
   your code). The plugin seam wires the codec into pydicom's pipelines
   exactly where the native codec sits.
 - Wheels with the native kernel are built for macOS arm64 and Linux
-  x86_64. Everywhere else (including Windows) the package works with the
+  x86_64. Everywhere else (including Windows — tested there in CI: [`windows-fallback`](https://github.com/thyn-ai/mojo-kernels/actions/workflows/windows-fallback.yml)) the package works with the
   identical pure-Python fallback.
 
 ## Benchmarks
