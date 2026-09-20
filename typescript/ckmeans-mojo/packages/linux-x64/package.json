@@ -4,9 +4,15 @@
   "description": "Prebuilt ckmeansmojo Mojo kernel for Linux x86_64 (used by @ckmeans-mojo/core).",
   "license": "Apache-2.0",
   "author": "Algenta",
-  "os": ["linux"],
-  "cpu": ["x64"],
-  "files": ["lib/"],
+  "os": [
+    "linux"
+  ],
+  "cpu": [
+    "x64"
+  ],
+  "files": [
+    "lib/"
+  ],
   "repository": {
     "type": "git",
     "url": "https://github.com/thyn-ai/mojo-kernels"

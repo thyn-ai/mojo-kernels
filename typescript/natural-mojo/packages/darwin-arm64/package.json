@@ -4,9 +4,15 @@
   "description": "Prebuilt naturalmojo Mojo kernel for macOS Apple Silicon (used by @natural-mojo/core).",
   "license": "Apache-2.0",
   "author": "Algenta",
-  "os": ["darwin"],
-  "cpu": ["arm64"],
-  "files": ["lib/"],
+  "os": [
+    "darwin"
+  ],
+  "cpu": [
+    "arm64"
+  ],
+  "files": [
+    "lib/"
+  ],
   "repository": {
     "type": "git",
     "url": "https://github.com/thyn-ai/mojo-kernels"

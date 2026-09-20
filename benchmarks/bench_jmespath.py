@@ -40,6 +40,7 @@ import random
 import statistics
 import subprocess
 import sys
+import tempfile
 import time
 
 SEED = 20260919
@@ -173,42 +174,76 @@ def time_warm_many(search, expr, docs) -> float:
     return statistics.median(samples)
 
 
-COLD_SNIPPET = """
+# The two programs the cold probe may time. Selection is by literal
+# comparison, here and again inside the child, so a module name never turns
+# into an import statement by string formatting.
+COLD_MODULES = ("jmespath", "jmespath_mojo")
+
+# The child program is a fixed literal. Everything it needs -- the two
+# directories for sys.path, which module to import, the expression and the
+# document -- arrives in one JSON payload file whose path is the child's only
+# argument. No string from the environment is ever part of the program text,
+# and none is ever an argv element.
+COLD_PROBE = """\
 import json, sys, time
-sys.path.insert(0, {wrapper!r})
-sys.path.insert(0, {oracle!r})
-import {mod}
-payload = json.load(open({docfile!r}))
-expr, _ = payload["expr"], None
-data = payload["data"]
+with open(sys.argv[1], encoding="utf-8") as fh:
+    payload = json.load(fh)
+sys.path.insert(0, payload["wrapper"])
+sys.path.insert(0, payload["oracle"])
+if payload["module"] == "jmespath":
+    import jmespath as mod
+elif payload["module"] == "jmespath_mojo":
+    import jmespath_mojo as mod
+else:
+    sys.exit(f"cold probe: unknown module {payload['module']!r}")
+expr, data = payload["expr"], payload["data"]
 t0 = time.perf_counter()
-{mod}.search(expr, data)
+mod.search(expr, data)
 print(time.perf_counter() - t0)
 """
 
 
+def oracle_dir() -> str:
+    """Directory the cold probe adds to sys.path for the oracle package.
+
+    Inside the pixi environment the oracle is importable already and the
+    default is a harmless non-existent entry; ``JMESPATH_ORACLE_PATH`` names
+    a ``pip install --target`` directory when the oracle lives elsewhere.
+    """
+    return os.environ.get("JMESPATH_ORACLE_PATH", "/tmp/jm-oracle")
+
+
 def time_cold(module: str, expr: str, data) -> float:
     """Median seconds for the first search call in N_COLD_RUNS fresh processes."""
+    if module not in COLD_MODULES:
+        raise ValueError(f"cold probe times one of {COLD_MODULES}, not {module!r}")
     wrapper = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "python", "jmespath_mojo"))
-    oracle = os.environ.get("JMESPATH_ORACLE_PATH", "/tmp/jm-oracle")
-    docfile = os.path.join(os.environ.get("TMPDIR", "/tmp"), f"bench_jm_cold_{os.getpid()}.json")
-    with open(docfile, "w") as f:
-        json.dump({"expr": expr, "data": data}, f)
+    payload = {
+        "wrapper": wrapper,
+        "oracle": oracle_dir(),
+        "module": module,
+        "expr": expr,
+        "data": data,
+    }
+    # tempfile chooses the directory (it honours TMPDIR itself), so the path
+    # handed to the child is never assembled from environment strings here.
+    docfile = tempfile.NamedTemporaryFile(
+        "w", encoding="utf-8", prefix="bench_jm_cold_", suffix=".json", delete=False
+    )
     samples = []
     try:
+        with docfile:
+            json.dump(payload, docfile)
         for _ in range(N_COLD_RUNS):
-            snippet = COLD_SNIPPET.format(
-                wrapper=wrapper, oracle=oracle, mod=module, docfile=docfile
-            )
             out = subprocess.run(
-                [sys.executable, "-c", snippet],
+                [sys.executable, "-c", COLD_PROBE, docfile.name],
                 capture_output=True,
                 text=True,
                 check=True,
             )
             samples.append(float(out.stdout.strip()))
     finally:
-        os.unlink(docfile)
+        os.unlink(docfile.name)
     return statistics.median(samples)
 
 

@@ -26,9 +26,13 @@ else
   trap 'rm -rf "$dist" /tmp/fuse-mojo-smoke-native /tmp/fuse-mojo-smoke-win' EXIT
 fi
 
+# npm pack names every tarball <name>-<version>.tgz from its package.json, so the
+# version the smoke installs by exact filename is read from the same place.
+version="$(node -p "require('$here/packages/core/package.json').version")"
+
 case "$(uname -s)-$(uname -m)" in
-  Darwin-arm64) platform_pkg="fuse-mojo-darwin-arm64-0.1.0.tgz" ;;
-  Linux-x86_64) platform_pkg="fuse-mojo-linux-x64-0.1.0.tgz" ;;
+  Darwin-arm64) platform_pkg="fuse-mojo-darwin-arm64-${version}.tgz" ;;
+  Linux-x86_64) platform_pkg="fuse-mojo-linux-x64-${version}.tgz" ;;
   *) echo "error: no platform package for $(uname -s)-$(uname -m); run the core-only fallback path manually" >&2; exit 1 ;;
 esac
 
@@ -41,7 +45,7 @@ ls "$dist"
 echo "== native smoke (fresh project, core + platform tarballs) =="
 rm -rf /tmp/fuse-mojo-smoke-native
 mkdir -p /tmp/fuse-mojo-smoke-native/vendor
-cp "$dist/fuse-mojo-core-0.1.0.tgz" "$dist/$platform_pkg" /tmp/fuse-mojo-smoke-native/vendor/
+cp "$dist/fuse-mojo-core-${version}.tgz" "$dist/$platform_pkg" /tmp/fuse-mojo-smoke-native/vendor/
 cd /tmp/fuse-mojo-smoke-native
 node "$here/../scripts/consumer-lockfile.cjs" "$here/package-lock.json" vendor/*.tgz
 npm ci --no-audit --no-fund --loglevel=error
@@ -52,7 +56,7 @@ head -3 native.json
 echo "== simulated-Windows smoke (core tarball only; fallback engages) =="
 rm -rf /tmp/fuse-mojo-smoke-win
 mkdir -p /tmp/fuse-mojo-smoke-win/vendor
-cp "$dist/fuse-mojo-core-0.1.0.tgz" /tmp/fuse-mojo-smoke-win/vendor/
+cp "$dist/fuse-mojo-core-${version}.tgz" /tmp/fuse-mojo-smoke-win/vendor/
 cd /tmp/fuse-mojo-smoke-win
 node "$here/../scripts/consumer-lockfile.cjs" "$here/package-lock.json" vendor/*.tgz
 npm ci --no-audit --no-fund --loglevel=error

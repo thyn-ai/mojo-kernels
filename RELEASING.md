@@ -3,10 +3,13 @@
 A release of this repository is one `vX.Y.Z` tag that ships every
 distributable at that version: the `bm25-mojo` and `cclib-mojo` platform
 wheels (macOS arm64, Linux x86_64) and the `@fuse-mojo/core`,
-`@fuse-mojo/darwin-arm64` and `@fuse-mojo/linux-x64` npm tarballs. The
-pipeline is [`.github/workflows/release.yml`](./.github/workflows/release.yml);
-this document is what a maintainer needs to run it, what the owner sets up
-once, and how anyone verifies what it produced.
+`@fuse-mojo/darwin-arm64` and `@fuse-mojo/linux-x64` npm tarballs. Two
+workflows cut it: [`release-please.yml`](./.github/workflows/release-please.yml)
+opens the release pull request and, when that merges, creates the tag and
+the GitHub Release; [`release.yml`](./.github/workflows/release.yml) builds,
+signs and attests the assets onto that Release. Nobody pushes a tag by
+hand. This document is what a maintainer needs to know, what the owner sets
+up once, and how anyone verifies what it produced.
 
 ## What a release contains
 
@@ -26,10 +29,11 @@ for that tag:
 | `<asset>.sigstore.json` (one per asset, `SHA256SUMS` included) | keyless [Sigstore](https://www.sigstore.dev/) signature bundle, signed by the `release.yml` run itself |
 | `multiple.intoto.jsonl` | [SLSA](https://slsa.dev/) build provenance covering all eight assets, from the [SLSA generic generator](https://github.com/slsa-framework/slsa-github-generator) |
 
-The Release is the one release-drafter has been preparing on every merge to
-`main`: an existing release for the tag is used as-is, an open draft is
-adopted (retagged to the tag being cut, notes kept) and only if there is
-neither does the workflow create one with generated notes.
+The Release is the one release-please published when the release pull
+request merged, with that pull request's CHANGELOG entry as its notes.
+Creating it is what pushes the tag that starts `release.yml`, which attaches
+the assets to it and never creates a second one. (A tag with no release at
+all, which is not a supported path, gets one with generated notes.)
 
 Registries are gated. The wheels are published to PyPI and the tarballs to
 npm **only** when the repository variables `PUBLISH_PYPI` / `PUBLISH_NPM`
@@ -40,41 +44,47 @@ Connect): no long-lived registry token lives in this repository.
 
 ## Cutting a release
 
-1. **Bump the version in lockstep.** Every published unit carries the same
-   version and the workflow refuses a tag that disagrees with any of them.
-   In one pull request, set the new `X.Y.Z` in:
+Nobody bumps a version or pushes a tag. The release is a pull request that
+release-please writes and a maintainer merges.
 
-   - `pixi.toml` (`[workspace] version`)
-   - `python/bm25_mojo/pyproject.toml` and `python/bm25_mojo/bm25_mojo/__init__.py`
-   - `python/cclib_mojo/pyproject.toml` and `python/cclib_mojo/cclib_mojo/__init__.py`
-   - `typescript/fuse-mojo/packages/core/package.json` (`version` and both
-     `optionalDependencies` pins), `typescript/fuse-mojo/packages/darwin-arm64/package.json`,
-     `typescript/fuse-mojo/packages/linux-x64/package.json`
-   - the tarball names in `typescript/fuse-mojo/scripts/smoke.sh`, which
-     the smoke test installs by exact filename
+1. **Merge changes with Conventional Commit titles.** The pull request title
+   becomes the squash commit on `main` and decides the next version: `feat`
+   bumps the minor version; `fix`, `perf`, `deps`, `security` and `revert`
+   bump the patch version; a breaking change (`!` after the type or a
+   `BREAKING CHANGE:` footer) bumps the minor version while the project is
+   on 0.x (`bump-minor-pre-major`) and the major version from 1.0.0 on.
+   `docs`, `ci`, `chore`, `build`, `refactor`, `test` and `style` never cut
+   a release on their own and do not appear in the changelog.
 
-   and move the `[Unreleased]` section of [`CHANGELOG.md`](./CHANGELOG.md)
-   under a `[X.Y.Z]` heading. Merge it like any other change, with CI green.
+2. **The release pull request.** On every push to `main`,
+   [`release-please.yml`](./.github/workflows/release-please.yml) opens or
+   rewrites `chore(release): vX.Y.Z` (branch
+   `release-please--branches--main--components--mojo-kernels`, label
+   `autorelease: pending`) from the commits merged since the previous
+   tag. Its diff is exactly: the next entry at the top of
+   [`CHANGELOG.md`](./CHANGELOG.md), `version.txt`,
+   `.release-please-manifest.json`, and every version location listed under
+   [What release-please bumps](#what-release-please-bumps), all set to the
+   same `X.Y.Z`. Its body is the CHANGELOG entry. It follows `main`: another
+   merge re-runs release-please, which rewrites it on top of the new head, so
+   it is never behind.
 
-2. **Check the draft.** release-drafter has updated the draft release on
-   the [Releases](https://github.com/thyn-ai/mojo-kernels/releases) page
-   with every merged PR since the previous tag. Edit the notes if anything
-   reads wrong; the workflow keeps them verbatim (only the draft's own
-   version string is rewritten to the tag if the two differ).
+   To override the computed version, merge a commit whose message carries a
+   `Release-As: X.Y.Z` footer; release-please uses that version for the next
+   release pull request.
 
-3. **Create the tag.** Either path starts the same workflow:
+3. **Merge it like any other pull request.** It is opened by the
+   `algenta-sdk-sync` App (a different identity from codna), so codna reviews
+   it and its approval counts; every required check runs on it (no workflow
+   in this repository is path-filtered). Once codna has approved and all
+   required checks are green, squash-merge it. Read the version in the title
+   and the CHANGELOG entry first: merging is the release decision, and that
+   version is the one that ships.
 
-   ```bash
-   # from a clean checkout of main at the merged bump commit
-   git tag -a vX.Y.Z -m "vX.Y.Z"
-   git push origin vX.Y.Z
-   ```
-
-   or open the draft on the Releases page, set its tag to `vX.Y.Z`
-   (creating it from `main`) and click **Publish release**. Publishing a
-   release creates the tag, which triggers the workflow exactly like a
-   pushed tag; the assets are attached to that same release a few minutes
-   later.
+   When it merges, the `release-please` run on that push creates the
+   `vX.Y.Z` tag on the merge commit and publishes the GitHub Release with the
+   CHANGELOG entry as its notes (the label flips to `autorelease: tagged`).
+   Creating the tag starts `release.yml`.
 
 4. **Watch the run** on the Actions tab (`release` workflow). The jobs, in
    order:
@@ -84,12 +94,37 @@ Connect): no long-lived registry token lives in this repository.
    | `preflight` | always | validates the tag (and, on a re-run, that the run was dispatched on it), checks that every package version equals the tag's |
    | `build` (ubuntu, macos) | always | kernels, differential suites, wheels, npm tarballs, smoke tests; each runner keeps the assets it can vouch for |
    | `sign` | always | `SHA256SUMS`; `cosign sign-blob` per asset with the job's OIDC identity; verifies every bundle; computes the provenance subjects |
-   | `release` | not on a dry run | finds / adopts / creates the GitHub Release, uploads assets and bundles |
+   | `release` | not on a dry run | finds the GitHub Release release-please published for the tag (creates one only if none exists), uploads assets and bundles |
    | `provenance` | always | SLSA generic generator; `multiple.intoto.jsonl` to the Release (or a workflow artifact on a dry run) |
    | `publish-pypi` | `PUBLISH_PYPI == "true"` | `pypa/gh-action-pypi-publish`, Trusted Publishing, PEP 740 attestations, `skip-existing` |
    | `publish-npm` | `PUBLISH_NPM == "true"` | `npm publish --provenance`, platform packages then core, versions already on the registry skipped |
 
    Nothing reaches a registry before the Release and its provenance exist.
+
+### What release-please bumps
+
+Every published unit carries the same version and `preflight` refuses a tag
+that disagrees with any of them. The release pull request writes the new
+`X.Y.Z` into all of these ([`release-please-config.json`](./release-please-config.json),
+`extra-files`):
+
+| Location | How release-please finds it |
+| --- | --- |
+| `version.txt`, `.release-please-manifest.json` | its own anchor and the last released version |
+| `pixi.toml` (`[workspace] version`) | TOML path `$.workspace.version` |
+| `python/*/pyproject.toml` (`[project] version`) | TOML path `$.project.version`, globbed |
+| `python/*/*/__init__.py` (`__version__ = "X.Y.Z"  # x-release-please-version`) | the line marker |
+| `typescript/*/package.json`, `typescript/*/packages/*/package.json` (`version`), core's `optionalDependencies` pins | JSON paths, globbed |
+| `typescript/*/package-lock.json` (root `version`, `packages[""]`, `packages/core` and its pins) | JSON paths, globbed |
+| `typescript/fuse-mojo/tests/unit.test.cjs`, `typescript/natural-mojo/tests/unit.test.cjs` (`assert.equal(..., 'X.Y.Z') // x-release-please-version`) | the line marker |
+
+A new package that follows the layout is picked up by the globs. Anything
+else that must carry the version gets an `x-release-please-version` marker
+on its line and an entry in `extra-files`; without one it drifts. The smoke
+scripts under `typescript/*/scripts/` read the version from
+`packages/core/package.json` and need nothing. `preflight` checks the
+packages a release ships (bm25-mojo, cclib-mojo, fuse-mojo) together with
+`pixi.toml`, `version.txt` and the manifest.
 
 ### Re-running a release
 
@@ -139,7 +174,41 @@ Download them with `gh run download <run-id>` and verify them as below, with
 
 ## One-time setup (owner)
 
-None of this is needed for the GitHub Release itself. It enables the two
+### The release pull request: App credentials
+
+release-please opens a pull request, and this organization's enterprise
+policy does not let GitHub Actions' own token create or approve pull
+requests (`gh api repos/thyn-ai/mojo-kernels/actions/permissions/workflow`
+reports `can_approve_pull_request_reviews: false`, and the setting cannot be
+changed per repository). A pull request opened with that token would also
+start none of the required workflows. So `release-please.yml` mints a
+short-lived installation token of the `algenta-sdk-sync` GitHub App
+(Integration 4614082, the App that already authors thyn-ai/algenta-sdk's
+sync pull requests and thyn-ai/algenta-integrations' release commits),
+scoped to this repository. Until the credentials exist the workflow skips
+with a notice in the run summary and nothing is tagged.
+
+1. Grant the App's installation access to this repository (Organization
+   settings → GitHub Apps → `algenta-sdk-sync` → Configure → Repository
+   access → add `mojo-kernels`).
+2. Add its App ID and private key as repository secrets, under the names
+   thyn-ai/algenta and thyn-ai/algenta-integrations already use:
+
+   ```bash
+   gh secret set ALGENTA_SDK_SYNC_APP_ID -R thyn-ai/mojo-kernels          # paste the App ID
+   gh secret set ALGENTA_SDK_SYNC_APP_PRIVATE_KEY -R thyn-ai/mojo-kernels < app-private-key.pem
+   ```
+
+3. Start the first run: `gh workflow run release-please.yml -R thyn-ai/mojo-kernels`.
+   It opens `chore(release): vX.Y.Z` for everything merged since the last
+   tag.
+
+The labels release-please attaches (`autorelease: pending`,
+`autorelease: tagged`) already exist in the repository.
+
+### Registries
+
+None of the rest is needed for the GitHub Release itself. It enables the two
 registry jobs and it is done once.
 
 ### Before anything is published

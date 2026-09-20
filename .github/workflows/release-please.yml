@@ -1,0 +1,124 @@
+# The one release mechanism: release-please in manifest mode
+# (release-please-config.json + .release-please-manifest.json), one component
+# at the repository root, tags `vX.Y.Z`.
+#
+# On every push to main it opens or updates ONE pull request,
+# `chore(release): vX.Y.Z`, that bumps every version location in the tree in
+# lockstep (pixi.toml, version.txt, python/*/pyproject.toml, every
+# `__version__`, typescript/*/package.json + packages/*/package.json +
+# package-lock.json, the two unit tests that assert the version) and
+# prepends the next CHANGELOG.md entry, all computed from the Conventional
+# Commits merged since the previous tag. That pull request is gated like any
+# other (codna review + every required check) and is merged by a maintainer
+# with an ordinary squash. When it merges, the run this file starts on that
+# push creates the tag and publishes the GitHub Release with the CHANGELOG
+# entry as its notes; the tag push starts release.yml, which builds, signs and
+# attests the assets onto that Release. No tag is ever pushed by hand.
+#
+# WHY A GITHUB APP TOKEN, NOT THE DEFAULT GITHUB_TOKEN. release-please's whole
+# job is to open a pull request, and this org's enterprise policy disables
+# "Allow GitHub Actions to create and approve pull requests"
+# (`gh api repos/thyn-ai/mojo-kernels/actions/permissions/workflow` reports
+# can_approve_pull_request_reviews=false and the setting cannot be flipped per
+# repository). A pull request opened with GITHUB_TOKEN would also start none of
+# the pull_request workflows the ruleset requires. The org's established way
+# around both is a short-lived installation token of the `algenta-sdk-sync`
+# GitHub App (Integration 4614082; it authors the sync pull requests on
+# thyn-ai/algenta-sdk and the release commits on thyn-ai/algenta-integrations),
+# minted per run and scoped to this repository. The App holds contents:write
+# and pull_requests:write only. It is a different identity from the codna App,
+# so codna can review and approve what it opens, and the ruleset's
+# "last push must be approved by someone else" rule is satisfied by that
+# approval.
+#
+# UNTIL THE TWO SECRETS EXIST, THIS SKIPS RATHER THAN FAILS. The App's ID and
+# private key are repository secrets (ALGENTA_SDK_SYNC_APP_ID,
+# ALGENTA_SDK_SYNC_APP_PRIVATE_KEY, the same names thyn-ai/algenta and
+# thyn-ai/algenta-integrations use) that only the owner can add, together with
+# granting the App's installation access to this repository (RELEASING.md,
+# "One-time setup (owner)"). Without them the job reports the fact in the run
+# summary and exits green: a "not configured yet" signal, not an error being
+# swallowed. Once they are present, a real release-please failure fails the
+# run normally.
+#
+# Every action is pinned to a full commit SHA. The workflow never checks the
+# repository out: release-please works through the API on the target branch.
+name: release-please
+
+on:
+  push:
+    branches: [main]
+  # Lets the owner start the first run right after adding the secrets, and
+  # re-runs the reconciliation after a hiccup without waiting for a push.
+  workflow_dispatch:
+
+# Read-only default token; every write below goes through the App token.
+permissions:
+  contents: read
+
+# One run at a time: two runs racing would both try to update the same
+# release pull request (or both try to tag the same merge).
+concurrency:
+  group: release-please
+  cancel-in-progress: false
+
+jobs:
+  release-please:
+    name: open or update the release pull request; tag and publish on merge
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      # `secrets` is not available in a job-level `if:` (GitHub only exposes
+      # github/needs/vars/inputs there), so the presence check is a step the
+      # later steps condition on.
+      - name: Check whether the release App credentials are configured
+        id: creds
+        env:
+          APP_ID: ${{ secrets.ALGENTA_SDK_SYNC_APP_ID }}
+          APP_PRIVATE_KEY: ${{ secrets.ALGENTA_SDK_SYNC_APP_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -n "${APP_ID:-}" ] && [ -n "${APP_PRIVATE_KEY:-}" ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Explain the skip (App credentials not configured)
+        if: steps.creds.outputs.configured != 'true'
+        run: |
+          {
+            echo "### release-please skipped: App credentials not configured"
+            echo
+            echo "This repository has no \`ALGENTA_SDK_SYNC_APP_ID\` / \`ALGENTA_SDK_SYNC_APP_PRIVATE_KEY\`"
+            echo "secret, so there is no token allowed to open a pull request here (the enterprise"
+            echo "policy blocks the default \`GITHUB_TOKEN\` from creating pull requests; see this"
+            echo "workflow file's header)."
+            echo
+            echo "No release pull request was opened or updated and nothing was tagged. To turn"
+            echo "releases on: grant the \`algenta-sdk-sync\` GitHub App access to this repository,"
+            echo "add its App ID and private key as the two secrets named above, then re-run this"
+            echo "workflow (RELEASING.md, \"One-time setup (owner)\")."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Mint a scoped App installation token
+        id: app-token
+        if: steps.creds.outputs.configured == 'true'
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ secrets.ALGENTA_SDK_SYNC_APP_ID }}
+          private-key: ${{ secrets.ALGENTA_SDK_SYNC_APP_PRIVATE_KEY }}
+          owner: thyn-ai
+          # The App is installed on other repositories too; this token has no
+          # business reaching them.
+          repositories: mojo-kernels
+
+      - name: Open or update the release pull request; on a merged one, tag and publish the Release
+        if: steps.creds.outputs.configured == 'true'
+        uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+      # Nothing after this step. Building, signing, attesting and publishing
+      # the assets is release.yml's job, started by the tag this step pushes.

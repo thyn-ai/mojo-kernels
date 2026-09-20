@@ -16,10 +16,12 @@
 #   * SLSA build provenance for every asset (multiple.intoto.jsonl) from the
 #     SLSA generic generator, which signs it with its own isolated identity
 #
-# The Release itself is whatever release-drafter has been preparing: an
-# existing release for the tag is reused as-is, an open draft is adopted
-# (retagged and published, notes kept) and only when neither exists is one
-# created with generated notes.
+# The Release itself is the one release-please published when the release
+# pull request merged (release-please.yml): creating it is what pushed the
+# tag this workflow runs for, so the assets are attached to that Release and
+# never to a second one. Only when no release exists for the tag (a
+# hand-pushed tag, which is not a supported path) is one created with
+# generated notes.
 #
 # Registries are gated. Wheels go to PyPI (Trusted Publishing, PEP 740
 # attestations) and tarballs to npm (Trusted Publishing, `--provenance`) only
@@ -29,7 +31,8 @@
 # corresponding job is skipped and the GitHub Release is the only channel.
 #
 # Triggers:
-#   * push of a `v*` tag: the release path for every planned release.
+#   * push of a `v*` tag: release-please creates it when the release pull
+#     request merges. The release path for every planned release.
 #   * workflow_dispatch ON THE TAG (`gh workflow run release.yml --ref vX.Y.Z
 #     -f tag=vX.Y.Z`): re-runs the pipeline for an existing tag. Idempotent:
 #     existing assets are replaced, existing registry versions are skipped.
@@ -173,6 +176,9 @@ jobs:
               return json.loads(pathlib.Path(path).read_text())
 
           seen["pixi.toml [workspace].version"] = toml_version("pixi.toml", "workspace", "version")
+          # release-please's own anchor and the version it recorded as last released.
+          seen["version.txt"] = pathlib.Path("version.txt").read_text().strip()
+          seen[".release-please-manifest.json ."] = json_version(".release-please-manifest.json")["."]
           for pkg in ("bm25_mojo", "cclib_mojo"):
               seen[f"python/{pkg}/pyproject.toml [project].version"] = toml_version(
                   f"python/{pkg}/pyproject.toml", "project", "version")
@@ -463,11 +469,12 @@ jobs:
           if-no-files-found: error
           retention-days: 90
 
-  # Publishes the GitHub Release for the tag and attaches the signed assets.
-  # release-drafter's work is kept: a release that already exists for the tag
-  # is used as-is, an open draft is adopted (retagged to this tag, notes
-  # kept, published), and only if there is neither is a release created with
-  # generated notes. Skipped on a dry run.
+  # Attaches the signed assets to the GitHub Release for the tag. On the
+  # supported path that Release already exists: release-please published it
+  # (notes = the CHANGELOG entry) when the release pull request merged, and
+  # creating it is what pushed the tag this run is for; it is used as-is. A
+  # draft for the tag is published; only if there is neither is a release
+  # created with generated notes (a hand-pushed tag). Skipped on a dry run.
   release:
     name: publish the GitHub Release
     needs: [preflight, sign]
@@ -482,7 +489,7 @@ jobs:
           name: release-assets
           path: release-assets
 
-      - name: Find, adopt or create the Release for the tag
+      - name: Find or create the Release for the tag
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
@@ -496,33 +503,19 @@ jobs:
           # keeps the result an array even if no page came back.
           releases="$(gh api --paginate --slurp "${api}?per_page=100" | jq 'add // []')"
 
-          existing="$(jq -r --arg tag "$TAG" '[.[] | select(.tag_name == $tag)] | first | .id // empty' <<<"$releases")"
+          # A published release for the tag wins over a draft with the same
+          # tag name (a draft owns no tag, so both can exist at once): the
+          # published one is release-please's, and its notes are kept.
+          existing="$(jq -r --arg tag "$TAG" '[.[] | select(.tag_name == $tag and (.draft | not))] | first | .id // empty' <<<"$releases")"
           if [ -n "$existing" ]; then
-            is_draft="$(jq -r --arg tag "$TAG" '[.[] | select(.tag_name == $tag)] | first | .draft' <<<"$releases")"
-            if [ "$is_draft" = "true" ]; then
-              echo "Release $existing is a draft for $TAG; publishing it against $SHA (notes kept)."
-              gh api -X PATCH "${api}/${existing}" -f target_commitish="$SHA" -F draft=false -F prerelease="$PRERELEASE" --silent
-            else
-              echo "Release $existing already exists for $TAG; keeping it and its notes."
-            fi
+            echo "Release $existing already exists for $TAG (release-please published it when the release pull request merged); keeping it and its notes."
           else
-            # release-drafter's draft carries the version it resolved from PR
-            # labels, which may differ from the tag being cut. Adopt the most
-            # recent v* draft: retag, rename, point at the tagged commit,
-            # publish. Its notes are kept, with the draft's own tag rewritten
-            # to this one so the compare link is right.
-            draft="$(jq -r '[.[] | select(.draft and (.tag_name | test("^v[0-9]")))] | sort_by(.created_at) | last | .id // empty' <<<"$releases")"
+            draft="$(jq -r --arg tag "$TAG" '[.[] | select(.tag_name == $tag and .draft)] | first | .id // empty' <<<"$releases")"
             if [ -n "$draft" ]; then
-              old_tag="$(jq -r --arg id "$draft" '.[] | select((.id|tostring) == $id) | .tag_name' <<<"$releases")"
-              echo "Adopting draft release $draft ($old_tag) as $TAG."
-              jq -r --arg id "$draft" --arg old "$old_tag" --arg new "$TAG" \
-                '.[] | select((.id|tostring) == $id) | (.body // "") | split($old) | join($new)' <<<"$releases" > "$RUNNER_TEMP/notes.md"
-              gh api -X PATCH "${api}/${draft}" \
-                -f tag_name="$TAG" -f name="$TAG" -f target_commitish="$SHA" \
-                -F draft=false -F prerelease="$PRERELEASE" \
-                -F body=@"$RUNNER_TEMP/notes.md" --silent
+              echo "Release $draft is a draft for $TAG; publishing it against $SHA (notes kept)."
+              gh api -X PATCH "${api}/${draft}" -f target_commitish="$SHA" -F draft=false -F prerelease="$PRERELEASE" --silent
             else
-              echo "No release or draft found for $TAG; creating one with generated notes."
+              echo "No release found for $TAG; creating one with generated notes."
               args=(--verify-tag --title "$TAG" --generate-notes)
               if [ "$PRERELEASE" = "true" ]; then args+=(--prerelease); fi
               gh release create "$TAG" "${args[@]}"
