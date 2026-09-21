@@ -37,7 +37,15 @@ for lib in "$@"; do
     status=1
     continue
   fi
-  listing="$(objdump -d "$lib")"
+  # A non-zero objdump exit (not an ELF, unreadable, unsupported format) must
+  # name the library and fail closed, and the remaining libraries still get
+  # checked. objdump's own diagnostics are kept for the log.
+  if ! listing="$(objdump -d "$lib" 2>&1)"; then
+    echo "::error::$lib: objdump -d failed; the x86-64-v3 baseline of this library cannot be verified." >&2
+    printf '%s\n' "$listing" | tail -n 5 >&2
+    status=1
+    continue
+  fi
   total="$(printf '%s\n' "$listing" | grep -cE '^ +[0-9a-f]+:' || true)"
   if [ "$total" -eq 0 ]; then
     echo "::error::$lib: objdump found no instructions; is this an x86-64 ELF shared library?" >&2
