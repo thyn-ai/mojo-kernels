@@ -11,9 +11,13 @@ permissions:
 
 jobs:
   backtrace:
-    name: gdb backtrace of the numba JIT segfault
+    name: taskset race experiment (6-VM sample)
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        vm: [1, 2, 3, 4, 5, 6]
     steps:
       - name: Record CPU
         run: |
