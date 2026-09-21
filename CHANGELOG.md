@@ -10,6 +10,19 @@ Entries after 0.1.0 are written by [release-please](https://github.com/googleapi
 from the Conventional Commits merged since the previous tag, in the release
 pull request that cuts the version ([RELEASING.md](RELEASING.md)).
 
+## [0.1.4](https://github.com/thyn-ai/mojo-kernels/compare/v0.1.3...v0.1.4) (2026-09-21)
+
+
+### Fixed
+
+* **fuzz:** classify ill-conditioned raw-parameter cases as a documented known issue in the bm25 harness ([#59](https://github.com/thyn-ai/mojo-kernels/issues/59)) ([b3cd900](https://github.com/thyn-ai/mojo-kernels/commit/b3cd900599b59d9e2ec2f62f3c8646fc2288c8b8))
+
+
+### Performance
+
+* **bm25:** ABI v3 native vocab map + string-token batch path — the eviction-bound Xeon M cell ([#62](https://github.com/thyn-ai/mojo-kernels/issues/62)) ([dd86c8e](https://github.com/thyn-ai/mojo-kernels/commit/dd86c8ebf44be85ee724fd7de165c7ecf4293693))
+* **bm25:** flat batch packing + cheapest FFI marshal — Xeon arena warm margin 1.0-1.4x → 1.5-2.1x ([#61](https://github.com/thyn-ai/mojo-kernels/issues/61)) ([238f666](https://github.com/thyn-ai/mojo-kernels/commit/238f666cce38a25253825def554fc78f52db2e86))
+
 ## [0.1.3](https://github.com/thyn-ai/mojo-kernels/compare/v0.1.2...v0.1.3) (2026-09-21)
 
 

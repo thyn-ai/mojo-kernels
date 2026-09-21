@@ -31,7 +31,7 @@ from phonenumbers_mojo.core import (
     validate_column,
 )
 
-__version__ = "0.1.3"  # x-release-please-version
+__version__ = "0.1.4"  # x-release-please-version
 __all__ = [
     "CountryCodeSource",
     "NumberParseException",

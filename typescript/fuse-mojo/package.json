@@ -1,6 +1,6 @@
 {
   "name": "fuse-mojo-workspace",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "private": true,
   "description": "fuse-mojo: drop-in faster replacement for Fuse.js, powered by a Mojo kernel.",
   "workspaces": [

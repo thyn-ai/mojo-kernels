@@ -21,7 +21,7 @@ Set TA_MOJO_DISABLE_NATIVE=1 to force the pure-Python fallback.
 from ta_mojo._native import backend_info, native_available
 from ta_mojo.core import MacdResult, atr, ema, macd, rsi
 
-__version__ = "0.1.3"  # x-release-please-version
+__version__ = "0.1.4"  # x-release-please-version
 __all__ = [
     "ema",
     "rsi",

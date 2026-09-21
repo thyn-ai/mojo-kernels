@@ -21,7 +21,7 @@ Set SPATIALMATH_MOJO_DISABLE_NATIVE=1 to force the pure-Python fallback.
 from spatialmath_mojo._native import backend_info, native_available
 from spatialmath_mojo.core import compose, inverse, transform
 
-__version__ = "0.1.3"  # x-release-please-version
+__version__ = "0.1.4"  # x-release-please-version
 __all__ = [
     "backend_info",
     "compose",

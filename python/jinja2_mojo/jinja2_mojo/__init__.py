@@ -30,7 +30,7 @@ from jinja2_mojo.core import (
     compile_template,
 )
 
-__version__ = "0.1.3"  # x-release-please-version
+__version__ = "0.1.4"  # x-release-please-version
 __all__ = [
     "CompiledTemplate",
     "compile_template",

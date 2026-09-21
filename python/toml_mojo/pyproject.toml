@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "toml-mojo"
-version = "0.1.3"
+version = "0.1.4"
 description = "Drop-in faster replacement for stdlib tomllib, powered by a Mojo kernel (tomllib fallback included)."
 readme = "README.md"
 requires-python = ">=3.12"

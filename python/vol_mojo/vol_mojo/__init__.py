@@ -33,7 +33,7 @@ from vol_mojo.core import (
     walk_hive,
 )
 
-__version__ = "0.1.3"  # x-release-please-version
+__version__ = "0.1.4"  # x-release-please-version
 __all__ = [
     "HiveError",
     "PoolConstraint",
