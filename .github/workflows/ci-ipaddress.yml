@@ -1,0 +1,122 @@
+name: ci-ipaddress
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Read-only token for every job: the workflow only builds, tests and uploads a
+# build artifact (artifact upload needs no write scope).
+permissions:
+  contents: read
+
+# One run per ref; a newer push to a pull request cancels the run it supersedes.
+# Pushes to main always run to completion.
+concurrency:
+  group: ci-ipaddress-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  test:
+    name: ipaddress-mojo differential tests + wheel (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install pixi
+        uses: prefix-dev/setup-pixi@d3f436a425481402e6a95a1d1fc10331c708cd9e # v0.10.2
+        with:
+          # Install the pixi binary only. The tasks below install the environment
+          # lazily on first use, exactly as the previous curl|bash step did.
+          run-install: false
+
+      - name: Install the pixi environment
+        run: pixi install --locked
+
+      - name: Build the ipaddress Mojo kernel
+        # kernels/ipaddress/* and scripts/*_ipaddress.sh are this kernel's
+        # disjoint paths; pixi.toml is intentionally untouched, so the build
+        # is invoked directly with the environment's toolchain on PATH.
+        shell: bash
+        run: |
+          set -e
+          export PATH="$PWD/.pixi/envs/default/bin:$PATH"
+          bash kernels/ipaddress/build.sh
+
+      - name: Differential suite (native backend, then forced fallback)
+        # The oracle is the CPython stdlib ipaddress module; no bootstrap needed.
+        shell: bash
+        run: bash scripts/test_all_ipaddress.sh
+
+      - name: Build + repair the platform wheel (delocate/auditwheel)
+        shell: bash
+        run: |
+          set -e
+          export PATH="$PWD/.pixi/envs/default/bin:$PATH"
+          bash python/ipaddress_mojo/build_wheel.sh
+
+      - name: Smoke-test the wheel in a clean venv
+        shell: bash
+        run: |
+          set -e
+          python3 -m venv /tmp/ipaddress-wheel-smoke
+          /tmp/ipaddress-wheel-smoke/bin/pip install --quiet python/ipaddress_mojo/dist/*.whl
+          # Hide the pixi env for the smoke: an end user has no Mojo toolchain,
+          # so the wheel must load its kernel purely from its own vendored
+          # libraries (not via the build machine's absolute rpath).
+          repo_root="$PWD"
+          mv .pixi .pixi-hidden
+          trap 'mv "$repo_root/.pixi-hidden" "$repo_root/.pixi"' EXIT
+          cd /tmp
+          /tmp/ipaddress-wheel-smoke/bin/python - <<'EOF'
+          import ipaddress_mojo as ipm
+
+          info = ipm.backend_info()
+          assert info["native_available"], f"wheel must carry the native kernel: {info}"
+
+          # The same values the differential suite pins against the stdlib,
+          # computed inline (no fixtures on the end-user machine).
+          import ipaddress
+
+          nets = [ipm.ip_network("10.0.0.0/8"), ipm.ip_network("2001:db8::/32")]
+          addrs = [ipm.ip_address("10.1.2.3"), ipm.ip_address("11.0.0.1"),
+                   ipm.ip_address("2001:db8::1"), ipm.ip_address("2001:db9::1")]
+          native_hits = list(ipm.contains_many(nets, addrs))
+          native_parsed = [str(a) for a in ipm.parse_many(["1.2.3.4", "::ffff:1.2.3.4", "fe80::1%eth0"])]
+          native_collapsed = [str(n) for n in ipm.collapse_batch(
+              [ipm.ip_network("10.0.0.0/24"), ipm.ip_network("10.0.1.0/24")])]
+
+          import os
+          os.environ["IPADDRESS_MOJO_DISABLE_NATIVE"] = "1"
+          import importlib
+          importlib.reload(ipm._native)
+          importlib.reload(ipm)
+          fb_hits = list(ipm.contains_many(nets, addrs))
+          fb_parsed = [str(a) for a in ipm.parse_many(["1.2.3.4", "::ffff:1.2.3.4", "fe80::1%eth0"])]
+          fb_collapsed = [str(n) for n in ipm.collapse_batch(
+              [ipm.ip_network("10.0.0.0/24"), ipm.ip_network("10.0.1.0/24")])]
+
+          assert native_hits == fb_hits == [True, False, True, False]
+          assert native_parsed == fb_parsed == ["1.2.3.4", "::ffff:1.2.3.4", "fe80::1%eth0"]
+          assert native_collapsed == fb_collapsed == ["10.0.0.0/23"]
+          # Independently recomputed against the stdlib oracle:
+          want = [any(a in n for n in [ipaddress.ip_network("10.0.0.0/8"),
+                                       ipaddress.ip_network("2001:db8::/32")])
+                  for a in [ipaddress.ip_address(s) for s in
+                            ["10.1.2.3", "11.0.0.1", "2001:db8::1", "2001:db9::1"]]]
+          assert native_hits == want
+          print("wheel smoke OK:", ipm.__version__, info["native_source"])
+          EOF
+
+      - name: Upload wheel
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ipaddress-mojo-wheel-${{ matrix.os }}
+          path: python/ipaddress_mojo/dist/*.whl
+          retention-days: 14

@@ -1,0 +1,33 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "ipaddress-mojo"
+version = "0.1.0"
+description = "Drop-in replacement for stdlib ipaddress with a Mojo-accelerated batch API (bulk parse, bulk membership, bulk collapse); pure-Python fallback included."
+readme = "README.md"
+requires-python = ">=3.12"
+license = "Apache-2.0"
+authors = [{ name = "Algenta" }]
+keywords = ["ipaddress", "ipv4", "ipv6", "cidr", "acl", "log-analytics", "mojo"]
+classifiers = [
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: Apache Software License",
+  "Programming Language :: Python :: 3",
+  "Topic :: System :: Networking",
+]
+# The batch membership API returns numpy arrays (same hard dependency the
+# other kernels in this repo take for array-returning APIs).
+dependencies = ["numpy>=1.21"]
+
+[project.urls]
+Repository = "https://github.com/thyn-ai/mojo-kernels"
+
+# Wheels only: the shared library cannot rebuild from an sdist, so no sdist
+# target is offered. Per-platform wheels are produced by CI.
+[tool.hatch.build.targets.wheel]
+packages = ["ipaddress_mojo"]
+
+[tool.hatch.build.hooks.custom]
+path = "hatch_build.py"
