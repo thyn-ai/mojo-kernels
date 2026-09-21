@@ -119,11 +119,16 @@ jobs:
           /tmp/bench/bin/pip install --quiet "$OLD_WHEEL_URL"
           # The numba JIT segfaults intermittently on some runner CPUs (observed
           # in bm25s' warmup_numba_scorer on Emerald Rapids); it is not our
-          # kernel. Retry the whole bench up to 3x; a complete log is what counts.
-          for i in 1 2 3; do
-            if /tmp/bench/bin/python benchmarks/bench_bm25s_arena.py | tee before.log; then break; fi
-            echo "::warning::bench attempt $i crashed (flaky numba JIT); retrying"
-            [ "$i" = 3 ] && exit 1
+          # kernel. Retry only on exit 139; any other failure is real.
+          for i in 1 2 3 4 5; do
+            set +e
+            /tmp/bench/bin/python benchmarks/bench_bm25s_arena.py | tee before.log
+            rc=${PIPESTATUS[0]}
+            set -e
+            [ "$rc" = 0 ] && break
+            [ "$rc" != 139 ] && exit "$rc"
+            echo "::warning::bench attempt $i: numba JIT segfault (139); retrying"
+            [ "$i" = 5 ] && exit 1
           done
 
       - name: AFTER — wheel built from this branch
@@ -132,10 +137,15 @@ jobs:
         run: |
           set -euo pipefail
           /tmp/bench/bin/pip install --quiet --force-reinstall --no-deps python/bm25_mojo/dist/*.whl
-          for i in 1 2 3; do
-            if /tmp/bench/bin/python benchmarks/bench_bm25s_arena.py | tee after.log; then break; fi
-            echo "::warning::bench attempt $i crashed (flaky numba JIT); retrying"
-            [ "$i" = 3 ] && exit 1
+          for i in 1 2 3 4 5; do
+            set +e
+            /tmp/bench/bin/python benchmarks/bench_bm25s_arena.py | tee after.log
+            rc=${PIPESTATUS[0]}
+            set -e
+            [ "$rc" = 0 ] && break
+            [ "$rc" != 139 ] && exit "$rc"
+            echo "::warning::bench attempt $i: numba JIT segfault (139); retrying"
+            [ "$i" = 5 ] && exit 1
           done
 
       - name: Layer-by-layer autopsy (both wheels)
@@ -145,9 +155,15 @@ jobs:
         run: |
           set -euo pipefail
           run_cell () {
-            for i in 1 2 3; do
-              if /tmp/bench/bin/python benchmarks/bench_bm25s_arena.py --layers --cell "$1" | tee "$2"; then return 0; fi
-              echo "::warning::layers $1 attempt $i crashed (flaky numba JIT); retrying"
+            local i rc
+            for i in 1 2 3 4 5; do
+              set +e
+              /tmp/bench/bin/python benchmarks/bench_bm25s_arena.py --layers --cell "$1" | tee "$2"
+              rc=${PIPESTATUS[0]}
+              set -e
+              [ "$rc" = 0 ] && return 0
+              [ "$rc" != 139 ] && return "$rc"
+              echo "::warning::layers $1 attempt $i: numba JIT segfault (139); retrying"
             done
             return 1
           }
@@ -215,11 +231,17 @@ jobs:
         run: |
           set -euo pipefail
           run_img () {
-            # Retries: the numba JIT segfaults intermittently on some runner
-            # CPUs (bm25s warmup), unrelated to the kernel under test.
-            for i in 1 2 3; do
-              if docker run --cpus=2 -e BM25_XRAY_REPS bm25-arena-bench "$1" | tee "$2"; then return 0; fi
-              echo "::warning::docker bench attempt $i crashed (flaky numba JIT); retrying"
+            # Retries only on 139: the numba JIT segfaults intermittently on
+            # some runner CPUs (bm25s warmup), unrelated to the kernel.
+            local i rc
+            for i in 1 2 3 4 5; do
+              set +e
+              docker run --cpus=2 -e BM25_XRAY_REPS bm25-arena-bench "$1" | tee "$2"
+              rc=${PIPESTATUS[0]}
+              set -e
+              [ "$rc" = 0 ] && return 0
+              [ "$rc" != 139 ] && return "$rc"
+              echo "::warning::docker bench attempt $i: numba JIT segfault (139); retrying"
             done
             return 1
           }
@@ -234,14 +256,22 @@ jobs:
           BM25_XRAY_REPS: ${{ inputs.reps || '5' }}
         run: |
           set -euo pipefail
-          for i in 1 2 3; do
-            if docker run --cpus=2 bm25-arena-bench "/opt/venv-after/bin/python /bench/bench_bm25s_arena.py --layers --cell M" | tee docker-layers-after-M.log; then break; fi
-            echo "::warning::attempt $i crashed (flaky numba JIT); retrying"; [ "$i" = 3 ] && exit 1
-          done
-          for i in 1 2 3; do
-            if docker run --cpus=2 bm25-arena-bench "/opt/venv-before/bin/python /bench/bench_bm25s_arena.py --layers --cell M" | tee docker-layers-before-M.log; then break; fi
-            echo "::warning::attempt $i crashed (flaky numba JIT); retrying"; [ "$i" = 3 ] && exit 1
-          done
+          run_img () {
+            local i rc
+            for i in 1 2 3 4 5; do
+              set +e
+              docker run --cpus=2 bm25-arena-bench "$1" | tee "$2"
+              rc=${PIPESTATUS[0]}
+              set -e
+              [ "$rc" = 0 ] && return 0
+              [ "$rc" != 139 ] && return "$rc"
+              echo "::warning::attempt $i: numba JIT segfault (139); retrying"
+            done
+            return 1
+          }
+          run_img "/opt/venv-after/bin/python /bench/bench_bm25s_arena.py --layers --cell M" docker-layers-after-M.log
+          run_img "/opt/venv-after/bin/python /bench/bench_bm25s_arena.py --layers --cell L" docker-layers-after-L.log
+          run_img "/opt/venv-before/bin/python /bench/bench_bm25s_arena.py --layers --cell M" docker-layers-before-M.log
 
       - if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

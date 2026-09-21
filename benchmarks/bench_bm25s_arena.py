@@ -43,7 +43,6 @@ import os
 import platform
 import random
 import statistics
-import sys
 import time
 
 import numpy as np
@@ -297,8 +296,6 @@ def layers(n_docs: int, q_len: int = BM25_Q_LEN, reps: int = 30):
     step; each stage's output is asserted identical to the real lane's before
     any timing.
     """
-    import ctypes
-
     corpus, _terms, queries = build_workload(n_docs, q_len)
     ref, bs, ours, *_ = make_indexes(corpus)
     lanes = lane_fns(ref, bs, ours, queries)
@@ -339,12 +336,25 @@ def layers(n_docs: int, q_len: int = BM25_Q_LEN, reps: int = 30):
         return arr, int(arr.max(initial=0))
 
     # ---------- staged bm25_mojo path (mirrors core.py + _native.py) -------
+    # Two marshal conventions exist in the wild: the pre-0.1.4 wrapper bound
+    # POINTER(c_int) argtypes and passed .ctypes.data_as(...) objects; the
+    # 0.1.4+ wrapper declares c_void_p and passes integer .ctypes.data. The
+    # staged call must match the INSTALLED wheel's convention.
     ni = ours._native_index
     vocab_get = ours._vocab.get
     lib = ni._lib
     batch_fn = ni._batch_fn
     handle = ni._handle
     n_docs_ni = ni._n_docs
+    flat_abi = hasattr(ni, "score_batch_flat")
+
+    import ctypes as _ct
+
+    i32p, i64p, f64p = (
+        _ct.POINTER(_ct.c_int32),
+        _ct.POINTER(_ct.c_int64),
+        _ct.POINTER(_ct.c_double),
+    )
 
     def _flat_pack():
         flat = []
@@ -359,16 +369,29 @@ def layers(n_docs: int, q_len: int = BM25_Q_LEN, reps: int = 30):
             np.array(offsets, dtype=np.int64),
         )
 
+    def _old_pack():
+        qids_list = [
+            np.array([v for v in map(vocab_get, q) if v is not None], dtype=np.int32)
+            for q in queries
+        ]
+        counts = np.fromiter((len(q) for q in qids_list), dtype=np.int64, count=len(qids_list))
+        qids_flat = np.concatenate([np.ascontiguousarray(q, dtype=np.int32) for q in qids_list])
+        offsets = np.zeros(len(qids_list) + 1, dtype=np.int64)
+        np.cumsum(counts, out=offsets[1:])
+        return qids_flat, offsets
+
+    def _batch_call(qids_flat, offsets, panel):
+        if flat_abi:
+            return batch_fn(handle, qids_flat.ctypes.data, offsets.ctypes.data,
+                            len(queries), panel.ctypes.data)
+        return batch_fn(handle, qids_flat.ctypes.data_as(i32p),
+                        offsets.ctypes.data_as(i64p), len(queries),
+                        panel.ctypes.data_as(f64p))
+
     def mojo_staged():
-        qids_flat, offsets = _flat_pack()  # stage: map + flat pack
+        qids_flat, offsets = (_flat_pack() if flat_abi else _old_pack())
         panel = np.zeros((len(queries), n_docs_ni), dtype=np.float64)  # stage: calloc
-        rc = batch_fn(  # stage: ctypes marshal + kernel walk
-            handle,
-            qids_flat.ctypes.data,
-            offsets.ctypes.data,
-            len(queries),
-            panel.ctypes.data,
-        )
+        rc = _batch_call(qids_flat, offsets, panel)  # stage: marshal + kernel walk
         assert rc == 0
         return np.asarray(panel)
 
@@ -410,13 +433,14 @@ def layers(n_docs: int, q_len: int = BM25_Q_LEN, reps: int = 30):
          lambda outs: np.stack(outs)),
     ]
     mojo_parts = [
-        ("flat map+pack (10q)", lambda: None,
-         lambda _c: _flat_pack()),
+        (("flat map+pack (10q)" if flat_abi else "qmap+arrays+pack (10q)"), lambda: None,
+         lambda _c: (_flat_pack() if flat_abi else _old_pack())),
         ("panel np.zeros f64", lambda: None,
          lambda _c: np.zeros((len(queries), n_docs_ni), dtype=np.float64)),
-        ("ffi call (walk inside)", lambda: (*_flat_pack(), np.zeros((len(queries), n_docs_ni), dtype=np.float64)),
-         lambda pk: batch_fn(handle, pk[0].ctypes.data, pk[1].ctypes.data,
-                             len(queries), pk[2].ctypes.data)),
+        ("ffi call (walk inside)",
+         lambda: (*(_flat_pack() if flat_abi else _old_pack()),
+                  np.zeros((len(queries), n_docs_ni), dtype=np.float64)),
+         lambda pk: _batch_call(pk[0], pk[1], pk[2])),
     ]
 
     # microcosts
