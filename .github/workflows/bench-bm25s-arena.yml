@@ -51,6 +51,11 @@ defaults:
 
 env:
   PYTHONFAULTHANDLER: "1"
+  # The arena derives query terms from a set's iteration order, which follows
+  # the process hash seed — the live Space samples a fresh (statistically
+  # equivalent) query set every boot. Pinning the seed here makes BEFORE and
+  # AFTER see byte-identical queries and the logs reproducible.
+  PYTHONHASHSEED: "0"
   OLD_WHEEL_URL: https://github.com/thyn-ai/mojo-kernels/releases/download/arena-wheels-v0.1.0/bm25_mojo-0.1.2-py3-none-manylinux_2_35_x86_64.whl
   BENCH_DEPS: "bm25s==0.3.11 numba==0.67.0 rank_bm25==0.2.2 numpy>=1.26,<3"
 
@@ -75,6 +80,13 @@ jobs:
           pixi run build-kernel-bm25
           pixi run wheel-bm25
           ls -la python/bm25_mojo/dist/
+
+      - name: Upload the branch wheel (shippable artifact)
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: bm25-mojo-wheel-branch
+          path: python/bm25_mojo/dist/*.whl
+          if-no-files-found: error
 
       - name: Record the runner CPU
         run: |
@@ -213,6 +225,7 @@ jobs:
           set -euo pipefail
           cat > Dockerfile.bench <<'EOF'
           FROM python:3.12-bookworm
+          ENV PYTHONHASHSEED=0 PYTHONFAULTHANDLER=1
           WORKDIR /bench
           COPY wheels/before /wheels/before/
           COPY wheels/after /wheels/after/
