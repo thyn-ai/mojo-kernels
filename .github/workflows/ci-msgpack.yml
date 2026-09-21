@@ -1,0 +1,99 @@
+name: ci-msgpack
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Read-only token for every job: the workflow only builds, tests and uploads a
+# build artifact (artifact upload needs no write scope).
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: msgpack-mojo differential tests + wheel (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install pixi
+        uses: prefix-dev/setup-pixi@d3f436a425481402e6a95a1d1fc10331c708cd9e # v0.10.2
+        with:
+          # Install the pixi binary only. The tasks below install the environment
+          # lazily on first `pixi run`, exactly as the previous curl|bash step did;
+          # `pixi install --locked` + caching is a separate, opt-in change.
+          run-install: false
+
+      - name: Install the pinned oracle into .oracle-msgpack/
+        # msgpack is a test/benchmark oracle only (the differential suite
+        # compares msgpack_mojo against it byte-for-byte / value-for-value);
+        # it is not a runtime dependency of the published wrapper. Installed
+        # with `pip --target` into an unmanaged directory because `pixi run`
+        # prunes pip-installed packages from the pixi env. Pinned: the oracle
+        # must be the published PyPI release these numbers were measured
+        # against.
+        run: |
+          pixi run python -m ensurepip --upgrade
+          pixi run python -m pip install --target .oracle-msgpack "msgpack==1.1.2"
+
+      - name: Build the msgpack Mojo kernel
+        run: pixi run bash kernels/msgpack/build.sh
+
+      - name: Differential suite (native backend, then forced fallback)
+        run: |
+          PYTHONPATH="python/msgpack_mojo:.oracle-msgpack" PYTHONNOUSERSITE=1 pixi run python -m pytest tests/test_msgpack_differential.py tests/test_msgpack_loader.py -q
+          PYTHONPATH="python/msgpack_mojo:.oracle-msgpack" PYTHONNOUSERSITE=1 MSGPACK_MOJO_DISABLE_NATIVE=1 pixi run python -m pytest tests/test_msgpack_differential.py tests/test_msgpack_loader.py -q
+
+      - name: Build + repair the platform wheel (delocate/auditwheel)
+        run: PYTHONNOUSERSITE=1 pixi run bash python/msgpack_mojo/build_wheel.sh
+
+      - name: Smoke-test the wheel in a clean venv
+        shell: bash
+        run: |
+          set -e
+          python3 -m venv /tmp/msgpack-wheel-smoke
+          /tmp/msgpack-wheel-smoke/bin/pip install --quiet python/msgpack_mojo/dist/*.whl
+          # Hide the pixi env for the smoke: an end user has no Mojo toolchain,
+          # so the wheel must load its kernel purely from its own vendored
+          # libraries (not via the build machine's absolute rpath).
+          repo_root="$PWD"
+          mv .pixi .pixi-hidden
+          trap 'mv "$repo_root/.pixi-hidden" "$repo_root/.pixi"' EXIT
+          # Run the quickstart from /tmp: the script's own directory must not
+          # shadow the installed wheel with the in-repo package.
+          cp python/msgpack_mojo/quickstart_smoke.py /tmp/msgpack_quickstart_smoke.py
+          cd /tmp
+          /tmp/msgpack-wheel-smoke/bin/python /tmp/msgpack_quickstart_smoke.py | tee /tmp/quickstart-native.txt
+          # The forced fallback must produce identical results.
+          MSGPACK_MOJO_DISABLE_NATIVE=1 /tmp/msgpack-wheel-smoke/bin/python /tmp/msgpack_quickstart_smoke.py | tee /tmp/quickstart-fallback.txt
+          /tmp/msgpack-wheel-smoke/bin/python - <<'EOF'
+          import msgpack_mojo
+
+          info = msgpack_mojo.backend_info()
+          assert info["native_available"], f"wheel must carry the native kernel: {info}"
+
+          def checksum(path):
+              for line in open(path):
+                  if line.startswith("project checksum:"):
+                      return line.split(":", 1)[1].strip()
+              raise AssertionError(f"no checksum in {path}")
+
+          native = checksum("/tmp/quickstart-native.txt")
+          fallback = checksum("/tmp/quickstart-fallback.txt")
+          assert native == fallback, (native, fallback)
+          print("wheel smoke OK:", msgpack_mojo.__version__, info["native_source"])
+          EOF
+
+      - name: Upload wheel
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: msgpack-mojo-wheel-${{ matrix.os }}
+          path: python/msgpack_mojo/dist/*.whl
+          retention-days: 14
