@@ -2,6 +2,8 @@
 name: debug-numba-crash
 
 on:
+  push:
+    branches: [chore/bm25-xeon-arena-r2]
   workflow_dispatch:
 
 permissions:
