@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "oletools-mojo"
-version = "0.1.2"
+version = "0.1.3"
 description = "Drop-in faster replacement for oletools' olevba.decompress_stream (MS-OVBA VBA decompression), powered by a Mojo kernel (pure-Python fallback included)."
 readme = "README.md"
 requires-python = ">=3.12"

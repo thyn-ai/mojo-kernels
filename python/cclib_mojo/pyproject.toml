@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "cclib-mojo"
-version = "0.1.2"
+version = "0.1.3"
 description = "Fast electron-density and wavefunction-on-grid evaluation for cclib-style basis sets, powered by a Mojo kernel (pure-Python fallback included)."
 readme = "README.md"
 requires-python = ">=3.12"

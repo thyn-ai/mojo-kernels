@@ -1,6 +1,6 @@
 {
   "name": "minisearch-mojo-workspace",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "private": true,
   "description": "minisearch-mojo: drop-in faster replacement for MiniSearch fuzzy/prefix search, powered by a Mojo kernel.",
   "workspaces": [

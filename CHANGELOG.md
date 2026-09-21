@@ -10,6 +10,13 @@ Entries after 0.1.0 are written by [release-please](https://github.com/googleapi
 from the Conventional Commits merged since the previous tag, in the release
 pull request that cuts the version ([RELEASING.md](RELEASING.md)).
 
+## [0.1.3](https://github.com/thyn-ai/mojo-kernels/compare/v0.1.2...v0.1.3) (2026-09-21)
+
+
+### Fixed
+
+* **build:** compile the shipped kernels for a fixed CPU baseline (x86-64-v3, apple-m1) ([#55](https://github.com/thyn-ai/mojo-kernels/issues/55)) ([ea13998](https://github.com/thyn-ai/mojo-kernels/commit/ea13998e7cc1a7992c06f7342cf22dd7e49a82a6))
+
 ## [0.1.2](https://github.com/thyn-ai/mojo-kernels/compare/v0.1.1...v0.1.2) (2026-09-20)
 
 

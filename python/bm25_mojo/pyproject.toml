@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "bm25-mojo"
-version = "0.1.2"
+version = "0.1.3"
 description = "Drop-in faster replacement for rank_bm25, powered by a Mojo kernel (pure-Python fallback included)."
 readme = "README.md"
 requires-python = ">=3.12"

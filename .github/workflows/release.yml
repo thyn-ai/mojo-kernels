@@ -338,6 +338,13 @@ jobs:
           pixi run build-kernel-gaussgrid
           pixi run build-kernel-fuse
 
+      # The Linux assets must run on every x86-64 CPU the README names, not
+      # only on the CPU of the runner that built them: build.sh compiles for
+      # the x86-64-v3 baseline and this refuses any AVX-512 encoding.
+      - name: Assert the Linux kernels stay on the x86-64-v3 baseline
+        if: runner.os == 'Linux'
+        run: bash scripts/check_x86_64_baseline.sh kernels/bm25/build/libbm25mojo.so kernels/gaussgrid/build/libgaussgridmojo.so kernels/fuse/build/libfusemojo.so
+
       - name: Differential suites (native backend, then forced fallback)
         run: |
           set -euo pipefail
