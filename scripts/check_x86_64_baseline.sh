@@ -30,6 +30,9 @@ if ! command -v objdump >/dev/null 2>&1; then
   exit 2
 fi
 
+errfile="$(mktemp)"
+trap 'rm -f "$errfile"' EXIT
+
 status=0
 for lib in "$@"; do
   if [ ! -f "$lib" ]; then
@@ -39,10 +42,11 @@ for lib in "$@"; do
   fi
   # A non-zero objdump exit (not an ELF, unreadable, unsupported format) must
   # name the library and fail closed, and the remaining libraries still get
-  # checked. objdump's own diagnostics are kept for the log.
-  if ! listing="$(objdump -d "$lib" 2>&1)"; then
+  # checked. stderr is captured apart from the listing, so a warning objdump
+  # prints on a successful run can never be counted as an instruction.
+  if ! listing="$(objdump -d "$lib" 2>"$errfile")"; then
     echo "::error::$lib: objdump -d failed; the x86-64-v3 baseline of this library cannot be verified." >&2
-    printf '%s\n' "$listing" | tail -n 5 >&2
+    tail -n 5 "$errfile" >&2
     status=1
     continue
   fi
