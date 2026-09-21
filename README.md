@@ -200,10 +200,24 @@ two-baseline framing are in the
 
 ## Install & quickstart
 
-### bm25-mojo (Python)
+Prebuilt binaries for **macOS on Apple silicon (arm64)** and **Linux
+x86-64** are attached to every [GitHub Release](https://github.com/thyn-ai/mojo-kernels/releases)
+as signed assets, and the commands below install straight from there (bash
+or zsh; the `case` picks the asset for the machine it runs on). Every asset
+ships with a Sigstore bundle (`<asset>.sigstore.json`) and is listed in
+`SHA256SUMS`; [RELEASING.md § Verify a release](RELEASING.md#verify-a-release)
+has the commands. PyPI and npm distribution follows once the registries are
+enabled ([RELEASING.md § Registries](RELEASING.md#registries)).
 
-```
-pip install bm25-mojo
+### bm25-mojo (Python 3.12+)
+
+```bash
+V=0.1.3  # x-release-please-version
+case "$(uname -sm)" in
+  "Darwin arm64") WHEEL="bm25_mojo-$V-py3-none-macosx_14_0_arm64.whl" ;;
+  "Linux x86_64") WHEEL="bm25_mojo-$V-py3-none-manylinux_2_35_x86_64.whl" ;;
+esac
+pip install "https://github.com/thyn-ai/mojo-kernels/releases/download/v$V/${WHEEL:?no prebuilt wheel for this platform}"
 ```
 
 ```python
@@ -233,11 +247,21 @@ with `BM25_MOJO_DISABLE_NATIVE=1`; inspect
 the active backend with `bm25_mojo.backend_info()`. Full API parity notes:
 [`python/bm25_mojo/README.md`](python/bm25_mojo/README.md).
 
-### fuse-mojo (TypeScript / Node)
+### fuse-mojo (TypeScript / Node 18+)
 
+```bash
+V=0.1.3  # x-release-please-version
+URL="https://github.com/thyn-ai/mojo-kernels/releases/download/v$V"
+case "$(uname -sm)" in
+  "Darwin arm64") PLATFORM_PKG="fuse-mojo-darwin-arm64-$V.tgz" ;;
+  "Linux x86_64") PLATFORM_PKG="fuse-mojo-linux-x64-$V.tgz" ;;
+esac
+npm install "$URL/${PLATFORM_PKG:?no prebuilt package for this platform}" "$URL/fuse-mojo-core-$V.tgz"
 ```
-npm install @fuse-mojo/core
-```
+
+Install the platform package together with `@fuse-mojo/core`: core on its
+own installs cleanly but runs on the vendored Fuse.js fallback, because its
+optional dependency on the platform package resolves only from a registry.
 
 ```js
 // then use it exactly like fuse.js
@@ -260,10 +284,15 @@ unsupported options throw `UnsupportedOptionError` on both backends. Force the
 fallback with `FUSE_MOJO_DISABLE_NATIVE=1`; inspect with `Fuse.backendInfo()`.
 Full option matrix: [`typescript/fuse-mojo/README.md`](typescript/fuse-mojo/README.md).
 
-### cclib-mojo (Python, computational chemistry)
+### cclib-mojo (Python 3.12+, computational chemistry)
 
-```
-pip install cclib-mojo
+```bash
+V=0.1.3  # x-release-please-version
+case "$(uname -sm)" in
+  "Darwin arm64") WHEEL="cclib_mojo-$V-py3-none-macosx_14_0_arm64.whl" ;;
+  "Linux x86_64") WHEEL="cclib_mojo-$V-py3-none-manylinux_2_35_x86_64.whl" ;;
+esac
+pip install "https://github.com/thyn-ai/mojo-kernels/releases/download/v$V/${WHEEL:?no prebuilt wheel for this platform}"
 ```
 
 ```python

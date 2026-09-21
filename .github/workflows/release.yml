@@ -167,82 +167,13 @@ jobs:
             echo "::error::Tag '$TAG' is not a release tag (vMAJOR.MINOR.PATCH with an optional suffix); refusing to release it." >&2
             exit 1
           fi
-          VERSION="$(EXPECTED_VERSION="${TAG#v}" python3 - <<'PYEOF'
-          import json, os, pathlib, re, sys, tomllib
-
-          seen: dict[str, str] = {}
-
-          # A location whose key is gone reads "<missing>" rather than raising:
-          # it then disagrees with the rest and is named in the error below,
-          # which is the point of listing every location.
-          def toml_version(path: str, *keys: str) -> str:
-              node = tomllib.loads(pathlib.Path(path).read_text())
-              for key in keys:
-                  if not isinstance(node, dict) or key not in node:
-                      return "<missing>"
-                  node = node[key]
-              return str(node)
-
-          def json_version(path: str) -> dict:
-              return json.loads(pathlib.Path(path).read_text())
-
-          def json_at(data: dict, *keys: str) -> str:
-              node = data
-              for key in keys:
-                  if not isinstance(node, dict) or key not in node:
-                      return "<missing>"
-                  node = node[key]
-              return str(node)
-
-          seen["pixi.toml [workspace].version"] = toml_version("pixi.toml", "workspace", "version")
-          # release-please's own anchor and the version it recorded as last released.
-          seen["version.txt"] = pathlib.Path("version.txt").read_text().strip()
-          seen[".release-please-manifest.json ."] = json_version(".release-please-manifest.json")["."]
-          # Every location release-please bumps, discovered by the same globs
-          # release-please-config.json uses. Checking the whole set (not just
-          # the packages this release ships) is what turns a silently skipped
-          # rewrite -- an updater whose JSONPath stopped matching logs a warning
-          # and leaves the file untouched -- into a refusal that names the file,
-          # instead of version drift that surfaces some releases later.
-          root = pathlib.Path(".")
-          for path in sorted(root.glob("python/*/pyproject.toml")):
-              seen[f"{path} [project].version"] = toml_version(str(path), "project", "version")
-          for path in sorted(root.glob("python/*/*/__init__.py")):
-              match = re.search(r'^__version__\s*=\s*"([^"]+)"', path.read_text(), re.M)
-              seen[f"{path} __version__"] = match.group(1) if match else "<missing>"
-          for path in sorted(root.glob("typescript/*/package.json")):
-              seen[f"{path} version"] = json_at(json_version(str(path)), "version")
-          for path in sorted(root.glob("typescript/*/packages/*/package.json")):
-              data = json_version(str(path))
-              seen[f"{path} version"] = json_at(data, "version")
-              for name, pin in data.get("optionalDependencies", {}).items():
-                  seen[f"{path} optionalDependencies[{name}]"] = pin
-          for path in sorted(root.glob("typescript/*/package-lock.json")):
-              lock = json_version(str(path))
-              seen[f"{path} version"] = json_at(lock, "version")
-              for key in ("", "packages/core"):
-                  entry = lock.get("packages", {}).get(key)
-                  if entry is None:
-                      continue
-                  label = key or '""'
-                  seen[f"{path} packages[{label}].version"] = json_at(entry, "version")
-                  for name, pin in entry.get("optionalDependencies", {}).items():
-                      seen[f"{path} packages[{label}].optionalDependencies[{name}]"] = pin
-
-          for label, value in seen.items():
-              print(f"  {value:<14} {label}", file=sys.stderr)
-          versions = sorted(set(seen.values()))
-          if len(versions) != 1:
-              print(f"::error::Package versions disagree ({', '.join(versions)}); bump them in lockstep (see RELEASING.md).", file=sys.stderr)
-              sys.exit(1)
-          version = versions[0]
-          expected = os.environ.get("EXPECTED_VERSION", "")
-          if expected and expected != version:
-              print(f"::error::Tag names version {expected} but every package in the tree is at {version}; refusing to release a mismatched tag.", file=sys.stderr)
-              sys.exit(1)
-          print(version)
-          PYEOF
-          )"
+          # scripts/version_locations.py lists every location release-please
+          # bumps (discovered by the config's own globs, README install blocks
+          # included) and refuses a tree in which any of them disagrees or
+          # differs from the tag. readme-install.yml runs the same check on
+          # every release pull request, so drift fails before the merge.
+          python3 -m unittest discover -s tests -p test_version_locations.py
+          VERSION="$(EXPECTED_VERSION="${TAG#v}" python3 scripts/version_locations.py)"
           if [ -z "$TAG" ]; then
             TAG="v${VERSION}"
           fi

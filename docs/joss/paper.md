@@ -184,9 +184,10 @@ step toward upstream integration.
 
 Source code: <https://github.com/thyn-ai/mojo-kernels>
 (`python/cclib_mojo`, kernel `kernels/gaussgrid`), Apache-2.0, © 2026
-Algenta. Install with `pip install cclib-mojo`: per-platform
-self-contained wheels for macOS arm64 and Linux x86_64, with the NumPy
-fallback everywhere else; NumPy is the only hard dependency.
+Algenta. Install with `pip install` of the per-platform, self-contained
+wheel attached to the project's GitHub Release (macOS arm64 and Linux
+x86_64; PyPI distribution follows once the registry is enabled), with the
+NumPy fallback everywhere else; NumPy is the only hard dependency.
 Documentation and a runnable quickstart ship in the package README and
 `quickstart.py`; tests live in `tests/test_gaussgrid_*.py` and the
 benchmark in `benchmarks/bench_gaussgrid.py`. A Zenodo archive DOI for

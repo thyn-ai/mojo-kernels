@@ -8,7 +8,7 @@ automatic fallback on platforms without a native build (e.g. Windows — tested 
 Mojo toolchain required at install time.
 
 ```js
-// npm install @fuse-mojo/core   →   then use it exactly like fuse.js
+// install (see "Install" below)   →   then use it exactly like fuse.js
 import Fuse from '@fuse-mojo/core'
 
 const books = [
@@ -22,6 +22,28 @@ fuse.search('lock')
 ```
 
 CommonJS works too: `const Fuse = require('@fuse-mojo/core')`.
+
+## Install
+
+Node 18 or newer. The platform package and `@fuse-mojo/core` are signed
+assets of the matching [GitHub Release](https://github.com/thyn-ai/mojo-kernels/releases)
+(bash or zsh; npm distribution follows once the registry is enabled, see
+[RELEASING.md § Registries](../../RELEASING.md#registries)):
+
+```bash
+V=0.1.3  # x-release-please-version
+URL="https://github.com/thyn-ai/mojo-kernels/releases/download/v$V"
+case "$(uname -sm)" in
+  "Darwin arm64") PLATFORM_PKG="fuse-mojo-darwin-arm64-$V.tgz" ;;
+  "Linux x86_64") PLATFORM_PKG="fuse-mojo-linux-x64-$V.tgz" ;;
+esac
+npm install "$URL/${PLATFORM_PKG:?no prebuilt package for this platform}" "$URL/fuse-mojo-core-$V.tgz"
+```
+
+Install both: core on its own installs cleanly but runs on the vendored
+Fuse.js fallback, because its optional dependency on the platform package
+resolves only from a registry. `Fuse.backendInfo().native_available` tells
+you which backend is active.
 
 ## Benchmark
 
@@ -110,7 +132,7 @@ fixed costs dominate; length 8+ patterns gain ~30x.
 ## How it works
 
 ```
-npm install @fuse-mojo/core
+npm install <platform package + @fuse-mojo/core from the GitHub Release>
         │
         ▼
 @fuse-mojo/core (thin JS wrapper)
