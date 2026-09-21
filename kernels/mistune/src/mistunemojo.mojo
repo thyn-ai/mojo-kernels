@@ -85,8 +85,20 @@ struct ByteWriter(Copyable, Movable):
         self.data.append(UInt8(b))
 
     def write(mut self, s: String):
-        for i in range(s.byte_length()):
-            self.data.append(s.as_bytes()[i])
+        var n = s.byte_length()
+        if n == 0:
+            return
+        var old = len(self.data)
+        self.data.resize(old + n, 0)
+        unsafe_memcpy(dest=self.data.unsafe_ptr() + old, src=s.unsafe_ptr(), count=n)
+
+    def write_span(mut self, s: String, start: Int, end: Int):
+        var n = end - start
+        if n <= 0:
+            return
+        var old = len(self.data)
+        self.data.resize(old + n, 0)
+        unsafe_memcpy(dest=self.data.unsafe_ptr() + old, src=s.unsafe_ptr() + start, count=n)
 
     def finish(self) -> String:
         var copy = self.data.copy()
@@ -289,6 +301,29 @@ def cp_to_utf8(cp: Int) -> String:
 # --------------------------------------------------------------------------
 # HTML escaping (mistune escapes & < > " everywhere, including code spans)
 # --------------------------------------------------------------------------
+
+
+def escape_html_into(mut out: ByteWriter, s: String):
+    var n = s.byte_length()
+    var i = 0
+    var start = 0
+    while i < n:
+        var b = Int(s.as_bytes()[i])
+        if b == 38 or b == 60 or b == 62 or b == 34:
+            out.write_span(s, start, i)
+            if b == 38:
+                out.write("&amp;")
+            elif b == 60:
+                out.write("&lt;")
+            elif b == 62:
+                out.write("&gt;")
+            else:
+                out.write("&quot;")
+            i += 1
+            start = i
+        else:
+            i += 1
+    out.write_span(s, start, n)
 
 
 def escape_html(s: String) -> String:
@@ -1954,14 +1989,27 @@ struct Inline:
     var brackets: List[Bracket]
     var refs: Dict[String, RefDef]
     var punct: List[Int]
+    var punct_ready: Bool
+    var delim_nodes: Dict[Int, Bool]
 
-    def __init__(out self, refs: Dict[String, RefDef], punct: List[Int]):
+    def __init__(out self):
         self.nodes = List[Node]()
         self.roots = List[Int]()
         self.delims = List[Delim]()
         self.brackets = List[Bracket]()
-        self.refs = refs.copy()
-        self.punct = punct.copy()
+        self.refs = Dict[String, RefDef]()
+        self.punct = List[Int]()
+        self.punct_ready = False
+        self.delim_nodes = Dict[Int, Bool]()
+
+    def is_punct(mut self, cp: Int) -> Bool:
+        # ASCII takes the fast path; the Unicode table is built on first use.
+        if cp < 128:
+            return _in_chars(cp, PUNCT_ASCII)
+        if not self.punct_ready:
+            self.punct = load_punct_ranges()
+            self.punct_ready = True
+        return is_punct_cp(cp, self.punct)
 
     def add_node(mut self, t: Int, text: String) -> Int:
         self.nodes.append(Node(t, text))
@@ -1984,7 +2032,7 @@ struct Inline:
             var k = self.nodes[p].children.index(idx)
             self.nodes[p].children.pop(k)
 
-    def parse(mut self, text0: String) raises -> List[Int]:
+    def parse(mut self, text0: String, refs: Dict[String, RefDef]) raises -> List[Int]:
         var text = rstrip_of(text0, " \t")
         var i = 0
         var n = text.byte_length()
@@ -2048,9 +2096,10 @@ struct Inline:
                 var run = j - i
                 var before = prev_cp(text, i)
                 var after = next_cp(text, j)
-                var fl = flanking(ch, before, after, self.punct)
+                var fl = self.flanking(ch, before, after)
                 var node = self.add_node(N_TEXT, slice(text, i, j))
                 self.delims.append(Delim(node, ch, run, fl[0], fl[1]))
+                self.delim_nodes[node] = True
                 i = j
                 continue
             if ch == 91 or (ch == 33 and i + 1 < n and Int(text.as_bytes()[i + 1]) == 91):
@@ -2060,7 +2109,7 @@ struct Inline:
                 i += 2 if is_img else 1
                 continue
             if ch == 93:  # ]
-                var consumed = self.close_bracket(text, i)
+                var consumed = self.close_bracket(text, i, refs)
                 if consumed > i:
                     i = consumed
                     continue
@@ -2111,10 +2160,7 @@ struct Inline:
         self.roots = out.copy()
 
     def is_delim_node(self, idx: Int) -> Bool:
-        for k in range(len(self.delims)):
-            if self.delims[k].node == idx:
-                return True
-        return False
+        return idx in self.delim_nodes
 
     def trim_trailing_spaces(mut self, hard: Bool) raises -> Bool:
         if len(self.roots) == 0:
@@ -2172,7 +2218,21 @@ struct Inline:
             return j + 1
         return 0
 
-    def close_bracket(mut self, text: String, i: Int) raises -> Int:
+    def flanking(mut self, ch: Int, before: Int, after: Int) -> List[Bool]:
+        var before_ws = is_ws_cp(before)
+        var after_ws = is_ws_cp(after)
+        var before_p = self.is_punct(before)
+        var after_p = self.is_punct(after)
+        var left = (not after_ws) and (not after_p or (before_ws or before_p))
+        var right = (not before_ws) and (not before_p or (after_ws or after_p))
+        if ch == 42:  # '*'
+            return List[Bool]([left, right])
+        # underscore: intraword rules
+        var can_open = left and (not right or before_p)
+        var can_close = right and (not left or after_p)
+        return List[Bool]([can_open, can_close])
+
+    def close_bracket(mut self, text: String, i: Int, refs: Dict[String, RefDef]) raises -> Int:
         """A ']' at position i: try to form a link/image. Returns new pos or 0."""
         if len(self.brackets) == 0:
             return 0
@@ -2226,8 +2286,8 @@ struct Inline:
                         key = normalize_label(raw)
                     else:
                         key = normalize_label(label_text)
-                    if key in self.refs:
-                        var rd = self.refs[key].copy()
+                    if key in refs:
+                        var rd = refs[key].copy()
                         dest = rd.dest
                         title = rd.title
                         end = lab_end
@@ -2235,8 +2295,8 @@ struct Inline:
             if not have and not (after < n and Int(text.as_bytes()[after]) == 91):
                 # shortcut reference
                 var key = normalize_label(label_text)
-                if key in self.refs:
-                    var rd = self.refs[key].copy()
+                if key in refs:
+                    var rd = refs[key].copy()
                     dest = rd.dest
                     title = rd.title
                     end = after
@@ -2280,7 +2340,7 @@ struct Inline:
         return end
 
     def process_emphasis(mut self, mut delims: List[Delim]) raises:
-        var openers_bottom = Dict[String, Int]()
+        var openers_bottom = Dict[Int, Int]()
         var ci = 0
         while ci < len(delims):
             var c = delims[ci].copy()
@@ -2378,23 +2438,11 @@ struct Inline:
         return idx
 
 
-def delim_key(d: Delim) -> String:
-    return String(d.ch) + ":" + String(d.can_open) + ":" + String(d.orig % 3)
+def delim_key(d: Delim) -> Int:
+    return (d.ch << 4) | ((1 if d.can_open else 0) << 2) | (d.orig % 3)
 
 
-def flanking(ch: Int, before: Int, after: Int, ranges: List[Int]) -> List[Bool]:
-    var before_ws = is_ws_cp(before)
-    var after_ws = is_ws_cp(after)
-    var before_p = is_punct_cp(before, ranges)
-    var after_p = is_punct_cp(after, ranges)
-    var left = (not after_ws) and (not after_p or (before_ws or before_p))
-    var right = (not before_ws) and (not before_p or (after_ws or after_p))
-    if ch == 42:  # '*'
-        return List[Bool]([left, right])
-    # underscore: intraword rules
-    var can_open = left and (not right or before_p)
-    var can_close = right and (not left or after_p)
-    return List[Bool]([can_open, can_close])
+# (flanking is an Inline method: the Unicode table is built lazily)
 
 
 def scan_scheme(body: String) -> Int:
@@ -2552,90 +2600,104 @@ def html_token_len(text: String, i: Int) -> Int:
 
 struct Renderer:
     var refs: Dict[String, RefDef]
-    var punct: List[Int]
 
-    def __init__(out self, refs: Dict[String, RefDef], punct: List[Int]):
+    def __init__(out self, refs: Dict[String, RefDef]):
         self.refs = refs.copy()
-        self.punct = punct.copy()
 
-    def render_inline(mut self, nodes: List[Node], roots: List[Int], mut out: String) raises:
+    def render_inline(mut self, nodes: List[Node], roots: List[Int], mut out: ByteWriter) raises:
         for k in range(len(roots)):
-            var node = nodes[roots[k]].copy()
-            var t = node.t
+            var ni = roots[k]
+            var t = nodes[ni].t
             if t == N_TEXT:
-                out += escape_html(node.text)
+                escape_html_into(out, nodes[ni].text)
             elif t == N_CODE:
-                out += "<code>" + escape_html(node.text) + "</code>"
+                out.write("<code>")
+                escape_html_into(out, nodes[ni].text)
+                out.write("</code>")
             elif t == N_EM:
-                out += "<em>"
-                self.render_inline(nodes, node.children, out)
-                out += "</em>"
+                out.write("<em>")
+                self.render_inline(nodes, nodes[ni].children, out)
+                out.write("</em>")
             elif t == N_STRONG:
-                out += "<strong>"
-                self.render_inline(nodes, node.children, out)
-                out += "</strong>"
+                out.write("<strong>")
+                self.render_inline(nodes, nodes[ni].children, out)
+                out.write("</strong>")
             elif t == N_LINK:
-                if url_is_harmful(node.dest):
-                    out += '<a href="#harmful-link">'
+                if url_is_harmful(nodes[ni].dest):
+                    out.write('<a href="#harmful-link">')
                 else:
-                    out += '<a href="' + escape_url(node.dest) + '"'
-                    if node.title.byte_length() > 0:
-                        out += ' title="' + escape_title(node.title) + '"'
-                    out += ">"
-                self.render_inline(nodes, node.children, out)
-                out += "</a>"
+                    out.write('<a href="')
+                    out.write(escape_url(nodes[ni].dest))
+                    out.write('"')
+                    if nodes[ni].title.byte_length() > 0:
+                        out.write(' title="')
+                        out.write(escape_title(nodes[ni].title))
+                        out.write('"')
+                    out.write(">")
+                self.render_inline(nodes, nodes[ni].children, out)
+                out.write("</a>")
             elif t == N_IMG:
-                if url_is_harmful(node.dest):
-                    out += '<img src="#harmful-link"'
+                if url_is_harmful(nodes[ni].dest):
+                    out.write('<img src="#harmful-link"')
                 else:
-                    out += '<img src="' + escape_url(node.dest) + '"'
-                out += ' alt="' + escape_html(self.alt_text(nodes, node.children)) + '"'
-                if node.title.byte_length() > 0:
-                    out += ' title="' + escape_title(node.title) + '"'
-                out += " />"
+                    out.write('<img src="')
+                    out.write(escape_url(nodes[ni].dest))
+                    out.write('"')
+                out.write(' alt="')
+                escape_html_into(out, self.alt_text(nodes, nodes[ni].children))
+                out.write('"')
+                if nodes[ni].title.byte_length() > 0:
+                    out.write(' title="')
+                    out.write(escape_title(nodes[ni].title))
+                    out.write('"')
+                out.write(" />")
             elif t == N_BR:
-                out += "<br />\n"
+                out.write("<br />\n")
             elif t == N_SOFT:
-                out += "\n"
+                out.write("\n")
 
     def alt_text(self, nodes: List[Node], kids: List[Int]) raises -> String:
         var out = String()
         for k in range(len(kids)):
-            var node = nodes[kids[k]].copy()
-            if node.t == N_TEXT or node.t == N_CODE:
-                out += node.text
-            elif node.t == N_SOFT or node.t == N_BR:
+            var ni = kids[k]
+            if nodes[ni].t == N_TEXT or nodes[ni].t == N_CODE:
+                out += nodes[ni].text
+            elif nodes[ni].t == N_SOFT or nodes[ni].t == N_BR:
                 out += "\n"
             else:
-                out += self.alt_text(nodes, node.children)
+                out += self.alt_text(nodes, nodes[ni].children)
         return out
 
-    def inline_html(mut self, text: String) raises -> String:
-        var parser = Inline(self.refs, self.punct)
-        var roots = parser.parse(text)
-        var out = String()
+    def inline_html_into(mut self, text: String, mut out: ByteWriter) raises:
+        var parser = Inline()
+        var roots = parser.parse(text, self.refs)
         self.render_inline(parser.nodes, roots, out)
-        return out
 
-    def render_blocks(mut self, blocks: List[Blk], idxs: List[Int], mut out: String) raises:
+    def render_blocks(mut self, blocks: List[Blk], idxs: List[Int], mut out: ByteWriter) raises:
         for k in range(len(idxs)):
             var b = blocks[idxs[k]].copy()
             var t = b.t
             if t == B_PARA:
                 var text = "\n".join(b.lines)
-                out += "<p>" + self.inline_html(text) + "</p>\n"
+                out.write("<p>")
+                self.inline_html_into(text, out)
+                out.write("</p>\n")
             elif t == B_HEAD:
                 var text = "\n".join(b.lines)
-                out += "<h" + String(b.level) + ">" + self.inline_html(text) + "</h" + String(b.level) + ">\n"
+                out.write("<h" + String(b.level) + ">")
+                self.inline_html_into(text, out)
+                out.write("</h" + String(b.level) + ">\n")
             elif t == B_HR:
-                out += "<hr />\n"
+                out.write("<hr />\n")
             elif t == B_CODE_IND:
                 var lines = List[String]()
                 for j in range(len(b.lines)):
                     lines.append(b.lines[j])
                 while len(lines) > 0 and lines[len(lines) - 1].byte_length() == 0:
                     lines.pop()
-                out += "<pre><code>" + escape_html("\n".join(lines)) + "</code></pre>\n"
+                out.write("<pre><code>")
+                escape_html_into(out, "\n".join(lines))
+                out.write("</code></pre>\n")
             elif t == B_CODE_F:
                 var content = String()
                 for j in range(len(b.lines)):
@@ -2649,43 +2711,47 @@ struct Renderer:
                         break
                 if word.byte_length() > 0:
                     cls = ' class="language-' + escape_html(decode_entities(unescape(word))) + '"'
-                out += "<pre><code" + cls + ">" + escape_html(content) + "</code></pre>\n"
+                out.write("<pre><code" + cls + ">")
+                escape_html_into(out, content)
+                out.write("</code></pre>\n")
             elif t == B_HTML:
                 var lines = List[String]()
                 for j in range(len(b.lines)):
                     lines.append(b.lines[j])
                 while len(lines) > 0 and lines[len(lines) - 1].byte_length() == 0:
                     lines.pop()
-                out += "<p>" + escape_html("\n".join(lines)) + "</p>\n"
+                out.write("<p>")
+                escape_html_into(out, "\n".join(lines))
+                out.write("</p>\n")
             elif t == B_QUOTE:
-                out += "<blockquote>\n"
+                out.write("<blockquote>\n")
                 self.render_blocks(blocks, b.children, out)
-                out += "</blockquote>\n"
+                out.write("</blockquote>\n")
             elif t == B_LIST:
                 var tag = "ol" if b.ordered else "ul"
                 var attr = String("")
                 if b.ordered and b.start != 1:
                     attr = ' start="' + String(b.start) + '"'
-                out += "<" + tag + attr + ">\n"
+                out.write("<" + tag + attr + ">\n")
                 for j in range(len(b.children)):
                     self.render_item(blocks, b.children[j], out, b.tight)
-                out += "</" + tag + ">\n"
+                out.write("</" + tag + ">\n")
 
-    def render_item(mut self, blocks: List[Blk], item: Int, mut out: String, tight: Bool) raises:
-        out += "<li>"
+    def render_item(mut self, blocks: List[Blk], item: Int, mut out: ByteWriter, tight: Bool) raises:
+        out.write("<li>")
         var b = blocks[item].copy()
         if tight:
             for j in range(len(b.children)):
                 var child = blocks[b.children[j]].copy()
                 if child.t == B_PARA:
                     var text = "\n".join(child.lines)
-                    out += self.inline_html(text)
+                    self.inline_html_into(text, out)
                 else:
                     var single = List[Int]([b.children[j]])
                     self.render_blocks(blocks, single, out)
         else:
             self.render_blocks(blocks, b.children, out)
-        out += "</li>\n"
+        out.write("</li>\n")
 
 
 # --------------------------------------------------------------------------
@@ -2709,10 +2775,10 @@ def render_markdown(text: String) raises -> String:
         return String("")
     var parser = Parser()
     _ = parser.parse(text)
-    var renderer = Renderer(parser.refs, load_punct_ranges())
-    var out = String()
+    var renderer = Renderer(parser.refs)
+    var out = ByteWriter()
     renderer.render_blocks(parser.blocks, parser.blocks[0].children, out)
-    return out
+    return out.finish()
 
 
 @export

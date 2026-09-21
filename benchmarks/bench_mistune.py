@@ -84,9 +84,12 @@ def main() -> None:
     py = platform.python_version()
     import subprocess as sp
 
-    mojo_v = sp.run(
-        ["mojo", "--version"], capture_output=True, text=True
-    ).stdout.strip()
+    try:
+        mojo_v = sp.run(
+            ["mojo", "--version"], capture_output=True, text=True
+        ).stdout.strip()
+    except OSError:
+        mojo_v = "Mojo (pixi env)"
     print(f"# mistune-mojo benchmark")
     print(f"# {machine}, Python {py}, {mojo_v}, mistune {mistune.__version__}")
     print(f"# median of {N_RUNS} runs; correctness asserted before timing\n")
