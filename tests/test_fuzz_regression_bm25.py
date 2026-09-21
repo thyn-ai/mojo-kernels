@@ -43,6 +43,19 @@ ILL_CONDITIONED_UNIT = base64.b64decode(
 ILL_CONDITIONED_NATIVE = np.array([2.10031216e157] * 3)
 ILL_CONDITIONED_FALLBACK = np.array([2.10031008e157] * 3)
 
+# The sibling a 60 s run of the same workflow command found on the fix
+# branch (linux/amd64 container, crash-caa7aef187b44ab87d25718c8a90ac6e95ace895):
+# the same parameters (one byte of b differs) on a corpus where the query
+# term is posted in one document of four, so one query shows both shapes:
+#   native=[1.43393053e+169 1.43393053e+169 1.43393053e+169 1.56669398e+158]
+#   fallback=[nan nan nan 1.56669185e+158]
+COMBINED_UNIT = base64.b64decode(
+    "AgABAADi4uLi4uJ+4uLi4uLi4uLi4uLi4uJiAwMDAwMDAwMDAwMDAwMDAwcDAwMDAwMDAwMDAwMDAw"
+    "MDAwMDAwMDAAAAAAAAAAABAAA="
+)
+COMBINED_NATIVE = np.array([1.43393053e169] * 3 + [1.56669398e158])
+COMBINED_FALLBACK = np.array([np.nan] * 3 + [1.56669185e158])
+
 
 def test_seed_corpus_is_present():
     assert SEEDS, f"no seeds under {harness.CORPUS_DIR}; run fuzz/seed_corpus.py bm25"
@@ -120,6 +133,41 @@ def test_ill_conditioned_shape_excuses_only_the_cancelled_documents():
     native[3] += 1.0  # a well-conditioned document disagreeing is a finding
     with pytest.raises(Divergence):
         harness._compare_backends(mixed, query, native, fallback)
+
+
+def test_both_shapes_in_one_query_are_classified():
+    """Normaliser 0 at every document: 0/0 (degenerate-nan) where the term is
+    absent, residue (ill-conditioned-norm) where it is present. Every
+    position matches one shape; the outcome is the ill-conditioned key."""
+    case = harness.decode(COMBINED_UNIT)
+    assert harness.VARIANT_NAMES[case.variant] == "BM25Plus"
+    assert case.corpus == (("w03",) * 4,) * 3 + (("w03", "w03", "w00", "w00"),)
+    assert case.queries == (("w00",) * 4,)
+    query = list(case.queries[0])
+    assert harness.ISSUE_DEGENERATE_NAN.applies(case)
+    assert harness._ill_conditioned_documents(case, query).tolist() == [False] * 3 + [True]
+    assert (
+        harness._compare_backends(case, query, COMBINED_NATIVE, COMBINED_FALLBACK)
+        == harness.ISSUE_ILL_CONDITIONED_NORM.key
+    )
+    # Each shape alone still classifies as itself ...
+    nan_part = COMBINED_NATIVE.copy()
+    nan_part[3] = COMBINED_FALLBACK[3]
+    assert (
+        harness._compare_backends(case, query, nan_part, COMBINED_FALLBACK)
+        == harness.ISSUE_DEGENERATE_NAN.key
+    )
+    residue_part = COMBINED_FALLBACK.copy()
+    residue_part[3] = COMBINED_NATIVE[3]
+    assert (
+        harness._compare_backends(case, query, residue_part, COMBINED_FALLBACK)
+        == harness.ISSUE_ILL_CONDITIONED_NORM.key
+    )
+    # ... and a NaN on the kernel's side matches neither.
+    with pytest.raises(Divergence):
+        harness._compare_backends(case, query, COMBINED_FALLBACK, COMBINED_NATIVE)
+    expected = harness.ISSUE_ILL_CONDITIONED_NORM.key if harness.native_available() else None
+    assert harness.test_one_input(COMBINED_UNIT) == expected
 
 
 def test_raw_parameters_without_cancellation_do_not_apply():

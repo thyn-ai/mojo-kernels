@@ -126,6 +126,17 @@ def _bm25_reproducers(harness) -> dict[str, bytes]:
             b=-2.227377823277027e168, third=2.227377823277027e168,
             vocab_size=1, with_unicode=False, corpus=(("w00",),), queries=(("w00",),),
         ),
+        # Both shapes in one query (found by a 60 s run of the same workflow
+        # command on the fix branch, in a linux/amd64 container): the
+        # normaliser is 0 at every document, so the document without the
+        # term is the degenerate-nan 0/0 (reference NaN, kernel floor) and
+        # the document with it is the residue above. Minimised from four
+        # documents of four tokens to two of one.
+        "known-issue-ill-conditioned-norm-2.bin": Case(
+            variant=2, raw_params=True, k1=-2.227377823252691e168,
+            b=-2.227377823277027e168, third=2.227377823277027e168,
+            vocab_size=2, with_unicode=False, corpus=(("w00",), ("w01",)), queries=(("w00",),),
+        ),
     }
     return {name: harness.encode(case) for name, case in cases.items()}
 

@@ -453,23 +453,35 @@ def _check_score_array(scores: object, n_docs: int, what: str) -> None:
 def _compare_backends(
     case: Case, query: list[str], native: np.ndarray, fallback: np.ndarray
 ) -> str | None:
-    """None when the kernel matches the fallback; a KnownIssue key when the
-    disagreement has exactly a documented shape; raises otherwise."""
+    """None when the kernel matches the fallback; a KnownIssue key when every
+    disagreeing position has a documented shape; raises otherwise.
+
+    The two shapes can occur in one query: a normaliser that cancels to 0 at
+    every document of average length gives the reference 0/0 at the
+    documents that do not contain the term (``degenerate-nan``) and rounding
+    residue at the ones that do (``ill-conditioned-norm``). Each position
+    must then match one of them; the outcome is ``ill-conditioned-norm``
+    whenever any position has that shape, ``degenerate-nan`` otherwise.
+    """
     ok = _close(native, fallback)
     if ok.all():
         return None
-    # Known shape: the reference is NaN where the kernel is finite, and every
-    # other position agrees.
+    explained = ok.copy()
+    outcome: str | None = None
+    # Known shape: the reference is NaN where the kernel is finite.
     nan_only = np.isnan(fallback) & ~np.isnan(native)
-    if ISSUE_DEGENERATE_NAN.applies(case) and np.all(ok | nan_only):
-        return ISSUE_DEGENERATE_NAN.key
-    # Known shape: every disagreeing document scores a posted term through a
-    # summation that cancelled by ILL_CONDITIONED_AMPLIFICATION or more (its
-    # value is rounding residue, so no tolerance is meaningful there), and
-    # every other position agrees.
+    if ISSUE_DEGENERATE_NAN.applies(case) and np.any(~ok & nan_only):
+        explained |= nan_only
+        outcome = ISSUE_DEGENERATE_NAN.key
+    # Known shape: the document scores a posted term through a summation that
+    # cancelled by ILL_CONDITIONED_AMPLIFICATION or more (its value is
+    # rounding residue, so no tolerance is meaningful there).
     ill = _ill_conditioned_documents(case, query)
-    if ISSUE_ILL_CONDITIONED_NORM.applies(case) and np.all(ok | ill):
-        return ISSUE_ILL_CONDITIONED_NORM.key
+    if ISSUE_ILL_CONDITIONED_NORM.applies(case) and np.any(~ok & ill):
+        explained |= ill
+        outcome = ISSUE_ILL_CONDITIONED_NORM.key
+    if outcome is not None and explained.all():
+        return outcome
     bad = np.flatnonzero(~ok)
     raise Divergence(
         f"native kernel != fallback for query {query!r} at documents {bad.tolist()}: "
