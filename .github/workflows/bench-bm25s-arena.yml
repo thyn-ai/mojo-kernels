@@ -95,8 +95,8 @@ jobs:
       - name: Smoke the branch wheel alone (no bm25s/numba)
         run: |
           set -euo pipefail
-          PY312="$(command -v python3.12 || command -v python3)"
-          "$PY312" -m venv /tmp/smoke
+          # The pixi env's python is 3.12 regardless of the runner's default.
+          pixi run python -m venv /tmp/smoke
           /tmp/smoke/bin/pip install --quiet --no-cache-dir "numpy>=1.26,<3" python/bm25_mojo/dist/*.whl
           /tmp/smoke/bin/python - <<'PY'
           import faulthandler, random
@@ -117,8 +117,8 @@ jobs:
       - name: Set up the bench venv (arena pins)
         run: |
           set -euo pipefail
-          PY312="$(command -v python3.12 || command -v python3)"
-          "$PY312" -m venv /tmp/bench
+          # The pixi env's python is 3.12 regardless of the runner's default.
+          pixi run python -m venv /tmp/bench
           /tmp/bench/bin/pip install --quiet $BENCH_DEPS
           /tmp/bench/bin/pip list | grep -Ei 'bm25|numba|llvmlite|numpy' || true
 
