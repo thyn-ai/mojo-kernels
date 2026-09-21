@@ -69,24 +69,24 @@ Warm steady-state:
 
 | workload | PyPI phonenumbers | phonenumbers-mojo (native) | phonenumbers-mojo (fallback) | native speedup |
 |---|---:|---:|---:|---:|
-| `parse()`, per call | 8.56 µs | 6.49 µs | 58.74 µs | 1.3× |
-| `is_valid_number()`, per call | 3.17 µs | 2.57 µs | 20.80 µs | 1.2× |
-| `format_number(NATIONAL)`, per call | 4.70 µs | 4.96 µs | 30.53 µs | 0.9× |
-| `validate_column` batch, per number | 19.52 µs | 5.28 µs | 133.03 µs | **3.7×** |
+| `parse()`, per call | 7.29 µs | 5.17 µs | 47.55 µs | 1.4× |
+| `is_valid_number()`, per call | 2.55 µs | 2.13 µs | 15.55 µs | 1.2× |
+| `format_number(NATIONAL)`, per call | 3.07 µs | 3.63 µs | 19.64 µs | 0.8× |
+| `validate_column` batch, per number | 12.08 µs | 3.61 µs | 79.34 µs | **3.3×** |
 
 Cold first-call (fresh process: import + metadata + first parse, median of 5):
 
 | package | import + first parse |
 |---|---:|
-| PyPI phonenumbers | 40.61 ms |
-| phonenumbers-mojo (native) | 58.82 ms |
-| phonenumbers-mojo (fallback) | 61.33 ms |
+| PyPI phonenumbers | 43.40 ms |
+| phonenumbers-mojo (native) | 48.09 ms |
+| phonenumbers-mojo (fallback) | 35.63 ms |
 
 Honest summary: single-call `parse`/`is_valid_number` are moderately faster
-(1.2–1.3×), `format_number` is at parity, and the batch API — the real
-pipeline shape — is **3.7× faster** while remaining bit-identical. Cold
-start is ~1.4× slower than the oracle (shared-library load + metadata blob
-decompression); steady-state pipelines amortize this. The fallback engine
+(1.2–1.4×), `format_number` is at parity, and the batch API — the real
+pipeline shape — is **3.3× faster** while remaining bit-identical. Cold
+start is on par with the oracle (tens of ms either way, dominated by
+interpreter/package import; repeated runs vary ±30%). The fallback engine
 trades speed for portability (~0.15× of the oracle, correct everywhere).
 
 ## Differential testing
@@ -105,8 +105,10 @@ both backends (native, and `PHONENUMBERS_MOJO_DISABLE_NATIVE=1`):
   RFC3966 (`tel:`) input, vanity numbers, too-long/too-short/invalid-cc
   errors, non-ASCII inputs.
 
-Current status: **3 964 tests pass on the native backend; 3 962 pass (+2
-native-only loader skips) on the forced fallback**, 0 mismatches. Parity is
+Current status: **4 052 tests pass on the native backend; 4 050 pass (+2
+native-only loader skips) on the forced fallback**, 0 mismatches — plus an
+extended 37 050-case all-region fuzz (every region, marker variants,
+Unicode-digit inputs) with 0 mismatches on each backend. Parity is
 exact (no tolerance): identical parsed fields, booleans, formatted strings
 and exception `(error_type, message)` everywhere.
 

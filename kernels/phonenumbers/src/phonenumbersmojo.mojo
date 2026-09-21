@@ -870,7 +870,8 @@ def _ext_match_at[o: Origin](s: Pointer[UInt8, o], slen: Int, start: Int) -> Int
     ):
         i += 1
 
-    # Branch B: long markers, 1..20 digits (longest first)
+    # Branch B: long markers, 1..20 digits (longest first). ASCII subset;
+    # accented/fullwidth markers never occur behind the charset gate.
     for mi in range(8):
         var e = -1
         if mi == 0:
@@ -878,11 +879,11 @@ def _ext_match_at[o: Origin](s: Pointer[UInt8, o], slen: Int, start: Int) -> Int
         elif mi == 1:
             e = _match_lit(s, i, hlen, "extensio")
         elif mi == 2:
-            e = _match_lit(s, i, hlen, "extensin")
+            e = _match_lit(s, i, hlen, "xtensio")
         elif mi == 3:
-            e = _match_lit(s, i, hlen, "extensi")
-        elif mi == 4:
             e = _match_lit(s, i, hlen, "extn")
+        elif mi == 4:
+            e = _match_lit(s, i, hlen, "xtn")
         elif mi == 5:
             e = _match_lit(s, i, hlen, "ext")
         elif mi == 6:

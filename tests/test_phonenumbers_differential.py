@@ -139,6 +139,12 @@ EDGE_CASES = [
     "10439158,, 445", "2125551234ex 123", "+1 x42 212-555-1234",
     "212-555-1234x5", "212-555-1234, 12", "212-555-1234 123456",
     "1-800-XAMPLEZ", "+1 212-555-XYZA", "212-555-xyzw",
+    # markers pinned by the extended all-region fuzz
+    "+1 212-555-1234 xtn 42", "+1 212-555-1234 xtn. 42",
+    "+1 212-555-1234 xtensio 42", "+1 212-555-1234 extensio 42",
+    "+1 212-555-1234 extensi 42", "+1 212-555-1234 extensin 42",
+    "+1 212-555-1234 anexo 42", "+1 212-555-1234 extensión 42",
+    "00357 1 xtn 3", "+26233274623922940046 xtn 3", "(124) 7 xtn 3",
 ]
 EDGE_REGIONS = [None, "US", "IT", "AG", "GB", "CA", "BR", "DE"]
 
@@ -183,6 +189,8 @@ def test_non_ascii_inputs_match_oracle():
     cases = [
         "＋1 212-555-1234",  # full-width plus
         "＋４４ ２０ ７９４６ ００１８",  # full-width digits
+        "３２１７２",  # full-width digits only, no region
+        "１２３４５",  # full-width digits only, with region
         "+1 212-555-1234 доб 12",  # Cyrillic extension marker
         "+44 20 7946 0018 extensión 5",
         "ｅｘｔ 42",

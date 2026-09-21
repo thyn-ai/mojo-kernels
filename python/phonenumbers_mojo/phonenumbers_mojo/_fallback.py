@@ -342,7 +342,7 @@ for _letters, _digit in (
 def _extract_possible_number(text: str) -> str:
     start = -1
     for i, ch in enumerate(text):
-        if ch == "+" or ch == "＋" or ("0" <= ch <= "9"):
+        if ch == "+" or ch == "＋" or ch.isdigit():
             start = i
             break
     if start < 0:
@@ -377,9 +377,11 @@ def _extract_possible_number(text: str) -> str:
 #   E: [ \xa0\t]* (,,|;) [:.．]? [ \xa0\t,-]* 1..15 digits #?
 #   F: [ \xa0\t]* ,+ [:.．]? [ \xa0\t,-]* 1..9 digits #?
 _EXT_MARKERS_LONG = (
-    # e?xt(?:ensi(?:ó?|ó))?n?  (longest first so backtracking prefers them)
-    "extensión", "extensión", "extensió", "extensió", "extensio",
-    "extension", "extensi", "extensin", "extn", "ext", "xt",
+    # e?xt(?:ensi(?:o|o\u0301|\u00f3))?n?  (longest first so backtracking
+    # prefers them; "extensi"/"extensin" alone are NOT markers)
+    "extensión", "extensión", "extensió", "extensió",
+    "xtensión", "xtensión", "xtensió", "xtensió",
+    "extension", "extensio", "xtensio", "extn", "xtn", "ext", "xt",
     "ｅｘｔｎ", "ｅｘｔ", "anexo", "доб",
 )
 _EXT_MARKERS_SHORT = ("int", "ｉｎｔ", "x", "ｘ", "#", "＃", "~", "～")
