@@ -138,18 +138,29 @@ that disagrees with any of them. The release pull request writes the new
 | `typescript/*/package.json`, `typescript/*/packages/*/package.json` (`version`), core's `optionalDependencies` pins | JSON paths, globbed |
 | `typescript/*/package-lock.json` (root `version`, `packages[""]`, `packages/core` and its pins) | JSON paths, globbed |
 | `typescript/fuse-mojo/tests/unit.test.cjs`, `typescript/natural-mojo/tests/unit.test.cjs` (`assert.equal(..., 'X.Y.Z') // x-release-please-version`) | the line marker |
+| `README.md`, `python/cclib_mojo/README.md`, `typescript/fuse-mojo/README.md` (the `V=X.Y.Z  # x-release-please-version` line of each install block, which downloads the Release assets for that version) | the line marker |
 
 A new package that follows the layout is picked up by the globs. Anything
 else that must carry the version gets an `x-release-please-version` marker
-on its line and an entry in `extra-files`; without one it drifts. The smoke
-scripts under `typescript/*/scripts/` read the version from
-`packages/core/package.json` and need nothing. `preflight` checks the
-packages a release ships (bm25-mojo, cclib-mojo, fuse-mojo) together with
-`pixi.toml`, `version.txt` and the manifest, plus every location in the
-table above: an updater whose path stopped matching logs a warning and
-leaves its file untouched, so `preflight` checking the whole set is what
-turns that into a refusal naming the file rather than version drift that
-surfaces releases later.
+on its line and an entry in `extra-files`; without one it drifts. A marker
+line carries exactly one `X.Y.Z`: the generic updater replaces the first
+semver on the line and leaves any second one behind. The smoke scripts
+under `typescript/*/scripts/` read the version from
+`packages/core/package.json` and need nothing.
+
+[`scripts/version_locations.py`](./scripts/version_locations.py) is the
+check: `pixi.toml`, `version.txt`, the manifest and every location in the
+table above, discovered by the same globs the config uses (a marker line is
+read from every file the generic updater is handed). An updater whose path
+stopped matching logs a warning and leaves its file untouched, so checking
+the whole set is what turns that into a refusal naming the file rather than
+version drift that surfaces releases later. `preflight` runs it against the
+tag; [`readme-install.yml`](./.github/workflows/readme-install.yml) runs it
+on every release pull request (they always touch `version.txt` and the
+manifest), so a location the pull request left behind fails before the
+merge. The same workflow runs the README install blocks verbatim on
+`ubuntu-latest` and `macos-latest`, weekly and on every pull request that
+touches them, and asserts the installed packages load their native kernels.
 
 ### Re-running a release
 

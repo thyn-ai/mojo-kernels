@@ -36,7 +36,10 @@
         { "type": "json", "path": "typescript/*/package-lock.json", "jsonpath": "$.packages[''].version", "glob": true },
         { "type": "json", "path": "typescript/*/package-lock.json", "jsonpath": "$.packages['packages/core'].version", "glob": true },
         { "type": "json", "path": "typescript/*/package-lock.json", "jsonpath": "$.packages['packages/core'].optionalDependencies.*", "glob": true },
-        { "type": "generic", "path": "typescript/*/tests/unit.test.cjs", "glob": true }
+        { "type": "generic", "path": "typescript/*/tests/unit.test.cjs", "glob": true },
+        { "type": "generic", "path": "README.md" },
+        { "type": "generic", "path": "python/cclib_mojo/README.md" },
+        { "type": "generic", "path": "typescript/fuse-mojo/README.md" }
       ]
     }
   }

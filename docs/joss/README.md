@@ -42,8 +42,9 @@ otherwise:
    with `openjournals/inara` as of 2026-09-19.
 
 Also decide *what* is being submitted: reviewers will install whatever
-`pip install cclib-mojo` resolves to, so the PyPI release (or a clearly
-documented test-PyPI/source install path) must exist by review time.
+the documented install command resolves to (today: the signed wheel on the
+GitHub Release), so the PyPI release (or a clearly documented test-PyPI or
+source install path) must exist by review time.
 
 ## Checking that the paper compiles
 
@@ -110,7 +111,7 @@ with where this repository stands today:
   issue ([cclib/cclib#1909](https://github.com/cclib/cclib/issues/1909)).
 - **Functionality**: installation proceeds as documented; functional
   claims confirmed; **performance claims confirmed** — reviewers may
-  re-run `pip install cclib-mojo`, `quickstart.py`, the differential
+  re-run the documented install, `quickstart.py`, the differential
   tests, and the benchmark on their own hardware. Numbers differ across
   machines; the README's reproduction path (`pixi run bench-cclib`) is
   the defense.

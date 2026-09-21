@@ -1,0 +1,87 @@
+# The README install commands stay true.
+#
+# README.md, python/cclib_mojo/README.md and typescript/fuse-mojo/README.md
+# install bm25-mojo, cclib-mojo and fuse-mojo from the signed assets of the
+# GitHub Release named by the `V=X.Y.Z  # x-release-please-version` line of
+# each install block. Two things can make those commands lie:
+#
+#   * a version location the release pull request left behind -- `lockstep`
+#     runs scripts/version_locations.py (the same check release.yml's
+#     preflight applies to the tag), so a release pull request that forgot
+#     one of the README lines goes red here, before it merges;
+#   * assets that do not install or do not load their native kernel --
+#     `install` runs the blocks exactly as printed, on both supported
+#     platforms, and asserts backend_info() / backendInfo() report the
+#     native backend (scripts/readme_install_check.sh).
+#
+# On release-please's own pull request the README already names the next
+# version, whose assets release.yml publishes only after the merge, so
+# `install` reports that and passes; the weekly run checks them for real.
+#
+# Every action is pinned to a full commit SHA; the token is read-only.
+name: readme-install
+
+on:
+  pull_request:
+    paths:
+      - README.md
+      - python/*/README.md
+      - typescript/*/README.md
+      - release-please-config.json
+      - .release-please-manifest.json
+      - version.txt
+      - CHANGELOG.md
+      - scripts/version_locations.py
+      - scripts/readme_install_check.sh
+      - tests/test_version_locations.py
+      - .github/workflows/readme-install.yml
+  schedule:
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: readme-install-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  lockstep:
+    name: every version location agrees (READMEs included)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Unit tests for the check, then the check itself
+        run: |
+          set -euo pipefail
+          python3 -m unittest discover -s tests -p test_version_locations.py
+          python3 scripts/version_locations.py
+
+  install:
+    name: README install commands load the native kernels (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+      - name: Run the README install blocks verbatim and assert the native backends
+        env:
+          # release-please's pull request names a version whose assets do not
+          # exist until it merges (see the header).
+          README_INSTALL_ALLOW_UNPUBLISHED: ${{ github.event_name == 'pull_request' && startsWith(github.head_ref, 'release-please--') && '1' || '0' }}
+        run: bash scripts/readme_install_check.sh

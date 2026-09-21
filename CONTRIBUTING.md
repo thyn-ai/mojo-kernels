@@ -208,8 +208,10 @@ trailing marker is what release-please rewrites, so keep it),
 `typescript/*/package.json`, `typescript/*/packages/*/package.json` (plus
 core's `optionalDependencies` pins) and `typescript/*/package-lock.json`.
 Anything else that must carry the version gets the same marker on its line
-and an entry in that file. `release.yml`'s preflight lists only the
-packages a release ships.
+and an entry in that file (the README install blocks' `V=X.Y.Z` lines are
+registered this way). `scripts/version_locations.py` checks that every one
+of them agrees; `release.yml`'s preflight runs it against the tag and
+`readme-install.yml` on every release pull request.
 
 ## Commit messages and pull requests
 

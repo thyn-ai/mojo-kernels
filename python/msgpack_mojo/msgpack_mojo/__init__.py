@@ -46,7 +46,7 @@ from msgpack_mojo.exceptions import (
 )
 from msgpack_mojo.ext import ExtType, Timestamp
 
-__version__ = "0.1.0"  # x-release-please-version
+__version__ = "0.1.3"  # x-release-please-version
 __all__ = [
     "BufferFull",
     "ExtType",
