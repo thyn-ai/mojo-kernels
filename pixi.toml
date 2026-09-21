@@ -11,7 +11,7 @@
 
 [workspace]
 name = "mojo-kernels"
-version = "0.1.2"
+version = "0.1.3"
 description = "Mojo kernel acceleration factory: prebuilt per-platform kernels with thin Python wrappers and pure-Python fallbacks."
 authors = ["thyn-ai"]
 license = "Apache-2.0"
