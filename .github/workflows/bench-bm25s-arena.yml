@@ -221,6 +221,11 @@ jobs:
           cat > Dockerfile.bench <<'EOF'
           FROM python:3.12-bookworm
           ENV PYTHONHASHSEED=0 PYTHONFAULTHANDLER=1
+          # numba's llvmlite segfaults intermittently while probing the newest
+          # runner CPUs (Emerald/Granite Rapids) at JIT time; pinning the
+          # target CPU skips the probe. The bm25s scorer is a scalar
+          # gather-add loop, so generated code is identical either way.
+          ENV NUMBA_CPU_NAME=skylake-avx512
           WORKDIR /bench
           COPY wheels/before /wheels/before/
           COPY wheels/after /wheels/after/
@@ -329,6 +334,8 @@ jobs:
           cat > Dockerfile.contended <<'EOF'
           FROM python:3.12-bookworm
           ENV PYTHONHASHSEED=0 PYTHONFAULTHANDLER=1
+          # See Dockerfile.bench: skip llvmlite's host-CPU probe (flaky segfault).
+          ENV NUMBA_CPU_NAME=skylake-avx512
           RUN apt-get update -qq && apt-get install -y -qq --no-install-recommends stress-ng procps \
            && rm -rf /var/lib/apt/lists/*
           WORKDIR /bench
