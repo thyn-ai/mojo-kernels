@@ -461,11 +461,6 @@ def _spread(data, ref_fn, ddof_of_n, min_n, err_msg, sqrt, xbar):
     return ref_fn(seq, xbar)
 
 
-def ref_fn(data, xbar):
-    fn = _reference.stdev if sqrt else _reference.variance
-    return fn(data, xbar)
-
-
 def _spread_c(data, ref_fn, c, ddof_of_n, min_n, err_msg, sqrt):
     """variance/stdev with a caller-given centre (the stdlib's xbar/mu path).
 
@@ -519,11 +514,6 @@ def _spread_c(data, ref_fn, c, ddof_of_n, min_n, err_msg, sqrt):
             return _finalize_products(r[0][0], ddof_of_n(len(seq)), sqrt)
         return ref_fn(seq, c)
     return ref_fn(seq, c)
-
-
-def ref_fn(data, c):
-    fn = _reference.stdev if sqrt else _reference.variance
-    return fn(data, c)
 
 
 def variance(data, xbar=None):

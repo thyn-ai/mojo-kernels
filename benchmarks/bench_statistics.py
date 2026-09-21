@@ -86,7 +86,7 @@ def machine_info() -> str:
 def cold_first_call(fn: str, ours: bool) -> float:
     """Median first-call latency (ms) over N_RUNS fresh interpreter processes."""
     call = (
-        f"m.quantiles(data, n=100)" if fn == "quantiles" else f"m.{fn}(data)"
+        "m.quantiles(data, n=100)" if fn == "quantiles" else f"m.{fn}(data)"
     )
     if ours:
         snippet = (
