@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import argparse
 import json
+from collections import Counter
 import os
 import pathlib
 import re
@@ -143,6 +144,19 @@ def collect(root: pathlib.Path) -> dict[str, str]:
     return seen
 
 
+def reference_version(seen: dict[str, str]) -> str:
+    """The version the odd ones out are measured against: the most common REAL
+    version. Error values such as "<missing>" never become the reference,
+    however many locations carry them, so the message names the broken
+    locations rather than the correct ones. Only when no location carries a
+    version at all does the most common value (an error string) stand in."""
+    counts = Counter(seen.values())
+    real = [value for value in counts if SEMVER.fullmatch(value)]
+    if real:
+        return max(real, key=counts.__getitem__)
+    return counts.most_common(1)[0][0]
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--root", default=".", help="repository root (default: the current directory)")
@@ -159,10 +173,11 @@ def main(argv: list[str] | None = None) -> int:
         print(f"  {value:<14} {label}", file=sys.stderr)
     versions = sorted(set(seen.values()))
     if len(versions) != 1:
-        odd = [label for label, value in seen.items() if value != max(versions, key=list(seen.values()).count)]
+        reference = reference_version(seen)
+        odd = [label for label, value in seen.items() if value != reference]
         print(
             f"::error::Package versions disagree ({', '.join(versions)}); bump them in lockstep (see RELEASING.md). "
-            f"Odd ones out: {', '.join(odd)}",
+            f"Reference: {reference}. Odd ones out: {', '.join(odd)}",
             file=sys.stderr,
         )
         return 1

@@ -152,6 +152,14 @@ class VersionLocationsTest(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("<missing>      pixi.toml [workspace].version", err)
 
+    def test_error_values_never_become_the_reference(self) -> None:
+        # Three broken locations and two correct ones: the reference is still
+        # the real version, so the message names the broken locations.
+        seen = {"a": "<missing>", "b": "<missing>", "c": "<missing>", "d": "1.2.3", "e": "1.2.3"}
+        self.assertEqual(version_locations.reference_version(seen), "1.2.3")
+        only_errors = {"a": "<missing>", "b": "<2 versions on the line>", "c": "<missing>"}
+        self.assertEqual(version_locations.reference_version(only_errors), "<missing>")
+
     def test_this_repository_is_in_lockstep(self) -> None:
         code, out, err = run(REPO_ROOT)
         self.assertEqual(code, 0, err)

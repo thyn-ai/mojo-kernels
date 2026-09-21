@@ -43,7 +43,22 @@ if n == 0:
     sys.exit("no install block carries the x-release-please-version marker")
 PY
 
-version="$(grep -h 'x-release-please-version' "$work"/block-*.sh | head -n 1 | sed -E 's/^V=([0-9][^ ]*).*/\1/')"
+# Every block pins the Release on its own `V=X.Y.Z  # x-release-please-version`
+# line. A block without a well-formed line, or two blocks that disagree, is an
+# error with a message, never an empty or garbage version.
+version=""
+for block in "$work"/block-*.sh; do
+  v="$(awk '/x-release-please-version/ { if (match($0, /^V=[0-9]+\.[0-9]+\.[0-9]+[^ ]*/)) { print substr($0, 3, RLENGTH - 2); exit } }' "$block")"
+  if [ -z "$v" ]; then
+    echo "::error::$(basename "$block") has no 'V=X.Y.Z  # x-release-please-version' line; every install block must pin the Release version that way." >&2
+    exit 1
+  fi
+  if [ -n "$version" ] && [ "$v" != "$version" ]; then
+    echo "::error::the install blocks pin different versions ($version and $v in $(basename "$block")); they must agree." >&2
+    exit 1
+  fi
+  version="$v"
+done
 url="https://github.com/thyn-ai/mojo-kernels/releases/download/v${version}"
 echo "README version: $version"
 if ! curl -fsSLI -o /dev/null "$url/SHA256SUMS"; then
@@ -82,7 +97,10 @@ for shell in "${shells[@]}"; do
   for block in "$work"/block-*.sh; do
     echo "== $shell $(basename "$block") =="
     sed 's/^/    /' "$block"
-    "$shell" -e "$block"
+    # The blocks run as a reader would paste them, but with unset variables and
+    # failing pipelines fatal too, so a block that loses its `${VAR:?}` guard
+    # cannot expand to an empty string and install a malformed URL unnoticed.
+    "$shell" -e -u -o pipefail "$block"
   done
 done
 
