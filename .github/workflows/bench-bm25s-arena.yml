@@ -131,7 +131,7 @@ jobs:
           # kernel. Retry only on exit 139; any other failure is real.
           for i in 1 2 3 4 5 6 7 8; do
             set +e
-            /tmp/bench/bin/python benchmarks/bench_bm25s_arena.py | tee before.log
+            taskset -c 0 /tmp/bench/bin/python benchmarks/bench_bm25s_arena.py | tee before.log
             rc=${PIPESTATUS[0]}
             set -e
             [ "$rc" = 0 ] && break
@@ -148,7 +148,7 @@ jobs:
           /tmp/bench/bin/pip install --quiet --force-reinstall --no-deps python/bm25_mojo/dist/*.whl
           for i in 1 2 3 4 5 6 7 8; do
             set +e
-            /tmp/bench/bin/python benchmarks/bench_bm25s_arena.py | tee after.log
+            taskset -c 0 /tmp/bench/bin/python benchmarks/bench_bm25s_arena.py | tee after.log
             rc=${PIPESTATUS[0]}
             set -e
             [ "$rc" = 0 ] && break
@@ -167,7 +167,7 @@ jobs:
             local i rc
             for i in 1 2 3 4 5 6 7 8; do
               set +e
-              /tmp/bench/bin/python benchmarks/bench_bm25s_arena.py --layers --cell "$1" | tee "$2"
+              taskset -c 0 /tmp/bench/bin/python benchmarks/bench_bm25s_arena.py --layers --cell "$1" | tee "$2"
               rc=${PIPESTATUS[0]}
               set -e
               [ "$rc" = 0 ] && return 0
@@ -261,9 +261,9 @@ jobs:
             return 1
           }
           echo "--- BEFORE ---"
-          run_img "/opt/venv-before/bin/python /bench/bench_bm25s_arena.py" docker-before.log
+          run_img "taskset -c 0 /opt/venv-before/bin/python /bench/bench_bm25s_arena.py" docker-before.log
           echo "--- AFTER ---"
-          run_img "/opt/venv-after/bin/python /bench/bench_bm25s_arena.py" docker-after.log
+          run_img "taskset -c 0 /opt/venv-after/bin/python /bench/bench_bm25s_arena.py" docker-after.log
 
       - name: Layers inside --cpus=2
         if: ${{ github.event_name != 'workflow_dispatch' || inputs.layers }}
@@ -284,9 +284,9 @@ jobs:
             done
             return 1
           }
-          run_img "/opt/venv-after/bin/python /bench/bench_bm25s_arena.py --layers --cell M" docker-layers-after-M.log
-          run_img "/opt/venv-after/bin/python /bench/bench_bm25s_arena.py --layers --cell L" docker-layers-after-L.log
-          run_img "/opt/venv-before/bin/python /bench/bench_bm25s_arena.py --layers --cell M" docker-layers-before-M.log
+          run_img "taskset -c 0 /opt/venv-after/bin/python /bench/bench_bm25s_arena.py --layers --cell M" docker-layers-after-M.log
+          run_img "taskset -c 0 /opt/venv-after/bin/python /bench/bench_bm25s_arena.py --layers --cell L" docker-layers-after-L.log
+          run_img "taskset -c 0 /opt/venv-before/bin/python /bench/bench_bm25s_arena.py --layers --cell M" docker-layers-before-M.log
 
       - if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -378,12 +378,12 @@ jobs:
             return 1
           }
           echo "--- BEFORE (0.1.4.dev0) under contention ---"
-          run_hog "/opt/venv-before/bin/python /bench/bench_bm25s_arena.py --arena-only" contended-before.log
+          run_hog "taskset -c 0 /opt/venv-before/bin/python /bench/bench_bm25s_arena.py --arena-only" contended-before.log
           echo "--- AFTER (branch) under contention ---"
-          run_hog "/opt/venv-after/bin/python /bench/bench_bm25s_arena.py --arena-only" contended-after.log
+          run_hog "taskset -c 0 /opt/venv-after/bin/python /bench/bench_bm25s_arena.py --arena-only" contended-after.log
           echo "--- layers M under contention (after, then before) ---"
-          run_hog "/opt/venv-after/bin/python /bench/bench_bm25s_arena.py --layers --cell M" contended-layers-after-M.log
-          run_hog "/opt/venv-before/bin/python /bench/bench_bm25s_arena.py --layers --cell M" contended-layers-before-M.log
+          run_hog "taskset -c 0 /opt/venv-after/bin/python /bench/bench_bm25s_arena.py --layers --cell M" contended-layers-after-M.log
+          run_hog "taskset -c 0 /opt/venv-before/bin/python /bench/bench_bm25s_arena.py --layers --cell M" contended-layers-before-M.log
 
       - if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
