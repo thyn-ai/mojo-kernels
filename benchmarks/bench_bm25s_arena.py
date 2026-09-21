@@ -204,6 +204,9 @@ def make_indexes(corpus):
     bs = bm25s.BM25(dtype="float32")  # method='lucene' — the bm25s default
     bs.index(corpus, show_progress=False)
     bs.compile()  # numba scorer — the config bm25s recommends for speed
+    # Swap in the shared cache-loaded dispatcher (see _shared_numba_scorer):
+    # identical compiled code, no per-process LLVM invocation.
+    bs._compute_relevance_from_scores = _shared_numba_scorer()
     t_bs = time.perf_counter() - t0
 
     t0 = time.perf_counter()
@@ -719,17 +722,84 @@ def layers_context(n_docs: int, q_len: int = BM25_Q_LEN, reps: int = 15):
 # main
 # ---------------------------------------------------------------------------
 
+_NUMBA_SCORER = None
+
+
+def _shared_numba_scorer():
+    """One njit(cache=True) dispatcher for bm25s' scorer, shared by every
+    bm25s instance in this process.
+
+    Why: bm25s' compile() makes a fresh njit dispatcher per instance, so
+    every process compiles the scorer with LLVM once per bm25s instance —
+    and llvmlite's JIT segfaults intermittently at init on the newest Intel
+    runner models (Emerald 8573C / Granite 6973P-C; a race that vanishes
+    under serialization). A `cache=True` dispatcher loads the SAME compiled
+    code from numba's on-disk cache without invoking LLVM at all, once a
+    crash-quarantined subprocess (see prewarm_numba) has written the cache
+    for this exact CPU. Warm timings are bit-identical either way; only the
+    bm25s cold column changes (cache-load instead of per-instance JIT), and
+    it is flagged in the output.
+    """
+    global _NUMBA_SCORER
+    if _NUMBA_SCORER is None:
+        from numba import njit
+        from bm25s.scoring import _compute_relevance_from_scores_jit_ready
+
+        _NUMBA_SCORER = njit(cache=True)(_compute_relevance_from_scores_jit_ready)
+    return _NUMBA_SCORER
+
+
+def _numba_child_compile_script() -> str:
+    """Child-process source: compile the scorer with cache=True, using the
+    EXACT array dtypes a real bm25s index passes (the cache key is the full
+    signature; bm25s' own warmup uses different indptr dtypes than a real
+    index, so a real tiny index is built here)."""
+    return (
+        "import numpy as np, bm25s\n"
+        "from numba import njit\n"
+        "from bm25s.scoring import _compute_relevance_from_scores_jit_ready as fn\n"
+        "bm = bm25s.BM25(dtype='float32')\n"
+        "bm.index([['a', 'b'], ['a'], ['b', 'c']], show_progress=False)\n"
+        "sc = bm.scores\n"
+        "d = njit(cache=True)(fn)\n"
+        "d(data=sc['data'], indptr=sc['indptr'], indices=sc['indices'],\n"
+        "  num_docs=sc['num_docs'], query_tokens_ids=np.asarray([0], dtype=sc['indices'].dtype),\n"
+        "  dtype=np.dtype('float32'))\n"
+        "print('child compile OK')\n"
+    )
+
 
 def prewarm_numba():
-    """The Space pre-warms the numba scorer once at boot; mirror that."""
+    """The Space pre-warms the numba scorer once at boot; mirror that — but
+    crash-quarantined: a subprocess compiles the scorer (retried: the
+    llvmlite JIT-init segfault is a race), this process then only loads the
+    on-disk cache. Falls back to in-process compilation if the child never
+    succeeds (the workflow's retries cover a total failure)."""
+    import subprocess
+    import sys
+
     import bm25s
 
-    tiny = bm25_corpus(BASE_SEED, 64)
+    tries = int(os.environ.get("BM25_XRAY_NUMBA_WARM_TRIES", "60"))
+    for attempt in range(tries):
+        rc = subprocess.call(
+            [sys.executable, "-c", _numba_child_compile_script()],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        if rc == 0:
+            break
+    else:
+        print(f"- WARNING: numba child compile failed {tries}x; falling back to in-process JIT")
+
     t0 = time.perf_counter()
+    tiny = bm25_corpus(BASE_SEED, 64)
     bm = bm25s.BM25(dtype="float32")
     bm.index(tiny, show_progress=False)
     bm.compile()
-    bm.warmup_numba_scorer()
+    # First in-process scorer call: a cache load (no LLVM) when the child
+    # succeeded, an in-process compile otherwise.
+    bm._compute_relevance_from_scores = _shared_numba_scorer()
     bm.get_scores(["w00000"])
     return time.perf_counter() - t0
 
@@ -747,7 +817,9 @@ def main() -> None:
     print("== environment ==")
     print(env_report())
     jit_s = prewarm_numba()
-    print(f"- one-time numba JIT pre-warm (Space-boot equivalent): {jit_s:.2f}s")
+    print(f"- one-time numba pre-warm (Space-boot equivalent, crash-quarantined): {jit_s:.2f}s")
+    print("- numba scorer: shared cache-loaded dispatcher (llvmlite JIT-init race workaround);")
+    print("  the bm25s COLD column is cache-assisted — the live Space pays full per-instance JIT.")
     print(f"- warm reps per cell: {WARM_REPS} (interleaved A/B/C) · queries/cell: {BM25_N_QUERIES}")
 
     if args.layers:
