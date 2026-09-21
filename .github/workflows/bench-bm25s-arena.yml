@@ -52,7 +52,9 @@ env:
   # AFTER see byte-identical queries and the logs reproducible.
   PYTHONHASHSEED: "0"
   OLD_WHEEL_URL: https://github.com/thyn-ai/mojo-kernels/releases/download/arena-wheels-v0.1.1-dev/bm25_mojo-0.1.4.dev0-py3-none-manylinux_2_35_x86_64.whl
-  BENCH_DEPS: "bm25s==0.3.11 numba==0.67.0 rank_bm25==0.2.2 numpy>=1.26,<3"
+  # The live Space resolves numpy 1.26.4 (card footer); pin it for Space
+  # parity — numpy small-call overhead differs materially vs 2.x.
+  BENCH_DEPS: "bm25s==0.3.11 numba==0.67.0 rank_bm25==0.2.2 numpy==1.26.4"
 
 jobs:
   x86_64-native:
@@ -231,8 +233,8 @@ jobs:
           COPY wheels/after /wheels/after/
           COPY benchmarks/bench_bm25s_arena.py /bench/
           RUN python -m venv /opt/venv-before && python -m venv /opt/venv-after \
-           && /opt/venv-before/bin/pip install --quiet --no-cache-dir bm25s==0.3.11 numba==0.67.0 rank_bm25==0.2.2 "numpy>=1.26,<3" /wheels/before/*.whl \
-           && /opt/venv-after/bin/pip  install --quiet --no-cache-dir bm25s==0.3.11 numba==0.67.0 rank_bm25==0.2.2 "numpy>=1.26,<3" /wheels/after/*.whl
+           && /opt/venv-before/bin/pip install --quiet --no-cache-dir bm25s==0.3.11 numba==0.67.0 rank_bm25==0.2.2 "numpy==1.26.4" /wheels/before/*.whl \
+           && /opt/venv-after/bin/pip  install --quiet --no-cache-dir bm25s==0.3.11 numba==0.67.0 rank_bm25==0.2.2 "numpy==1.26.4" /wheels/after/*.whl
           ENTRYPOINT ["/bin/bash", "-c"]
           CMD ["true"]
           EOF
@@ -343,8 +345,8 @@ jobs:
           COPY wheels/after /wheels/after/
           COPY benchmarks/bench_bm25s_arena.py /bench/
           RUN python -m venv /opt/venv-before && python -m venv /opt/venv-after \
-           && /opt/venv-before/bin/pip install --quiet --no-cache-dir bm25s==0.3.11 numba==0.67.0 rank_bm25==0.2.2 "numpy>=1.26,<3" /wheels/before/*.whl \
-           && /opt/venv-after/bin/pip  install --quiet --no-cache-dir bm25s==0.3.11 numba==0.67.0 rank_bm25==0.2.2 "numpy>=1.26,<3" /wheels/after/*.whl
+           && /opt/venv-before/bin/pip install --quiet --no-cache-dir bm25s==0.3.11 numba==0.67.0 rank_bm25==0.2.2 "numpy==1.26.4" /wheels/before/*.whl \
+           && /opt/venv-after/bin/pip  install --quiet --no-cache-dir bm25s==0.3.11 numba==0.67.0 rank_bm25==0.2.2 "numpy==1.26.4" /wheels/after/*.whl
           ENTRYPOINT ["/bin/bash", "-c"]
           CMD ["true"]
           EOF

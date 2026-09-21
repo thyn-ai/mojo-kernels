@@ -37,7 +37,7 @@ import numpy as np
 
 # Must equal ABI_VERSION in kernels/bm25/src/bm25mojo.mojo. A mismatch means
 # the installed wheel and the resolved shared library disagree; fall back.
-ABI_VERSION = 2
+ABI_VERSION = 3
 
 # Score-formula variants, mirrored from the kernel.
 VARIANT_OKAPI = 0
@@ -47,9 +47,17 @@ VARIANT_PLUS = 2
 _ENV_LIB = "BM25_MOJO_NATIVE_LIB"
 _ENV_DISABLE = "BM25_MOJO_DISABLE_NATIVE"
 
+# Widest fixed-width token slot the kernel accepts (MAX_TOKEN_WIDTH there).
+MAX_TOKEN_WIDTH = 4096
+
 
 class NativeUnavailable(RuntimeError):  # noqa: N818
     """The native bm25mojo kernel could not be found, loaded, or verified."""
+
+
+class UnsafeTokenError(ValueError):
+    """A token the native string path cannot take (non-`str`, embedded NUL,
+    or over-wide slot); the caller falls back to id-mapping for that batch."""
 
 
 def _lib_basename() -> str:
@@ -106,10 +114,21 @@ def _bind_abi(lib: ctypes.CDLL) -> None:
         vp,  # idf[n_terms]
     ]
     lib.bm25mojo_index_create.restype = ctypes.c_void_p
+    lib.bm25mojo_vocab_attach.argtypes = [vp, vp, ctypes.c_int64, ctypes.c_int64]
+    lib.bm25mojo_vocab_attach.restype = ctypes.c_int32
     lib.bm25mojo_score.argtypes = [vp, vp, ctypes.c_int64, vp]
     lib.bm25mojo_score.restype = ctypes.c_int32
     lib.bm25mojo_score_batch.argtypes = [vp, vp, vp, ctypes.c_int64, vp]
     lib.bm25mojo_score_batch.restype = ctypes.c_int32
+    lib.bm25mojo_score_batch_str.argtypes = [
+        vp,
+        vp,
+        ctypes.c_int64,
+        vp,
+        ctypes.c_int64,
+        vp,
+    ]
+    lib.bm25mojo_score_batch_str.restype = ctypes.c_int32
     lib.bm25mojo_index_destroy.argtypes = [vp]
     lib.bm25mojo_index_destroy.restype = None
 
@@ -206,6 +225,7 @@ class NativeIndex:
         doc_tids: np.ndarray,
         doc_freqs: np.ndarray,
         idf: np.ndarray,
+        vocab_terms: np.ndarray | None = None,
     ) -> None:
         lib = _load()  # raises NativeUnavailable
         doc_len = np.ascontiguousarray(doc_len, dtype=np.float64)
@@ -241,10 +261,34 @@ class NativeIndex:
         # Hot-path caches: avoid per-call ctypes constructor overhead.
         self._score_fn = lib.bm25mojo_score
         self._batch_fn = lib.bm25mojo_score_batch
+        self._batch_str_fn = lib.bm25mojo_score_batch_str
+        # Attach the vocabulary for the native string-token batch path. On any
+        # refusal (mismatched sizes, embedded-NUL term) the index simply keeps
+        # using the id-mapping path — results are identical, mapping is slower.
+        self._str_ok = False
+        if vocab_terms is not None:
+            vocab_terms = np.ascontiguousarray(vocab_terms)
+            if (
+                vocab_terms.dtype.kind == "S"
+                and vocab_terms.shape[0] == int(n_terms)
+                and 0 < vocab_terms.dtype.itemsize <= MAX_TOKEN_WIDTH
+            ):
+                rc = lib.bm25mojo_vocab_attach(
+                    handle,
+                    vocab_terms.ctypes.data,
+                    vocab_terms.dtype.itemsize,
+                    int(n_terms),
+                )
+                self._str_ok = rc == 0
 
     @property
     def n_docs(self) -> int:
         return self._n_docs
+
+    @property
+    def str_ok(self) -> bool:
+        """Whether the native string-token batch path is armed for this index."""
+        return self._str_ok
 
     def score(self, query_term_ids: np.ndarray) -> np.ndarray:
         """Score one token-id query against every document. Returns float64[n_docs].
@@ -296,6 +340,45 @@ class NativeIndex:
         )
         if rc != 0:
             raise NativeUnavailable(f"native batch scoring failed with status {rc}")
+        return panel
+
+    def score_batch_str(
+        self, tokens: np.ndarray, counts: np.ndarray, n_queries: int
+    ) -> np.ndarray:
+        """Score a batch of string-token queries in one FFI call.
+
+        `tokens` is the concatenated batch as a fixed-width ``'S'`` array
+        (NUL-padded slots); `counts[q]` is query q's token count. Mapping,
+        offset accumulation and scoring all run natively; each row of the
+        returned float64 (n_queries, n_docs) panel is bit-identical to
+        `score_batch_flat` over the mapped ids. Raises UnsafeTokenError when a
+        slot cannot be a NUL-padded string (embedded NUL) or is over-wide —
+        the caller then falls back to id-mapping for that batch.
+        """
+        if self._handle is None:
+            raise NativeUnavailable("native index is closed")
+        if n_queries == 0:
+            return np.zeros((0, self._n_docs), dtype=np.float64)
+        if not self._str_ok:
+            raise NativeUnavailable("native string path is not armed (no vocab map)")
+        tokens = np.ascontiguousarray(tokens)
+        counts = np.ascontiguousarray(counts, dtype=np.int32)
+        width = tokens.dtype.itemsize
+        if tokens.dtype.kind != "S" or width <= 0 or width > MAX_TOKEN_WIDTH:
+            raise UnsafeTokenError(f"unsupported token slot width {width!r}")
+        panel = np.zeros((n_queries, self._n_docs), dtype=np.float64)
+        rc = self._batch_str_fn(
+            self._handle,
+            tokens.ctypes.data,
+            width,
+            counts.ctypes.data,
+            n_queries,
+            panel.ctypes.data,
+        )
+        if rc == 3:
+            raise UnsafeTokenError("query token with an embedded NUL byte")
+        if rc != 0:
+            raise NativeUnavailable(f"native string batch scoring failed with status {rc}")
         return panel
 
     def score_batch(self, query_term_ids_list: list[np.ndarray]) -> np.ndarray:
