@@ -5,8 +5,8 @@
 # interleaved) on GitHub-hosted x86_64 runners, for two bm25-mojo builds in
 # the SAME job on the SAME machine:
 #
-#   * BEFORE: the published arena wheel (bm25_mojo 0.1.2, GitHub Release
-#     arena-wheels-v0.1.0) — the exact build the Space runs today;
+#   * BEFORE: the published arena wheel (bm25_mojo 0.1.4.dev0, GitHub Release
+#     arena-wheels-v0.1.1-dev) — the exact build the Space runs today;
 #   * AFTER:  the wheel built from this branch's kernel source.
 #
 # Job 1 runs natively on the runner; job 2 runs inside a Space-matched
@@ -51,13 +51,15 @@ env:
   # equivalent) query set every boot. Pinning the seed here makes BEFORE and
   # AFTER see byte-identical queries and the logs reproducible.
   PYTHONHASHSEED: "0"
-  OLD_WHEEL_URL: https://github.com/thyn-ai/mojo-kernels/releases/download/arena-wheels-v0.1.0/bm25_mojo-0.1.2-py3-none-manylinux_2_35_x86_64.whl
-  BENCH_DEPS: "bm25s==0.3.11 numba==0.67.0 rank_bm25==0.2.2 numpy>=1.26,<3"
+  OLD_WHEEL_URL: https://github.com/thyn-ai/mojo-kernels/releases/download/arena-wheels-v0.1.1-dev/bm25_mojo-0.1.4.dev0-py3-none-manylinux_2_35_x86_64.whl
+  # The live Space resolves numpy 1.26.4 (card footer); pin it for Space
+  # parity — numpy small-call overhead differs materially vs 2.x.
+  BENCH_DEPS: "bm25s==0.3.11 numba==0.67.0 rank_bm25==0.2.2 numpy==1.26.4"
 
 jobs:
   x86_64-native:
     name: arena duel on runner x86_64 (old vs new wheel)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -93,7 +95,8 @@ jobs:
       - name: Smoke the branch wheel alone (no bm25s/numba)
         run: |
           set -euo pipefail
-          python3 -m venv /tmp/smoke
+          # The pixi env's python is 3.12 regardless of the runner's default.
+          pixi run python -m venv /tmp/smoke
           /tmp/smoke/bin/pip install --quiet --no-cache-dir "numpy>=1.26,<3" python/bm25_mojo/dist/*.whl
           /tmp/smoke/bin/python - <<'PY'
           import faulthandler, random
@@ -114,7 +117,8 @@ jobs:
       - name: Set up the bench venv (arena pins)
         run: |
           set -euo pipefail
-          python3 -m venv /tmp/bench
+          # The pixi env's python is 3.12 regardless of the runner's default.
+          pixi run python -m venv /tmp/bench
           /tmp/bench/bin/pip install --quiet $BENCH_DEPS
           /tmp/bench/bin/pip list | grep -Ei 'bm25|numba|llvmlite|numpy' || true
 
@@ -127,15 +131,15 @@ jobs:
           # The numba JIT segfaults intermittently on some runner CPUs (observed
           # in bm25s' warmup_numba_scorer on Emerald Rapids); it is not our
           # kernel. Retry only on exit 139; any other failure is real.
-          for i in 1 2 3 4 5; do
+          for i in 1 2 3 4 5 6 7 8; do
             set +e
-            /tmp/bench/bin/python benchmarks/bench_bm25s_arena.py | tee before.log
+            taskset -c 0 /tmp/bench/bin/python benchmarks/bench_bm25s_arena.py --arena-only | tee before.log
             rc=${PIPESTATUS[0]}
             set -e
             [ "$rc" = 0 ] && break
             [ "$rc" != 139 ] && exit "$rc"
             echo "::warning::bench attempt $i: numba JIT segfault (139); retrying"
-            [ "$i" = 5 ] && exit 1
+            [ "$i" = 8 ] && exit 1
           done
 
       - name: AFTER — wheel built from this branch
@@ -144,15 +148,15 @@ jobs:
         run: |
           set -euo pipefail
           /tmp/bench/bin/pip install --quiet --force-reinstall --no-deps python/bm25_mojo/dist/*.whl
-          for i in 1 2 3 4 5; do
+          for i in 1 2 3 4 5 6 7 8; do
             set +e
-            /tmp/bench/bin/python benchmarks/bench_bm25s_arena.py | tee after.log
+            taskset -c 0 /tmp/bench/bin/python benchmarks/bench_bm25s_arena.py --arena-only | tee after.log
             rc=${PIPESTATUS[0]}
             set -e
             [ "$rc" = 0 ] && break
             [ "$rc" != 139 ] && exit "$rc"
             echo "::warning::bench attempt $i: numba JIT segfault (139); retrying"
-            [ "$i" = 5 ] && exit 1
+            [ "$i" = 8 ] && exit 1
           done
 
       - name: Layer-by-layer autopsy (both wheels)
@@ -163,9 +167,9 @@ jobs:
           set -euo pipefail
           run_cell () {
             local i rc
-            for i in 1 2 3 4 5; do
+            for i in 1 2 3 4 5 6 7 8; do
               set +e
-              /tmp/bench/bin/python benchmarks/bench_bm25s_arena.py --layers --cell "$1" | tee "$2"
+              taskset -c 0 /tmp/bench/bin/python benchmarks/bench_bm25s_arena.py --layers --cell "$1" | tee "$2"
               rc=${PIPESTATUS[0]}
               set -e
               [ "$rc" = 0 ] && return 0
@@ -189,7 +193,7 @@ jobs:
 
   x86_64-docker-2cpu:
     name: arena duel in Space-matched container (--cpus=2)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -226,8 +230,8 @@ jobs:
           COPY wheels/after /wheels/after/
           COPY benchmarks/bench_bm25s_arena.py /bench/
           RUN python -m venv /opt/venv-before && python -m venv /opt/venv-after \
-           && /opt/venv-before/bin/pip install --quiet --no-cache-dir bm25s==0.3.11 numba==0.67.0 rank_bm25==0.2.2 "numpy>=1.26,<3" /wheels/before/*.whl \
-           && /opt/venv-after/bin/pip  install --quiet --no-cache-dir bm25s==0.3.11 numba==0.67.0 rank_bm25==0.2.2 "numpy>=1.26,<3" /wheels/after/*.whl
+           && /opt/venv-before/bin/pip install --quiet --no-cache-dir bm25s==0.3.11 numba==0.67.0 rank_bm25==0.2.2 "numpy==1.26.4" /wheels/before/*.whl \
+           && /opt/venv-after/bin/pip  install --quiet --no-cache-dir bm25s==0.3.11 numba==0.67.0 rank_bm25==0.2.2 "numpy==1.26.4" /wheels/after/*.whl
           ENTRYPOINT ["/bin/bash", "-c"]
           CMD ["true"]
           EOF
@@ -242,7 +246,7 @@ jobs:
             # Retries only on 139: the numba JIT segfaults intermittently on
             # some runner CPUs (bm25s warmup), unrelated to the kernel.
             local i rc
-            for i in 1 2 3 4 5; do
+            for i in 1 2 3 4 5 6 7 8; do
               set +e
               docker run --cpus=2 -e BM25_XRAY_REPS bm25-arena-bench "$1" | tee "$2"
               rc=${PIPESTATUS[0]}
@@ -254,9 +258,9 @@ jobs:
             return 1
           }
           echo "--- BEFORE ---"
-          run_img "/opt/venv-before/bin/python /bench/bench_bm25s_arena.py" docker-before.log
+          run_img "taskset -c 0 /opt/venv-before/bin/python /bench/bench_bm25s_arena.py --arena-only" docker-before.log
           echo "--- AFTER ---"
-          run_img "/opt/venv-after/bin/python /bench/bench_bm25s_arena.py" docker-after.log
+          run_img "taskset -c 0 /opt/venv-after/bin/python /bench/bench_bm25s_arena.py --arena-only" docker-after.log
 
       - name: Layers inside --cpus=2
         if: ${{ github.event_name != 'workflow_dispatch' || inputs.layers }}
@@ -266,7 +270,7 @@ jobs:
           set -euo pipefail
           run_img () {
             local i rc
-            for i in 1 2 3 4 5; do
+            for i in 1 2 3 4 5 6 7 8; do
               set +e
               docker run --cpus=2 bm25-arena-bench "$1" | tee "$2"
               rc=${PIPESTATUS[0]}
@@ -277,13 +281,108 @@ jobs:
             done
             return 1
           }
-          run_img "/opt/venv-after/bin/python /bench/bench_bm25s_arena.py --layers --cell M" docker-layers-after-M.log
-          run_img "/opt/venv-after/bin/python /bench/bench_bm25s_arena.py --layers --cell L" docker-layers-after-L.log
-          run_img "/opt/venv-before/bin/python /bench/bench_bm25s_arena.py --layers --cell M" docker-layers-before-M.log
+          run_img "taskset -c 0 /opt/venv-after/bin/python /bench/bench_bm25s_arena.py --layers --cell M" docker-layers-after-M.log
+          run_img "taskset -c 0 /opt/venv-after/bin/python /bench/bench_bm25s_arena.py --layers --cell L" docker-layers-after-L.log
+          run_img "taskset -c 0 /opt/venv-before/bin/python /bench/bench_bm25s_arena.py --layers --cell M" docker-layers-before-M.log
 
       - if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: bench-bm25s-arena-docker-2cpu
           path: "docker-*.log"
+          if-no-files-found: error
+
+  x86_64-contended:
+    name: arena duel under CPU+memory contention (8375C Space proxy)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install pixi
+        uses: prefix-dev/setup-pixi@d3f436a425481402e6a95a1d1fc10331c708cd9e # v0.10.2
+        with:
+          run-install: false
+
+      - name: Build the BM25 Mojo kernel + wheel (this branch)
+        run: |
+          set -euo pipefail
+          pixi run build-kernel-bm25
+          pixi run wheel-bm25
+
+      - name: Upload the branch wheel (shippable artifact)
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: bm25-mojo-wheel-branch-r2
+          path: python/bm25_mojo/dist/*.whl
+          if-no-files-found: error
+
+      - name: Fetch the BEFORE wheel (0.1.4.dev0 — the live Space build)
+        run: |
+          set -euo pipefail
+          mkdir -p wheels/before wheels/after
+          cp python/bm25_mojo/dist/*.whl wheels/after/
+          curl -fsSL -o "wheels/before/$(basename "$OLD_WHEEL_URL")" "$OLD_WHEEL_URL"
+          ls -la wheels/before wheels/after
+
+      - name: Build the contended bench image (with stress-ng)
+        run: |
+          set -euo pipefail
+          cat > Dockerfile.contended <<'EOF'
+          FROM python:3.12-bookworm
+          ENV PYTHONHASHSEED=0 PYTHONFAULTHANDLER=1
+          RUN apt-get update -qq && apt-get install -y -qq --no-install-recommends stress-ng procps \
+           && rm -rf /var/lib/apt/lists/*
+          WORKDIR /bench
+          COPY wheels/before /wheels/before/
+          COPY wheels/after /wheels/after/
+          COPY benchmarks/bench_bm25s_arena.py /bench/
+          RUN python -m venv /opt/venv-before && python -m venv /opt/venv-after \
+           && /opt/venv-before/bin/pip install --quiet --no-cache-dir bm25s==0.3.11 numba==0.67.0 rank_bm25==0.2.2 "numpy==1.26.4" /wheels/before/*.whl \
+           && /opt/venv-after/bin/pip  install --quiet --no-cache-dir bm25s==0.3.11 numba==0.67.0 rank_bm25==0.2.2 "numpy==1.26.4" /wheels/after/*.whl
+          ENTRYPOINT ["/bin/bash", "-c"]
+          CMD ["true"]
+          EOF
+          docker build -f Dockerfile.contended -t bm25-arena-contended .
+
+      # The 8375C Space proxy: a 2-vCPU cgroup shared with a CPU hog (the
+      # gradio event loop + noisy neighbors on cpu-basic) and a memory hog
+      # (allocator churn + DRAM pressure). Knobs via -e STRESS_*.
+      - name: BEFORE vs AFTER under contention (arena cells only)
+        env:
+          BM25_XRAY_REPS: ${{ inputs.reps || '5' }}
+          STRESS_CPU: "1"
+          STRESS_VM: "1"
+          STRESS_VM_BYTES: "768M"
+        run: |
+          set -euo pipefail
+          run_hog () {
+            local i rc
+            for i in 1 2 3 4 5 6 7 8; do
+              set +e
+              docker run --cpus=2 -e BM25_XRAY_REPS -e STRESS_CPU -e STRESS_VM -e STRESS_VM_BYTES                 bm25-arena-contended                 "stress-ng --cpu \$STRESS_CPU --vm \$STRESS_VM --vm-bytes \$STRESS_VM_BYTES --vm-hang 0 >/tmp/hog.log 2>&1 & \
+                 HOG=\$!; sleep 1; $1; rc=\$?; kill \$HOG 2>/dev/null; exit \$rc" | tee "$2"
+              rc=${PIPESTATUS[0]}
+              set -e
+              [ "$rc" = 0 ] && return 0
+              [ "$rc" != 139 ] && return "$rc"
+              echo "::warning::attempt $i: numba JIT segfault (139); retrying"
+            done
+            return 1
+          }
+          echo "--- BEFORE (0.1.4.dev0) under contention ---"
+          run_hog "taskset -c 0 /opt/venv-before/bin/python /bench/bench_bm25s_arena.py --arena-only" contended-before.log
+          echo "--- AFTER (branch) under contention ---"
+          run_hog "taskset -c 0 /opt/venv-after/bin/python /bench/bench_bm25s_arena.py --arena-only" contended-after.log
+          echo "--- layers M under contention (after, then before) ---"
+          run_hog "taskset -c 0 /opt/venv-after/bin/python /bench/bench_bm25s_arena.py --layers --cell M" contended-layers-after-M.log
+          run_hog "taskset -c 0 /opt/venv-before/bin/python /bench/bench_bm25s_arena.py --layers --cell M" contended-layers-before-M.log
+
+      - if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: bench-bm25s-arena-contended
+          path: "contended-*.log"
           if-no-files-found: error

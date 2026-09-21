@@ -26,6 +26,7 @@ from bm25_mojo._native import (
     VARIANT_PLUS,
     NativeIndex,
     NativeUnavailable,
+    UnsafeTokenError,
 )
 
 __all__ = ["BM25", "BM25Okapi", "BM25L", "BM25Plus"]
@@ -115,6 +116,19 @@ class BM25:
             freqs.extend(frequencies.values())
             doc_offsets.append(len(tids))
         idf_values = np.array([self.idf[word] for word in self._vocab], dtype=np.float64)
+        # Vocabulary as fixed-width 'S' slots in id order (dict iteration
+        # order), for the kernel's native token->id map. The native map keys
+        # are byte strings, so it may only be used when every term is a `str`
+        # — numpy 'S' conversion would silently stringify non-str keys and
+        # could conflate distinct dict keys (e.g. int 1 with "1"). Non-ASCII
+        # terms cannot encode to 'S' either. Any refusal simply leaves the
+        # id-mapping path in charge (identical results, slower mapping).
+        vocab_terms = None
+        if all(map(str.__instancecheck__, self._vocab)):
+            try:
+                vocab_terms = np.asarray(list(self._vocab), dtype="S")
+            except (UnicodeEncodeError, TypeError, ValueError):
+                vocab_terms = None
         try:
             self._native_index = NativeIndex(
                 doc_len=np.array(self.doc_len, dtype=np.float64),
@@ -127,6 +141,7 @@ class BM25:
                 doc_tids=np.array(tids, dtype=np.int32),
                 doc_freqs=np.array(freqs, dtype=np.float64),
                 idf=idf_values,
+                vocab_terms=vocab_terms,
             )
             return "native"
         except NativeUnavailable:
@@ -159,10 +174,36 @@ class BM25:
         allocation, and token-mapping overhead across the batch. On the
         fallback backend this simply loops the reference scorer.
         """
-        queries = list(queries)
+        if type(queries) is not list:
+            queries = list(queries)
         if not queries:
             return np.zeros((0, self.corpus_size), dtype=np.float64)
         if self._native_index is not None:
+            ni = self._native_index
+            if ni.str_ok:
+                # Native string-token path: numpy encodes the batch into
+                # fixed-width byte slots in C, then one FFI call maps (in the
+                # kernel's vocab hash), packs and scores. In the arena's
+                # interleave pattern this avoids re-walking a megabyte-scale
+                # Python dict per call (the eviction tax dominates the M
+                # cell); the ~1us conversion premium is the tight-loop cost.
+                # Exactness guards: only `str` tokens may take this path —
+                # 'S' conversion would stringify anything else and could
+                # conflate distinct dict keys — and non-ASCII strings cannot
+                # encode to 'S'; both fall through (identical results).
+                try:
+                    tokens_flat = [t for q in queries for t in q]
+                    if not all(map(str.__instancecheck__, tokens_flat)):
+                        raise UnsafeTokenError("non-str token in batch")
+                    counts = np.array([len(q) for q in queries], dtype=np.int32)
+                    tokens = (
+                        np.asarray(tokens_flat, dtype="S")
+                        if tokens_flat
+                        else np.zeros((0,), dtype="S1")
+                    )
+                    return ni.score_batch_str(tokens, counts, len(queries))
+                except (UnsafeTokenError, UnicodeEncodeError):
+                    pass  # fall through to the id-mapping path for this batch
             # Single pass: token ids and per-query offsets are accumulated
             # into flat Python lists (list.extend over a map/filter runs at C
             # speed), then converted with exactly two numpy calls — instead of
@@ -178,7 +219,7 @@ class BM25:
             for query in queries:
                 extend(v for v in map(vocab_get, query) if v is not None)
                 add_offset(len(flat))
-            return self._native_index.score_batch_flat(
+            return ni.score_batch_flat(
                 np.array(flat, dtype=np.int32),
                 np.array(offsets, dtype=np.int64),
                 len(queries),

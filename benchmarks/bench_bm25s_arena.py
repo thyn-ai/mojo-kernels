@@ -204,6 +204,9 @@ def make_indexes(corpus):
     bs = bm25s.BM25(dtype="float32")  # method='lucene' — the bm25s default
     bs.index(corpus, show_progress=False)
     bs.compile()  # numba scorer — the config bm25s recommends for speed
+    # Swap in the shared cache-loaded dispatcher (see _shared_numba_scorer):
+    # identical compiled code, no per-process LLVM invocation.
+    bs._compute_relevance_from_scores = _shared_numba_scorer()
     t_bs = time.perf_counter() - t0
 
     t0 = time.perf_counter()
@@ -238,18 +241,33 @@ def run_cell(n_docs: int, q_len: int = BM25_Q_LEN, label: str = ""):
         raise SystemExit(f"GATE FAIL at {n_docs} docs/{q_len}t: max|diff| {worst:.3e} > {BM25_ATOL}")
 
     # --- warm: interleaved round-robin, median of WARM_REPS ---
+    # Per-call rusage deltas (page faults + context switches) are the
+    # contention X-ray: they separate page-fault churn (minflt), major
+    # faults (majflt), and CFS-throttle/steal evidence (nivcsw) per lane.
+    import resource
+
+    def rusage():
+        r = resource.getrusage(resource.RUSAGE_SELF)
+        return r.ru_minflt, r.ru_majflt, r.ru_nvcsw, r.ru_nivcsw
+
     samples = {name: [] for name in lanes}
+    deltas = {name: [] for name in lanes}
     for _rep in range(WARM_REPS):
         for name, fn in lanes.items():
+            r0 = rusage()
             t0 = time.perf_counter()
             fn()
-            samples[name].append(time.perf_counter() - t0)
+            dt = time.perf_counter() - t0
+            r1 = rusage()
+            samples[name].append(dt)
+            deltas[name].append(tuple(b - a for a, b in zip(r0, r1)))
 
     warm = {name: statistics.median(s) for name, s in samples.items()}
     warm_min = {name: min(s) for name, s in samples.items()}
     warm_max = {name: max(s) for name, s in samples.items()}
     best_inc = min(warm["rank_bm25"], warm["bm25s"])
     hero = best_inc / warm["bm25_mojo"]
+    med_delta = {name: tuple(statistics.median(v) for v in zip(*deltas[name])) for name in lanes}
     return {
         "n_docs": n_docs,
         "q_len": q_len,
@@ -262,6 +280,7 @@ def run_cell(n_docs: int, q_len: int = BM25_Q_LEN, label: str = ""):
         "warm_max_s": warm_max,
         "hero": hero,
         "incumbent": "bm25s" if warm["bm25s"] <= warm["rank_bm25"] else "rank_bm25",
+        "rusage": med_delta,  # per-lane median (minflt, majflt, nvcsw, nivcsw) per warm call
     }
 
 
@@ -278,6 +297,10 @@ def print_cell(r):
             f"{1e3 * r['warm_min_s'][name]:>9.3f} {1e3 * r['warm_max_s'][name]:>9.3f} "
             f"{1e3 * r['warm_s'][name] / nq:>9.4f}"
         )
+    print(f"{'lane':<12} {'minflt':>8} {'majflt':>8} {'nvcsw':>8} {'nivcsw':>8}   (median per warm call)")
+    for name in ("rank_bm25", "bm25s", "bm25_mojo"):
+        minflt, majflt, nvcsw, nivcsw = r["rusage"][name]
+        print(f"{name:<12} {minflt:>8.0f} {majflt:>8.0f} {nvcsw:>8.0f} {nivcsw:>8.0f}")
     verdict = "WIN" if r["hero"] > 1.0 else "LOSS"
     print(f"hero: {r['hero']:.3f}× vs {r['incumbent']} (warm median of {WARM_REPS}) — {verdict}")
 
@@ -340,6 +363,8 @@ def layers(n_docs: int, q_len: int = BM25_Q_LEN, reps: int = 30):
     # POINTER(c_int) argtypes and passed .ctypes.data_as(...) objects; the
     # 0.1.4+ wrapper declares c_void_p and passes integer .ctypes.data. The
     # staged call must match the INSTALLED wheel's convention.
+    if ours._native_index is None:
+        raise SystemExit("native kernel unavailable — refusing to stage the fallback as 'mojo'")
     ni = ours._native_index
     vocab_get = ours._vocab.get
     lib = ni._lib
@@ -388,10 +413,31 @@ def layers(n_docs: int, q_len: int = BM25_Q_LEN, reps: int = 30):
                         offsets.ctypes.data_as(i64p), len(queries),
                         panel.ctypes.data_as(f64p))
 
+    # The 0.1.4.dev1+ wrapper prefers the native string-token path when the
+    # vocab map is armed (str_ok); the staged call mirrors it, incl. the
+    # guard/fallback shape (arena corpora are all-str ASCII).
+    batch_str_fn = getattr(ni, "_batch_str_fn", None)
+    str_armed = bool(getattr(ni, "_str_ok", False)) and batch_str_fn is not None
+
+    def _str_pack():
+        tokens_flat = [t for q in queries for t in q]
+        if not all(map(str.__instancecheck__, tokens_flat)):
+            raise ValueError("non-str token in staged batch")
+        counts = np.array([len(q) for q in queries], dtype=np.int32)
+        tokens = np.asarray(tokens_flat, dtype="S") if tokens_flat else np.zeros((0,), dtype="S1")
+        return tokens, counts
+
     def mojo_staged():
-        qids_flat, offsets = (_flat_pack() if flat_abi else _old_pack())
-        panel = np.zeros((len(queries), n_docs_ni), dtype=np.float64)  # stage: calloc
-        rc = _batch_call(qids_flat, offsets, panel)  # stage: marshal + kernel walk
+        if str_armed:
+            tokens, counts = _str_pack()
+            panel = np.zeros((len(queries), n_docs_ni), dtype=np.float64)
+            width = tokens.dtype.itemsize
+            rc = batch_str_fn(handle, tokens.ctypes.data, width,
+                              counts.ctypes.data, len(queries), panel.ctypes.data)
+        else:
+            qids_flat, offsets = (_flat_pack() if flat_abi else _old_pack())
+            panel = np.zeros((len(queries), n_docs_ni), dtype=np.float64)  # stage: calloc
+            rc = _batch_call(qids_flat, offsets, panel)  # stage: marshal + kernel walk
         assert rc == 0
         return np.asarray(panel)
 
@@ -432,15 +478,27 @@ def layers(n_docs: int, q_len: int = BM25_Q_LEN, reps: int = 30):
                                      dtype=s_dtype) for q in queries],
          lambda outs: np.stack(outs)),
     ]
+    def _pack_any():
+        if str_armed:
+            return ("str", *_str_pack())
+        return ("ids", *(_flat_pack() if flat_abi else _old_pack()))
+
+    def _ffi_any(pk):
+        if pk[0] == "str":
+            tokens, counts = pk[1], pk[2]
+            return batch_str_fn(handle, tokens.ctypes.data, tokens.dtype.itemsize,
+                                counts.ctypes.data, len(queries), pk[3].ctypes.data)
+        return _batch_call(pk[1], pk[2], pk[3])
+
     mojo_parts = [
-        (("flat map+pack (10q)" if flat_abi else "qmap+arrays+pack (10q)"), lambda: None,
-         lambda _c: (_flat_pack() if flat_abi else _old_pack())),
+        (("str encode+counts (10q)" if str_armed else
+          "flat map+pack (10q)" if flat_abi else "qmap+arrays+pack (10q)"), lambda: None,
+         lambda _c: _pack_any()),
         ("panel np.zeros f64", lambda: None,
          lambda _c: np.zeros((len(queries), n_docs_ni), dtype=np.float64)),
         ("ffi call (walk inside)",
-         lambda: (*(_flat_pack() if flat_abi else _old_pack()),
-                  np.zeros((len(queries), n_docs_ni), dtype=np.float64)),
-         lambda pk: _batch_call(pk[0], pk[1], pk[2])),
+         lambda: (*_pack_any(), np.zeros((len(queries), n_docs_ni), dtype=np.float64)),
+         lambda pk: _ffi_any(pk)),
     ]
 
     # microcosts
@@ -492,20 +550,256 @@ def layers(n_docs: int, q_len: int = BM25_Q_LEN, reps: int = 30):
 
 
 # ---------------------------------------------------------------------------
-# main
+# --layers-context: staged layer timing INSIDE the interleaved arena protocol
 # ---------------------------------------------------------------------------
 
 
+def layers_context(n_docs: int, q_len: int = BM25_Q_LEN, reps: int = 15):
+    """Time each layer of both warm paths with the full interleaved churn.
+
+    Every round runs the complete rank_bm25 lane first (the arena's long
+    pole), then the bm25s lane with per-stage timers, then the bm25_mojo lane
+    with per-stage timers — so every staged call starts from the same evicted
+    state a real arena warm rep starts from. This is the number the tight-loop
+    --layers mode cannot see: which stage actually inflates in arena context.
+    """
+    corpus, _terms, queries = build_workload(n_docs, q_len)
+    ref, bs, ours, *_ = make_indexes(corpus)
+    lanes = lane_fns(ref, bs, ours, queries)
+
+    # staged bm25s parts (same chain as --layers)
+    data = bs.scores["data"]
+    indices = bs.scores["indices"]
+    indptr = bs.scores["indptr"]
+    num_docs = bs.scores["num_docs"]
+    s_dtype = np.dtype(bs.dtype)
+    i_dtype = np.dtype(bs.int_dtype)
+    jit_fn = bs._compute_relevance_from_scores
+
+    # staged bm25_mojo parts (same chain as --layers, v2 flat pack)
+    if ours._native_index is None:
+        raise SystemExit("native kernel unavailable — refusing to stage the fallback as 'mojo'")
+    ni = ours._native_index
+    vocab_get = ours._vocab.get
+    batch_fn = ni._batch_fn
+    handle = ni._handle
+    n_docs_ni = ni._n_docs
+    flat_abi = hasattr(ni, "score_batch_flat")
+    import ctypes as _ct
+
+    i32p, i64p, f64p = (
+        _ct.POINTER(_ct.c_int32),
+        _ct.POINTER(_ct.c_int64),
+        _ct.POINTER(_ct.c_double),
+    )
+
+    def _flat_pack():
+        flat = []
+        offsets = [0]
+        extend = flat.extend
+        add_offset = offsets.append
+        for q in queries:
+            extend(v for v in map(vocab_get, q) if v is not None)
+            add_offset(len(flat))
+        return np.array(flat, dtype=np.int32), np.array(offsets, dtype=np.int64)
+
+    def _old_pack():
+        qids_list = [
+            np.array([v for v in map(vocab_get, q) if v is not None], dtype=np.int32)
+            for q in queries
+        ]
+        counts = np.fromiter((len(q) for q in qids_list), dtype=np.int64, count=len(qids_list))
+        qids_flat = np.concatenate([np.ascontiguousarray(q, dtype=np.int32) for q in qids_list])
+        offsets = np.zeros(len(qids_list) + 1, dtype=np.int64)
+        np.cumsum(counts, out=offsets[1:])
+        return qids_flat, offsets
+
+    def _batch_call(qids_flat, offsets, panel):
+        if flat_abi:
+            return batch_fn(handle, qids_flat.ctypes.data, offsets.ctypes.data,
+                            len(queries), panel.ctypes.data)
+        return batch_fn(handle, qids_flat.ctypes.data_as(i32p),
+                        offsets.ctypes.data_as(i64p), len(queries),
+                        panel.ctypes.data_as(f64p))
+
+    batch_str_fn = getattr(ni, "_batch_str_fn", None)
+    str_armed = bool(getattr(ni, "_str_ok", False)) and batch_str_fn is not None
+
+    def _str_pack():
+        tokens_flat = [t for q in queries for t in q]
+        if not all(map(str.__instancecheck__, tokens_flat)):
+            raise ValueError("non-str token in staged batch")
+        counts = np.array([len(q) for q in queries], dtype=np.int32)
+        tokens = np.asarray(tokens_flat, dtype="S") if tokens_flat else np.zeros((0,), dtype="S1")
+        return tokens, counts
+
+    bs_stage_samples: dict[str, list[float]] = {
+        "vocab map": [], "asarray+max": [], "numba jit": [], "np.stack": [], "WHOLE": [],
+    }
+    mojo_stage_samples: dict[str, list[float]] = {
+        "flat map+pack": [], "panel zeros": [], "ffi+walk": [], "WHOLE": [],
+    }
+
+    def bs_staged_timed():
+        t0 = time.perf_counter()
+        qid_lists = [bs.get_tokens_ids(q) for q in queries]
+        t1 = time.perf_counter()
+        arrs = []
+        for ql in qid_lists:
+            a = np.asarray(ql, dtype=i_dtype)
+            _m = int(a.max(initial=0))
+            if _m >= len(indptr) - 1:
+                raise ValueError("token id out of range")
+            arrs.append(a)
+        t2 = time.perf_counter()
+        outs = [
+            jit_fn(data=data, indptr=indptr, indices=indices, num_docs=num_docs,
+                   query_tokens_ids=a, dtype=s_dtype)
+            for a in arrs
+        ]
+        t3 = time.perf_counter()
+        stacked = np.stack(outs)
+        t4 = time.perf_counter()
+        bs_stage_samples["vocab map"].append(t1 - t0)
+        bs_stage_samples["asarray+max"].append(t2 - t1)
+        bs_stage_samples["numba jit"].append(t3 - t2)
+        bs_stage_samples["np.stack"].append(t4 - t3)
+        bs_stage_samples["WHOLE"].append(t4 - t0)
+        return stacked
+
+    def mojo_staged_timed():
+        t0 = time.perf_counter()
+        if str_armed:
+            tokens, counts = _str_pack()
+        else:
+            qids_flat, offsets = (_flat_pack() if flat_abi else _old_pack())
+        t1 = time.perf_counter()
+        panel = np.zeros((len(queries), n_docs_ni), dtype=np.float64)
+        t2 = time.perf_counter()
+        if str_armed:
+            rc = batch_str_fn(handle, tokens.ctypes.data, tokens.dtype.itemsize,
+                              counts.ctypes.data, len(queries), panel.ctypes.data)
+        else:
+            rc = _batch_call(qids_flat, offsets, panel)
+        t3 = time.perf_counter()
+        assert rc == 0
+        mojo_stage_samples["flat map+pack"].append(t1 - t0)
+        mojo_stage_samples["panel zeros"].append(t2 - t1)
+        mojo_stage_samples["ffi+walk"].append(t3 - t2)
+        mojo_stage_samples["WHOLE"].append(t3 - t0)
+        return panel
+
+    # assert staged == real before timing
+    assert np.array_equal(lanes["bm25s"](), bs_staged_timed())
+    assert np.array_equal(lanes["bm25_mojo"](), mojo_staged_timed())
+    bs_stage_samples = {k: [] for k in bs_stage_samples}
+    mojo_stage_samples = {k: [] for k in mojo_stage_samples}
+
+    rank_samples = []
+    for _rep in range(reps):
+        t0 = time.perf_counter()
+        lanes["rank_bm25"]()
+        rank_samples.append(time.perf_counter() - t0)
+        bs_staged_timed()
+        mojo_staged_timed()
+
+    print(f"\n## LAYERS-CONTEXT @ {n_docs:,} docs · {len(queries)}q × {q_len}t "
+          f"(staged inside interleaved protocol, median of {reps})")
+    print(f"rank_bm25 lane between staged calls: {1e3 * statistics.median(rank_samples):.1f} ms")
+    print("bm25s stages in arena context (per 10-query lane call):")
+    for name, s in bs_stage_samples.items():
+        print(f"  {name:<18} {1e6 * statistics.median(s):>10.2f} us")
+    if str_armed:
+        mojo_stage_samples["str encode+counts"] = mojo_stage_samples.pop("flat map+pack")
+    print("bm25_mojo stages in arena context (per 10-query lane call):")
+    for name, s in mojo_stage_samples.items():
+        print(f"  {name:<18} {1e6 * statistics.median(s):>10.2f} us")
+    ratio = statistics.median(bs_stage_samples["WHOLE"]) / statistics.median(mojo_stage_samples["WHOLE"])
+    print(f"context ratio (whole lanes): {ratio:.3f}×")
+
+
+# ---------------------------------------------------------------------------
+# main
+# ---------------------------------------------------------------------------
+
+_NUMBA_SCORER = None
+
+
+def _shared_numba_scorer():
+    """One njit(cache=True) dispatcher for bm25s' scorer, shared by every
+    bm25s instance in this process.
+
+    Why: bm25s' compile() makes a fresh njit dispatcher per instance, so
+    every process compiles the scorer with LLVM once per bm25s instance —
+    and llvmlite's JIT segfaults intermittently at init on the newest Intel
+    runner models (Emerald 8573C / Granite 6973P-C; a race that vanishes
+    under serialization). A `cache=True` dispatcher loads the SAME compiled
+    code from numba's on-disk cache without invoking LLVM at all, once a
+    crash-quarantined subprocess (see prewarm_numba) has written the cache
+    for this exact CPU. Warm timings are bit-identical either way; only the
+    bm25s cold column changes (cache-load instead of per-instance JIT), and
+    it is flagged in the output.
+    """
+    global _NUMBA_SCORER
+    if _NUMBA_SCORER is None:
+        from numba import njit
+        from bm25s.scoring import _compute_relevance_from_scores_jit_ready
+
+        _NUMBA_SCORER = njit(cache=True)(_compute_relevance_from_scores_jit_ready)
+    return _NUMBA_SCORER
+
+
+def _numba_child_compile_script() -> str:
+    """Child-process source: compile the scorer with cache=True, using the
+    EXACT array dtypes a real bm25s index passes (the cache key is the full
+    signature; bm25s' own warmup uses different indptr dtypes than a real
+    index, so a real tiny index is built here)."""
+    return (
+        "import numpy as np, bm25s\n"
+        "from numba import njit\n"
+        "from bm25s.scoring import _compute_relevance_from_scores_jit_ready as fn\n"
+        "bm = bm25s.BM25(dtype='float32')\n"
+        "bm.index([['a', 'b'], ['a'], ['b', 'c']], show_progress=False)\n"
+        "sc = bm.scores\n"
+        "d = njit(cache=True)(fn)\n"
+        "d(data=sc['data'], indptr=sc['indptr'], indices=sc['indices'],\n"
+        "  num_docs=sc['num_docs'], query_tokens_ids=np.asarray([0], dtype=sc['indices'].dtype),\n"
+        "  dtype=np.dtype('float32'))\n"
+        "print('child compile OK')\n"
+    )
+
+
 def prewarm_numba():
-    """The Space pre-warms the numba scorer once at boot; mirror that."""
+    """The Space pre-warms the numba scorer once at boot; mirror that — but
+    crash-quarantined: a subprocess compiles the scorer (retried: the
+    llvmlite JIT-init segfault is a race), this process then only loads the
+    on-disk cache. Falls back to in-process compilation if the child never
+    succeeds (the workflow's retries cover a total failure)."""
+    import subprocess
+    import sys
+
     import bm25s
 
-    tiny = bm25_corpus(BASE_SEED, 64)
+    tries = int(os.environ.get("BM25_XRAY_NUMBA_WARM_TRIES", "60"))
+    for attempt in range(tries):
+        rc = subprocess.call(
+            [sys.executable, "-c", _numba_child_compile_script()],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        if rc == 0:
+            break
+    else:
+        print(f"- WARNING: numba child compile failed {tries}x; falling back to in-process JIT")
+
     t0 = time.perf_counter()
+    tiny = bm25_corpus(BASE_SEED, 64)
     bm = bm25s.BM25(dtype="float32")
     bm.index(tiny, show_progress=False)
     bm.compile()
-    bm.warmup_numba_scorer()
+    # First in-process scorer call: a cache load (no LLVM) when the child
+    # succeeded, an in-process compile otherwise.
+    bm._compute_relevance_from_scores = _shared_numba_scorer()
     bm.get_scores(["w00000"])
     return time.perf_counter() - t0
 
@@ -513,19 +807,29 @@ def prewarm_numba():
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--layers", action="store_true", help="staged layer autopsy")
+    ap.add_argument("--layers-context", action="store_true",
+                    help="staged layer autopsy INSIDE the interleaved protocol")
     ap.add_argument("--cell", choices=["S", "M", "L"], help="one arena size only")
+    ap.add_argument("--arena-only", action="store_true", help="run only the arena S/M/L cells")
     ap.add_argument("--sweep-only", action="store_true", help="skip arena S/M/L cells, run only the sweep")
     args = ap.parse_args()
 
     print("== environment ==")
     print(env_report())
     jit_s = prewarm_numba()
-    print(f"- one-time numba JIT pre-warm (Space-boot equivalent): {jit_s:.2f}s")
+    print(f"- one-time numba pre-warm (Space-boot equivalent, crash-quarantined): {jit_s:.2f}s")
+    print("- numba scorer: shared cache-loaded dispatcher (llvmlite JIT-init race workaround);")
+    print("  the bm25s COLD column is cache-assisted — the live Space pays full per-instance JIT.")
     print(f"- warm reps per cell: {WARM_REPS} (interleaved A/B/C) · queries/cell: {BM25_N_QUERIES}")
 
     if args.layers:
         for n_docs in (ARENA_SIZES[args.cell],) if args.cell else (1_000, 5_000, 20_000):
             layers(n_docs)
+        return
+
+    if args.layers_context:
+        for n_docs in (ARENA_SIZES[args.cell],) if args.cell else (1_000, 5_000, 20_000):
+            layers_context(n_docs)
         return
 
     results = []
@@ -539,11 +843,12 @@ def main() -> None:
 
     print("\n== sweep (same protocol; seed = SEED + n_docs + q_len) ==")
     sweep = []
-    for n_docs in SWEEP_DOCS:
-        for q_len in SWEEP_QLENS:
-            r = run_cell(n_docs, q_len, label=f"{n_docs:,} docs · 10q × {q_len}t")
-            sweep.append(r)
-            print_cell(r)
+    if not args.arena_only:
+        for n_docs in SWEEP_DOCS:
+            for q_len in SWEEP_QLENS:
+                r = run_cell(n_docs, q_len, label=f"{n_docs:,} docs · 10q × {q_len}t")
+                sweep.append(r)
+                print_cell(r)
 
     for r in results:
         print_cell(r)
