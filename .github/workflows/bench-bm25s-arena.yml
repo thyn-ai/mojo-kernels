@@ -95,7 +95,8 @@ jobs:
       - name: Smoke the branch wheel alone (no bm25s/numba)
         run: |
           set -euo pipefail
-          python3 -m venv /tmp/smoke
+          PY312="$(command -v python3.12 || command -v python3)"
+          "$PY312" -m venv /tmp/smoke
           /tmp/smoke/bin/pip install --quiet --no-cache-dir "numpy>=1.26,<3" python/bm25_mojo/dist/*.whl
           /tmp/smoke/bin/python - <<'PY'
           import faulthandler, random
@@ -116,7 +117,8 @@ jobs:
       - name: Set up the bench venv (arena pins)
         run: |
           set -euo pipefail
-          python3 -m venv /tmp/bench
+          PY312="$(command -v python3.12 || command -v python3)"
+          "$PY312" -m venv /tmp/bench
           /tmp/bench/bin/pip install --quiet $BENCH_DEPS
           /tmp/bench/bin/pip list | grep -Ei 'bm25|numba|llvmlite|numpy' || true
 
@@ -131,7 +133,7 @@ jobs:
           # kernel. Retry only on exit 139; any other failure is real.
           for i in 1 2 3 4 5 6 7 8; do
             set +e
-            taskset -c 0 /tmp/bench/bin/python benchmarks/bench_bm25s_arena.py | tee before.log
+            taskset -c 0 /tmp/bench/bin/python benchmarks/bench_bm25s_arena.py --arena-only | tee before.log
             rc=${PIPESTATUS[0]}
             set -e
             [ "$rc" = 0 ] && break
@@ -148,7 +150,7 @@ jobs:
           /tmp/bench/bin/pip install --quiet --force-reinstall --no-deps python/bm25_mojo/dist/*.whl
           for i in 1 2 3 4 5 6 7 8; do
             set +e
-            taskset -c 0 /tmp/bench/bin/python benchmarks/bench_bm25s_arena.py | tee after.log
+            taskset -c 0 /tmp/bench/bin/python benchmarks/bench_bm25s_arena.py --arena-only | tee after.log
             rc=${PIPESTATUS[0]}
             set -e
             [ "$rc" = 0 ] && break
@@ -261,9 +263,9 @@ jobs:
             return 1
           }
           echo "--- BEFORE ---"
-          run_img "taskset -c 0 /opt/venv-before/bin/python /bench/bench_bm25s_arena.py" docker-before.log
+          run_img "taskset -c 0 /opt/venv-before/bin/python /bench/bench_bm25s_arena.py --arena-only" docker-before.log
           echo "--- AFTER ---"
-          run_img "taskset -c 0 /opt/venv-after/bin/python /bench/bench_bm25s_arena.py" docker-after.log
+          run_img "taskset -c 0 /opt/venv-after/bin/python /bench/bench_bm25s_arena.py --arena-only" docker-after.log
 
       - name: Layers inside --cpus=2
         if: ${{ github.event_name != 'workflow_dispatch' || inputs.layers }}
