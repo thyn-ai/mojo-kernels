@@ -163,13 +163,26 @@ class BM25:
         if not queries:
             return np.zeros((0, self.corpus_size), dtype=np.float64)
         if self._native_index is not None:
+            # Single pass: token ids and per-query offsets are accumulated
+            # into flat Python lists (list.extend over a map/filter runs at C
+            # speed), then converted with exactly two numpy calls — instead of
+            # building one small numpy array per query plus a concatenate and
+            # a cumsum, whose fixed dispatch costs dominate small batches.
+            # Unseen terms map to None and are skipped: they contribute
+            # exactly 0, the same result the reference computes by adding 0.
             vocab_get = self._vocab.get
-            qids_list = [
-                np.array([v for v in map(vocab_get, query) if v is not None],
-                         dtype=np.int32)
-                for query in queries
-            ]
-            return self._native_index.score_batch(qids_list)
+            flat: list[int] = []
+            offsets = [0]
+            extend = flat.extend
+            add_offset = offsets.append
+            for query in queries:
+                extend(v for v in map(vocab_get, query) if v is not None)
+                add_offset(len(flat))
+            return self._native_index.score_batch_flat(
+                np.array(flat, dtype=np.int32),
+                np.array(offsets, dtype=np.int64),
+                len(queries),
+            )
         return np.array([self._reference_scores(query) for query in queries])
 
     def _reference_scores(self, query):

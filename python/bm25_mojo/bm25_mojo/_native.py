@@ -82,39 +82,35 @@ def _candidate_paths() -> list[tuple[str, str]]:
 
 
 def _bind_abi(lib: ctypes.CDLL) -> None:
-    f64p = ctypes.POINTER(ctypes.c_double)
-    i32p = ctypes.POINTER(ctypes.c_int32)
-    i64p = ctypes.POINTER(ctypes.c_int64)
+    # Every pointer argument is declared c_void_p and fed a plain integer
+    # address (numpy's `arr.ctypes.data`) at call time: ctypes converts a
+    # Python int to void* without constructing any per-call pointer object,
+    # the cheapest marshal path there is. The C side sees the same ABI.
+    vp = ctypes.c_void_p
     lib.bm25mojo_abi_version.argtypes = []
     lib.bm25mojo_abi_version.restype = ctypes.c_int32
     # ABI v2: the kernel builds the CSR postings and bakes idf-weighted
     # scores from doc-major term-frequency streams.
     lib.bm25mojo_index_create.argtypes = [
         ctypes.c_int64,  # n_docs
-        f64p,  # doc_len[n_docs]
+        vp,  # doc_len[n_docs]
         ctypes.c_double,  # avgdl
         ctypes.c_double,  # k1
         ctypes.c_double,  # b
         ctypes.c_double,  # delta
         ctypes.c_int32,  # variant
         ctypes.c_int64,  # n_terms
-        i64p,  # doc_offsets[n_docs+1]
-        i32p,  # doc_tids[ntok]
-        f64p,  # doc_freqs[ntok]
-        f64p,  # idf[n_terms]
+        vp,  # doc_offsets[n_docs+1]
+        vp,  # doc_tids[ntok]
+        vp,  # doc_freqs[ntok]
+        vp,  # idf[n_terms]
     ]
     lib.bm25mojo_index_create.restype = ctypes.c_void_p
-    lib.bm25mojo_score.argtypes = [ctypes.c_void_p, i32p, ctypes.c_int64, f64p]
+    lib.bm25mojo_score.argtypes = [vp, vp, ctypes.c_int64, vp]
     lib.bm25mojo_score.restype = ctypes.c_int32
-    lib.bm25mojo_score_batch.argtypes = [
-        ctypes.c_void_p,
-        i32p,
-        i64p,
-        ctypes.c_int64,
-        f64p,
-    ]
+    lib.bm25mojo_score_batch.argtypes = [vp, vp, vp, ctypes.c_int64, vp]
     lib.bm25mojo_score_batch.restype = ctypes.c_int32
-    lib.bm25mojo_index_destroy.argtypes = [ctypes.c_void_p]
+    lib.bm25mojo_index_destroy.argtypes = [vp]
     lib.bm25mojo_index_destroy.restype = None
 
 
@@ -212,9 +208,6 @@ class NativeIndex:
         idf: np.ndarray,
     ) -> None:
         lib = _load()  # raises NativeUnavailable
-        f64p = ctypes.POINTER(ctypes.c_double)
-        i32p = ctypes.POINTER(ctypes.c_int32)
-        i64p = ctypes.POINTER(ctypes.c_int64)
         doc_len = np.ascontiguousarray(doc_len, dtype=np.float64)
         doc_offsets = np.ascontiguousarray(doc_offsets, dtype=np.int64)
         doc_tids = np.ascontiguousarray(doc_tids, dtype=np.int32)
@@ -224,17 +217,17 @@ class NativeIndex:
         n_terms = np.int64(idf.shape[0])
         handle = lib.bm25mojo_index_create(
             n_docs,
-            doc_len.ctypes.data_as(f64p),
+            doc_len.ctypes.data,
             ctypes.c_double(avgdl),
             ctypes.c_double(k1),
             ctypes.c_double(b),
             ctypes.c_double(delta),
             ctypes.c_int32(variant),
             n_terms,
-            doc_offsets.ctypes.data_as(i64p),
-            doc_tids.ctypes.data_as(i32p),
-            doc_freqs.ctypes.data_as(f64p),
-            idf.ctypes.data_as(f64p),
+            doc_offsets.ctypes.data,
+            doc_tids.ctypes.data,
+            doc_freqs.ctypes.data,
+            idf.ctypes.data,
         )
         if not handle:
             raise NativeUnavailable(
@@ -248,9 +241,6 @@ class NativeIndex:
         # Hot-path caches: avoid per-call ctypes constructor overhead.
         self._score_fn = lib.bm25mojo_score
         self._batch_fn = lib.bm25mojo_score_batch
-        self._f64p = ctypes.POINTER(ctypes.c_double)
-        self._i32p = ctypes.POINTER(ctypes.c_int32)
-        self._i64p = ctypes.POINTER(ctypes.c_int64)
 
     @property
     def n_docs(self) -> int:
@@ -269,13 +259,44 @@ class NativeIndex:
         out = np.zeros(self._n_docs, dtype=np.float64)
         rc = self._score_fn(
             self._handle,
-            query_term_ids.ctypes.data_as(self._i32p),
+            query_term_ids.ctypes.data,
             len(query_term_ids),
-            out.ctypes.data_as(self._f64p),
+            out.ctypes.data,
         )
         if rc != 0:
             raise NativeUnavailable(f"native scoring failed with status {rc}")
         return out
+
+    def score_batch_flat(
+        self, qids_flat: np.ndarray, offsets: np.ndarray, n_queries: int
+    ) -> np.ndarray:
+        """Score a pre-packed batch of queries in one FFI call.
+
+        `qids_flat`/`offsets` are the concatenated int32 term ids and their
+        int64 per-query offsets (n_queries + 1 entries) — the exact C ABI
+        layout, so callers that pack once pay no per-query marshalling.
+        Returns a float64 (n_queries, n_docs) panel whose row i is
+        bit-identical to scoring query i alone.
+        """
+        if self._handle is None:
+            raise NativeUnavailable("native index is closed")
+        if n_queries == 0:
+            return np.zeros((0, self._n_docs), dtype=np.float64)
+        if qids_flat.dtype != np.int32 or not qids_flat.flags.c_contiguous:
+            qids_flat = np.ascontiguousarray(qids_flat, dtype=np.int32)
+        if offsets.dtype != np.int64 or not offsets.flags.c_contiguous:
+            offsets = np.ascontiguousarray(offsets, dtype=np.int64)
+        panel = np.zeros((n_queries, self._n_docs), dtype=np.float64)
+        rc = self._batch_fn(
+            self._handle,
+            qids_flat.ctypes.data,
+            offsets.ctypes.data,
+            n_queries,
+            panel.ctypes.data,
+        )
+        if rc != 0:
+            raise NativeUnavailable(f"native batch scoring failed with status {rc}")
+        return panel
 
     def score_batch(self, query_term_ids_list: list[np.ndarray]) -> np.ndarray:
         """Score a batch of token-id queries in one FFI call.
@@ -283,8 +304,6 @@ class NativeIndex:
         Returns a float64 (n_queries, n_docs) panel whose row i is
         bit-identical to `score(query_term_ids_list[i])`.
         """
-        if self._handle is None:
-            raise NativeUnavailable("native index is closed")
         n_queries = len(query_term_ids_list)
         if n_queries == 0:
             return np.zeros((0, self._n_docs), dtype=np.float64)
@@ -295,17 +314,7 @@ class NativeIndex:
         )
         offsets = np.zeros(n_queries + 1, dtype=np.int64)
         np.cumsum(counts, out=offsets[1:])
-        panel = np.zeros((n_queries, self._n_docs), dtype=np.float64)
-        rc = self._batch_fn(
-            self._handle,
-            qids_flat.ctypes.data_as(self._i32p),
-            offsets.ctypes.data_as(self._i64p),
-            n_queries,
-            panel.ctypes.data_as(self._f64p),
-        )
-        if rc != 0:
-            raise NativeUnavailable(f"native batch scoring failed with status {rc}")
-        return panel
+        return self.score_batch_flat(qids_flat, offsets, n_queries)
 
     def close(self) -> None:
         handle, self._handle = self._handle, None
