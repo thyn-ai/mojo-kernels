@@ -300,7 +300,6 @@ def _parse_blob(blob: U8Ptr, blob_len: Int64) -> Handle:
 
     # Section bounds check (program section sizes vary; validate offsets are
     # inside the blob and monotone-ish by checking each read below).
-    var cc_map_bytes = Int64(0)
     if cc_off < offs_table + total_off_words or cc_off + 8 * n_cc > blob_len:
         return None
 
@@ -873,7 +872,7 @@ def _ext_match_at[o: Origin](s: Pointer[UInt8, o], slen: Int, start: Int) -> Int
     # Branch B: long markers, 1..20 digits (longest first). ASCII subset;
     # accented/fullwidth markers never occur behind the charset gate.
     for mi in range(8):
-        var e = -1
+        var e: Int
         if mi == 0:
             e = _match_lit(s, i, hlen, "extension")
         elif mi == 1:
@@ -896,7 +895,7 @@ def _ext_match_at[o: Origin](s: Pointer[UInt8, o], slen: Int, start: Int) -> Int
                 return r
     # Branch C: short markers, 1..9 digits
     for mi in range(4):
-        var e = -1
+        var e: Int
         if mi == 0:
             e = _match_lit(s, i, hlen, "int")
         elif mi == 1:
@@ -1437,7 +1436,7 @@ def _maybe_extract_cc[o: Origin](
     var empty = List[UInt8]()
     if slen == 0:
         return (0, empty^, 20, -1)
-    var full = List[UInt8]()
+    var full: List[UInt8]
     var ccs = Int32(20)
     if s[unsafe_offset=0] == 43:  # '+'
         full = _normalize(s + 1, slen - 1)
@@ -1586,7 +1585,6 @@ def _parse_full(
         cc = retry[0]
         national = retry[1].copy()
         ccs = 10
-        err = -1
     elif err == E_INVALID_CC:
         dst[unsafe_offset=1] = E_INVALID_CC
         dst[unsafe_offset=3] = 5  # "country calling code not recognised"
