@@ -1,0 +1,190 @@
+# bm25s head-to-head on real linux x86_64 (dispatch-only benchmark workflow).
+#
+# Reproduces the hf-speed-arena BM25 duel cell EXACTLY (arena harness v0.1.0:
+# seeded Zipf corpus, 10 queries x 10 terms, gate+cold, warm median-of-5
+# interleaved) on GitHub-hosted x86_64 runners, for two bm25-mojo builds in
+# the SAME job on the SAME machine:
+#
+#   * BEFORE: the published arena wheel (bm25_mojo 0.1.2, GitHub Release
+#     arena-wheels-v0.1.0) — the exact build the Space runs today;
+#   * AFTER:  the wheel built from this branch's kernel source.
+#
+# Job 1 runs natively on the runner; job 2 runs inside a Space-matched
+# container (python 3.12, Debian bookworm) constrained to --cpus=2, mirroring
+# the HF cpu-basic cgroup limit. bm25s/numba/rank_bm25 are pinned to the
+# arena's versions. All logs are uploaded as artifacts; nothing is published.
+#
+# This workflow never deploys anything and never touches the default branch's
+# artifacts; it exists to produce contest evidence on real linux x86_64.
+
+name: bench-bm25s-arena
+
+on:
+  workflow_dispatch:
+    inputs:
+      reps:
+        description: "Warm repetitions per cell (arena protocol: 5)"
+        required: false
+        type: string
+        default: "5"
+      layers:
+        description: "Also run the staged layer-by-layer autopsy"
+        required: false
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bench-bm25s-arena-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  OLD_WHEEL_URL: https://github.com/thyn-ai/mojo-kernels/releases/download/arena-wheels-v0.1.0/bm25_mojo-0.1.2-py3-none-manylinux_2_35_x86_64.whl
+  BENCH_DEPS: "bm25s==0.3.11 numba==0.67.0 rank_bm25==0.2.2 numpy>=1.26,<3"
+
+jobs:
+  x86_64-native:
+    name: arena duel on runner x86_64 (old vs new wheel)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install pixi
+        uses: prefix-dev/setup-pixi@d3f436a425481402e6a95a1d1fc10331c708cd9e # v0.10.2
+        with:
+          run-install: false
+
+      - name: Build the BM25 Mojo kernel + wheel (this branch)
+        run: |
+          set -euo pipefail
+          pixi run build-kernel-bm25
+          pixi run wheel-bm25
+          ls -la python/bm25_mojo/dist/
+
+      - name: Record the runner CPU
+        run: |
+          set -euo pipefail
+          grep -m1 "model name" /proc/cpuinfo
+          grep -m1 "flags" /proc/cpuinfo | tr ' ' '\n' | grep -E '^(avx512f|avx512bw|avx512vl|avx2|fma)$' | sort -u | tr '\n' ' '; echo
+          nproc
+
+      - name: Set up the bench venv (arena pins)
+        run: |
+          set -euo pipefail
+          python3 -m venv /tmp/bench
+          /tmp/bench/bin/pip install --quiet $BENCH_DEPS
+          /tmp/bench/bin/pip list | grep -Ei 'bm25|numba|llvmlite|numpy' || true
+
+      - name: BEFORE — arena wheel 0.1.2 (the Space's build)
+        env:
+          BM25_XRAY_REPS: ${{ inputs.reps }}
+        run: |
+          set -euo pipefail
+          /tmp/bench/bin/pip install --quiet "$OLD_WHEEL_URL"
+          /tmp/bench/bin/python benchmarks/bench_bm25s_arena.py | tee before.log
+
+      - name: AFTER — wheel built from this branch
+        env:
+          BM25_XRAY_REPS: ${{ inputs.reps }}
+        run: |
+          set -euo pipefail
+          /tmp/bench/bin/pip install --quiet --force-reinstall --no-deps python/bm25_mojo/dist/*.whl
+          /tmp/bench/bin/python benchmarks/bench_bm25s_arena.py | tee after.log
+
+      - name: Layer-by-layer autopsy (both wheels)
+        if: ${{ inputs.layers }}
+        env:
+          BM25_XRAY_REPS: ${{ inputs.reps }}
+        run: |
+          set -euo pipefail
+          /tmp/bench/bin/python benchmarks/bench_bm25s_arena.py --layers --cell M | tee layers-after-M.log
+          /tmp/bench/bin/python benchmarks/bench_bm25s_arena.py --layers --cell S | tee layers-after-S.log
+          /tmp/bench/bin/python benchmarks/bench_bm25s_arena.py --layers --cell L | tee layers-after-L.log
+          /tmp/bench/bin/pip install --quiet --force-reinstall --no-deps "$OLD_WHEEL_URL"
+          /tmp/bench/bin/python benchmarks/bench_bm25s_arena.py --layers --cell M | tee layers-before-M.log
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: bench-bm25s-arena-native
+          path: "*.log"
+          if-no-files-found: error
+
+  x86_64-docker-2cpu:
+    name: arena duel in Space-matched container (--cpus=2)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install pixi
+        uses: prefix-dev/setup-pixi@d3f436a425481402e6a95a1d1fc10331c708cd9e # v0.10.2
+        with:
+          run-install: false
+
+      - name: Build the BM25 Mojo kernel + wheel (this branch)
+        run: |
+          set -euo pipefail
+          pixi run build-kernel-bm25
+          pixi run wheel-bm25
+
+      - name: Fetch the BEFORE wheel
+        run: |
+          set -euo pipefail
+          mkdir -p wheels
+          cp python/bm25_mojo/dist/*.whl wheels/after.whl
+          curl -fsSL -o wheels/before.whl "$OLD_WHEEL_URL"
+          ls -la wheels/
+
+      - name: Build the Space-matched bench image
+        run: |
+          set -euo pipefail
+          cat > Dockerfile.bench <<'EOF'
+          FROM python:3.12-bookworm
+          WORKDIR /bench
+          COPY wheels/before.whl wheels/after.whl /wheels/
+          COPY benchmarks/bench_bm25s_arena.py /bench/
+          RUN python -m venv /opt/venv-before && python -m venv /opt/venv-after \
+           && /opt/venv-before/bin/pip install --quiet --no-cache-dir bm25s==0.3.11 numba==0.67.0 rank_bm25==0.2.2 "numpy>=1.26,<3" /wheels/before.whl \
+           && /opt/venv-after/bin/pip  install --quiet --no-cache-dir bm25s==0.3.11 numba==0.67.0 rank_bm25==0.2.2 "numpy>=1.26,<3" /wheels/after.whl
+          ENTRYPOINT ["/bin/bash", "-c"]
+          CMD ["true"]
+          EOF
+          docker build -f Dockerfile.bench -t bm25-arena-bench .
+
+      - name: BEFORE vs AFTER inside --cpus=2 (Space cpu-basic cgroup)
+        env:
+          BM25_XRAY_REPS: ${{ inputs.reps }}
+        run: |
+          set -euo pipefail
+          docker run --cpus=2 -e BM25_XRAY_REPS bm25-arena-bench \
+            "/opt/venv-before/bin/python /bench/bench_bm25s_arena.py" | tee docker-before.log
+          docker run --cpus=2 -e BM25_XRAY_REPS bm25-arena-bench \
+            "/opt/venv-after/bin/python /bench/bench_bm25s_arena.py" | tee docker-after.log
+
+      - name: Layers inside --cpus=2
+        if: ${{ inputs.layers }}
+        env:
+          BM25_XRAY_REPS: ${{ inputs.reps }}
+        run: |
+          set -euo pipefail
+          docker run --cpus=2 bm25-arena-bench \
+            "/opt/venv-after/bin/python /bench/bench_bm25s_arena.py --layers --cell M" | tee docker-layers-after-M.log
+          docker run --cpus=2 bm25-arena-bench \
+            "/opt/venv-before/bin/python /bench/bench_bm25s_arena.py --layers --cell M" | tee docker-layers-before-M.log
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: bench-bm25s-arena-docker-2cpu
+          path: "docker-*.log"
+          if-no-files-found: error
