@@ -29,6 +29,18 @@ for that tag:
 | `<asset>.sigstore.json` (one per asset, `SHA256SUMS` included) | keyless [Sigstore](https://www.sigstore.dev/) signature bundle, signed by the `release.yml` run itself |
 | `multiple.intoto.jsonl` | [SLSA](https://slsa.dev/) build provenance covering all eight assets, from the [SLSA generic generator](https://github.com/slsa-framework/slsa-github-generator) |
 
+The kernels inside them are built for a fixed instruction-set baseline, not
+for the CPU of whichever runner GitHub hands out: Linux x86-64 kernels for
+`x86-64-v3` (AVX2, FMA, BMI2: every x86-64 CPU since Intel Haswell (2013)
+and AMD Zen (2017), and every GitHub-hosted runner) and macOS kernels for
+`apple-m1` (every Apple silicon Mac). `kernels/*/build.sh` pass
+`--target-cpu` to `mojo build`, and on Linux
+[`scripts/check_x86_64_baseline.sh`](./scripts/check_x86_64_baseline.sh)
+disassembles the result and refuses any AVX-512 encoding; `release.yml` runs
+it again on the assets' kernels before the differential suites. A kernel
+built for the host CPU instead would fail with "Illegal instruction" on any
+machine without that CPU's extensions.
+
 The Release is the one release-please published when the release pull
 request merged, with that pull request's CHANGELOG entry as its notes.
 Creating it is what pushes the tag that starts `release.yml`, which attaches
