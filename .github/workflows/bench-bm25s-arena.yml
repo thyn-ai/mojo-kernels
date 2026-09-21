@@ -91,7 +91,7 @@ jobs:
 
       - name: BEFORE — arena wheel 0.1.2 (the Space's build)
         env:
-          BM25_XRAY_REPS: ${{ inputs.reps }}
+          BM25_XRAY_REPS: ${{ inputs.reps || '5' }}
         run: |
           set -euo pipefail
           /tmp/bench/bin/pip install --quiet "$OLD_WHEEL_URL"
@@ -99,16 +99,16 @@ jobs:
 
       - name: AFTER — wheel built from this branch
         env:
-          BM25_XRAY_REPS: ${{ inputs.reps }}
+          BM25_XRAY_REPS: ${{ inputs.reps || '5' }}
         run: |
           set -euo pipefail
           /tmp/bench/bin/pip install --quiet --force-reinstall --no-deps python/bm25_mojo/dist/*.whl
           /tmp/bench/bin/python benchmarks/bench_bm25s_arena.py | tee after.log
 
       - name: Layer-by-layer autopsy (both wheels)
-        if: ${{ inputs.layers }}
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.layers }}
         env:
-          BM25_XRAY_REPS: ${{ inputs.reps }}
+          BM25_XRAY_REPS: ${{ inputs.reps || '5' }}
         run: |
           set -euo pipefail
           /tmp/bench/bin/python benchmarks/bench_bm25s_arena.py --layers --cell M | tee layers-after-M.log
@@ -146,10 +146,10 @@ jobs:
       - name: Fetch the BEFORE wheel
         run: |
           set -euo pipefail
-          mkdir -p wheels
-          cp python/bm25_mojo/dist/*.whl wheels/after.whl
-          curl -fsSL -o wheels/before.whl "$OLD_WHEEL_URL"
-          ls -la wheels/
+          mkdir -p wheels/before wheels/after
+          cp python/bm25_mojo/dist/*.whl wheels/after/
+          curl -fsSL -o "wheels/before/$(basename "$OLD_WHEEL_URL")" "$OLD_WHEEL_URL"
+          ls -la wheels/before wheels/after
 
       - name: Build the Space-matched bench image
         run: |
@@ -157,11 +157,12 @@ jobs:
           cat > Dockerfile.bench <<'EOF'
           FROM python:3.12-bookworm
           WORKDIR /bench
-          COPY wheels/before.whl wheels/after.whl /wheels/
+          COPY wheels/before /wheels/before/
+          COPY wheels/after /wheels/after/
           COPY benchmarks/bench_bm25s_arena.py /bench/
           RUN python -m venv /opt/venv-before && python -m venv /opt/venv-after \
-           && /opt/venv-before/bin/pip install --quiet --no-cache-dir bm25s==0.3.11 numba==0.67.0 rank_bm25==0.2.2 "numpy>=1.26,<3" /wheels/before.whl \
-           && /opt/venv-after/bin/pip  install --quiet --no-cache-dir bm25s==0.3.11 numba==0.67.0 rank_bm25==0.2.2 "numpy>=1.26,<3" /wheels/after.whl
+           && /opt/venv-before/bin/pip install --quiet --no-cache-dir bm25s==0.3.11 numba==0.67.0 rank_bm25==0.2.2 "numpy>=1.26,<3" /wheels/before/*.whl \
+           && /opt/venv-after/bin/pip  install --quiet --no-cache-dir bm25s==0.3.11 numba==0.67.0 rank_bm25==0.2.2 "numpy>=1.26,<3" /wheels/after/*.whl
           ENTRYPOINT ["/bin/bash", "-c"]
           CMD ["true"]
           EOF
@@ -169,7 +170,7 @@ jobs:
 
       - name: BEFORE vs AFTER inside --cpus=2 (Space cpu-basic cgroup)
         env:
-          BM25_XRAY_REPS: ${{ inputs.reps }}
+          BM25_XRAY_REPS: ${{ inputs.reps || '5' }}
         run: |
           set -euo pipefail
           docker run --cpus=2 -e BM25_XRAY_REPS bm25-arena-bench \
@@ -178,9 +179,9 @@ jobs:
             "/opt/venv-after/bin/python /bench/bench_bm25s_arena.py" | tee docker-after.log
 
       - name: Layers inside --cpus=2
-        if: ${{ inputs.layers }}
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.layers }}
         env:
-          BM25_XRAY_REPS: ${{ inputs.reps }}
+          BM25_XRAY_REPS: ${{ inputs.reps || '5' }}
         run: |
           set -euo pipefail
           docker run --cpus=2 bm25-arena-bench \
