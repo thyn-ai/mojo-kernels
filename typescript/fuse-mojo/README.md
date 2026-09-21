@@ -31,7 +31,7 @@ assets of the matching [GitHub Release](https://github.com/thyn-ai/mojo-kernels/
 [RELEASING.md § Registries](../../RELEASING.md#registries)):
 
 ```bash
-V=0.1.3  # x-release-please-version
+V=0.1.4  # x-release-please-version
 URL="https://github.com/thyn-ai/mojo-kernels/releases/download/v$V"
 case "$(uname -sm)" in
   "Darwin arm64") PLATFORM_PKG="fuse-mojo-darwin-arm64-$V.tgz" ;;
