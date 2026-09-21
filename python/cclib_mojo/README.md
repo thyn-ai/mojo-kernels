@@ -21,8 +21,18 @@ It works two ways:
 
 ## Install
 
-```
-pip install cclib-mojo
+The wheel for your platform is a signed asset of the matching
+[GitHub Release](https://github.com/thyn-ai/mojo-kernels/releases) (bash or
+zsh; PyPI distribution follows once the registry is enabled, see
+[RELEASING.md § Registries](../../RELEASING.md#registries)):
+
+```bash
+V=0.1.3  # x-release-please-version
+case "$(uname -sm)" in
+  "Darwin arm64") WHEEL="cclib_mojo-$V-py3-none-macosx_14_0_arm64.whl" ;;
+  "Linux x86_64") WHEEL="cclib_mojo-$V-py3-none-manylinux_2_35_x86_64.whl" ;;
+esac
+pip install "https://github.com/thyn-ai/mojo-kernels/releases/download/v$V/${WHEEL:?no prebuilt wheel for this platform}"
 ```
 
 Per-platform wheels (macOS arm64, Linux x86_64) carry the native kernel,
@@ -157,7 +167,7 @@ in compiled float64, with the grid row under update kept cache-resident.
 ## How it works
 
 ```
-pip install cclib-mojo
+pip install <cclib_mojo wheel from the GitHub Release>
         │
         ▼
 cclib_mojo (thin Python wrapper)
