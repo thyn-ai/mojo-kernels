@@ -1,0 +1,98 @@
+name: ci-mistune
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Read-only token for every job: the workflow only builds, tests and uploads a
+# build artifact (artifact upload needs no write scope).
+permissions:
+  contents: read
+
+# One run per ref; a newer push to a pull request cancels the run it supersedes.
+# Pushes to main always run to completion.
+concurrency:
+  group: ci-mistune-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  test:
+    name: mistune-mojo differential tests + wheel (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install pixi
+        uses: prefix-dev/setup-pixi@d3f436a425481402e6a95a1d1fc10331c708cd9e # v0.10.2
+        with:
+          # Install the pixi binary only. The tasks below install the environment
+          # lazily on first `pixi run`, exactly as the previous curl|bash step did;
+          # `pixi install --locked` + caching is a separate, opt-in change.
+          run-install: false
+
+      - name: Build the mistune Mojo kernel
+        run: pixi run bash kernels/mistune/build.sh
+
+      - name: Install the mistune 3.3.4 oracle
+        # The oracle (mistune==3.3.4, published PyPI) is used by the
+        # differential suite; it is not vendored into the package.
+        shell: bash
+        run: pixi run python -m pip install --quiet "mistune==3.3.4"
+
+      - name: Differential suite (native backend, then forced fallback)
+        shell: bash
+        run: |
+          export PYTHONPATH="python/mistune_mojo"
+          export PYTHONNOUSERSITE=1
+          pixi run bash scripts/test_all_mistune.sh
+
+      - name: Build + repair the platform wheel (delocate/auditwheel)
+        run: pixi run bash python/mistune_mojo/build_wheel.sh
+
+      - name: Smoke-test the wheel in a clean venv
+        shell: bash
+        run: |
+          set -e
+          python3 -m venv /tmp/mistune-wheel-smoke
+          /tmp/mistune-wheel-smoke/bin/pip install --quiet python/mistune_mojo/dist/*.whl
+          # Hide the pixi env for the smoke: an end user has no Mojo toolchain,
+          # so the wheel must load its kernel purely from its own vendored
+          # libraries (not via the build machine's absolute rpath).
+          repo_root="$PWD"
+          mv .pixi .pixi-hidden
+          trap 'mv "$repo_root/.pixi-hidden" "$repo_root/.pixi"' EXIT
+          cd /tmp
+          cat > /tmp/mistune_smoke.py <<'EOF'
+          import mistune_mojo
+
+          doc = "# smoke\n\n- *em* `code` [link](https://example.com)\n\n> quote\n"
+          html = mistune_mojo.markdown(doc)
+          assert html.startswith("<h1>smoke</h1>"), html
+          info = mistune_mojo.backend_info()
+          assert info["native_available"], f"wheel must carry the native kernel: {info}"
+          import hashlib
+          print("sha256:", hashlib.sha256(html.encode()).hexdigest())
+          EOF
+          /tmp/mistune-wheel-smoke/bin/python /tmp/mistune_smoke.py | tee /tmp/smoke-native.txt
+          # The forced fallback must produce byte-identical HTML.
+          MISTUNE_MOJO_DISABLE_NATIVE=1 /tmp/mistune-wheel-smoke/bin/python /tmp/mistune_smoke.py | tee /tmp/smoke-fallback.txt
+          /tmp/mistune-wheel-smoke/bin/python - <<'EOF'
+          native = open("/tmp/smoke-native.txt").read().split("sha256: ")[1].strip()
+          fallback = open("/tmp/smoke-fallback.txt").read().split("sha256: ")[1].strip()
+          assert native == fallback, (native, fallback)
+          print("wheel smoke OK: native and fallback HTML identical")
+          EOF
+
+      - name: Upload wheel
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: mistune-mojo-wheel-${{ matrix.os }}
+          path: python/mistune_mojo/dist/*.whl
+          retention-days: 14
