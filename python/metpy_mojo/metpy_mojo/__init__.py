@@ -17,7 +17,7 @@ Set METPY_MOJO_DISABLE_NATIVE=1 to force the pure-Python fallback.
 from metpy_mojo._native import backend_info, native_available
 from metpy_mojo.core import ParcelDiagnostics, cape_cin, cape_cin_grid, parcel_diagnostics
 
-__version__ = "0.1.2"  # x-release-please-version
+__version__ = "0.1.3"  # x-release-please-version
 __all__ = [
     "ParcelDiagnostics",
     "backend_info",

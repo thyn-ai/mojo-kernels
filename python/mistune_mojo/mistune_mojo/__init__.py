@@ -15,7 +15,7 @@ Set MISTUNE_MOJO_DISABLE_NATIVE=1 to force the pure-Python engine.
 from mistune_mojo._native import backend_info, native_available
 from mistune_mojo.core import markdown
 
-__version__ = "0.1.2"  # x-release-please-version
+__version__ = "0.1.3"  # x-release-please-version
 __all__ = [
     "markdown",
     "backend_info",

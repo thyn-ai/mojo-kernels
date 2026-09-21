@@ -33,6 +33,10 @@ included — comes from `pixi.lock`), and for fuse-mojo, Node.js ≥ 18 (CI runs
 Node 20) with npm from your host. Mojo has a toolchain for macOS Apple
 Silicon and Linux x86_64 only; on any other platform the wrappers run their
 fallback and the differential suites cannot be run natively.
+Kernels that ship in a release are compiled for a fixed baseline
+(`--target-cpu x86-64-v3` on Linux, `apple-m1` on macOS; see the `build.sh`
+of bm25, gaussgrid or fuse and RELEASING.md) so that the asset runs on every
+CPU the platform name covers, not only on the machine that built it.
 
 ```bash
 git clone https://github.com/thyn-ai/mojo-kernels

@@ -18,12 +18,20 @@ case "$(uname -s)" in
     # the wrapper's pure-JS fallback engages, so this only widens
     # compatibility.
     export MACOSX_DEPLOYMENT_TARGET="${MACOSX_DEPLOYMENT_TARGET:-14.0}"
+    # Every Apple silicon Mac runs apple-m1 code; the host default would
+    # be the build machine's own generation.
+    target_cpu="apple-m1"
     ;;
   Linux)
     lib="libfusemojo.so"
     shim="libfusemojoshim.so"
     shared_flag="-shared"
     rpath_flag="-Wl,-rpath,\$ORIGIN"
+    # x86-64-v3 (AVX2, FMA, BMI2): every x86-64 CPU since Intel Haswell
+    # and AMD Zen, and every GitHub-hosted runner. The host default is the
+    # build machine's CPU; a kernel built on an AVX-512 runner dies with
+    # SIGILL on any CPU without AVX-512 (scripts/check_x86_64_baseline.sh).
+    target_cpu="x86-64-v3"
     ;;
   *)
     echo "error: no Mojo toolchain for $(uname -s); the JS wrapper will use its fallback" >&2
@@ -31,7 +39,10 @@ case "$(uname -s)" in
     ;;
 esac
 
-mojo build --emit shared-lib -o "build/${lib}" src/fusemojo.mojo
+mojo build --target-cpu "${target_cpu}" --emit shared-lib -o "build/${lib}" src/fusemojo.mojo
+if [ "$(uname -s)" = "Linux" ]; then
+  bash ../../scripts/check_x86_64_baseline.sh "build/${lib}"
+fi
 cc -O2 -fPIC ${shared_flag} -o "build/${shim}" src/shim.c -Lbuild -lfusemojo ${rpath_flag}
 if [ "$(uname -s)" = "Darwin" ]; then
   # The link records the kernel library by its relative build path; both
