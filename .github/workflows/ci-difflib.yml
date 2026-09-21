@@ -1,0 +1,126 @@
+name: ci-difflib
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Read-only token for every job: the workflow only builds, tests and uploads a
+# build artifact (artifact upload needs no write scope).
+permissions:
+  contents: read
+
+# One run per ref; a newer push to a pull request cancels the run it supersedes.
+# Pushes to main always run to completion.
+concurrency:
+  group: ci-difflib-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  test:
+    name: difflib-mojo differential tests + wheel (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install pixi
+        uses: prefix-dev/setup-pixi@d3f436a425481402e6a95a1d1fc10331c708cd9e # v0.10.2
+        with:
+          # Install the pixi binary only. The tasks below install the environment
+          # lazily on first `pixi run`, exactly as the previous curl|bash step did;
+          # `pixi install --locked` + caching is a separate, opt-in change.
+          run-install: false
+
+      - name: Build the difflib Mojo kernel
+        run: pixi run bash kernels/difflib/build.sh
+
+      - name: Differential suite (native backend, then forced fallback)
+        # The oracle is the interpreter's own stdlib difflib — nothing to install.
+        run: |
+          PYTHONPATH="python/difflib_mojo" PYTHONNOUSERSITE=1 pixi run python -m pytest tests/test_difflib_differential.py tests/test_difflib_loader.py -q
+          PYTHONPATH="python/difflib_mojo" PYTHONNOUSERSITE=1 DIFFLIB_MOJO_DISABLE_NATIVE=1 pixi run python -m pytest tests/test_difflib_differential.py tests/test_difflib_loader.py -q
+
+      - name: Build + repair the platform wheel (delocate/auditwheel)
+        run: PYTHONNOUSERSITE=1 pixi run bash python/difflib_mojo/build_wheel.sh
+
+      - name: Smoke-test the wheel in a clean venv
+        shell: bash
+        run: |
+          set -e
+          python3 -m venv /tmp/difflib-wheel-smoke
+          /tmp/difflib-wheel-smoke/bin/pip install --quiet python/difflib_mojo/dist/*.whl
+          # Hide the pixi env for the smoke: an end user has no Mojo toolchain,
+          # so the wheel must load its kernel purely from its own vendored
+          # libraries (not via the build machine's absolute rpath).
+          repo_root="$PWD"
+          mv .pixi .pixi-hidden
+          trap 'mv "$repo_root/.pixi-hidden" "$repo_root/.pixi"' EXIT
+          cd /tmp
+          for mode in native fallback; do
+            if [ "$mode" = fallback ]; then export DIFFLIB_MOJO_DISABLE_NATIVE=1; fi
+            /tmp/difflib-wheel-smoke/bin/python - <<'EOF' | tee "/tmp/quickstart-difflib-$mode.txt"
+          import difflib
+
+          import difflib_mojo
+
+          a = "private Thread currentThread;"
+          b = "private volatile Thread currentThread;"
+          s = difflib_mojo.SequenceMatcher(lambda x: x == " ", a, b)
+          assert s.ratio() == difflib.SequenceMatcher(lambda x: x == " ", a, b).ratio()
+          assert s.get_opcodes() == difflib.SequenceMatcher(lambda x: x == " ", a, b).get_opcodes()
+          matches = difflib_mojo.get_close_matches("appel", ["ape", "apple", "peach", "puppy"])
+          assert matches == ["apple", "ape"], matches
+          batch = difflib_mojo.get_close_matches_batch(["appel", "pupy"], ["ape", "apple", "peach", "puppy"], 2, 0.6)
+          assert batch == [["apple", "ape"], ["puppy"]], batch
+          info = difflib_mojo.backend_info()
+          print("quickstart OK:", difflib_mojo.__version__, round(s.ratio(), 3), matches, info["native_available"])
+          EOF
+            unset DIFFLIB_MOJO_DISABLE_NATIVE
+          done
+          /tmp/difflib-wheel-smoke/bin/python - <<'EOF'
+          import difflib_mojo
+
+          info = difflib_mojo.backend_info()
+          assert info["native_available"], f"wheel must carry the native kernel: {info}"
+          native = open("/tmp/quickstart-difflib-native.txt").read()
+          fallback = open("/tmp/quickstart-difflib-fallback.txt").read()
+          # identical results; only the backend token in the line may differ
+          assert native.replace("True", "BACKEND") == fallback.replace("False", "BACKEND"), (native, fallback)
+          print("wheel smoke OK:", difflib_mojo.__version__, info["native_source"])
+          EOF
+
+      - name: Smoke-test the pure wheel (fallback-only) in a clean venv
+        shell: bash
+        run: |
+          set -e
+          cd python/difflib_mojo
+          DIFFLIB_MOJO_ALLOW_PURE_WHEEL=1 pixi run python -m build --wheel --no-isolation --outdir dist-pure .
+          python3 -m venv /tmp/difflib-pure-wheel-smoke
+          /tmp/difflib-pure-wheel-smoke/bin/pip install --quiet dist-pure/*.whl
+          cd /tmp && /tmp/difflib-pure-wheel-smoke/bin/python - <<'EOF'
+          import difflib
+
+          import difflib_mojo
+
+          a = "private Thread currentThread;"
+          b = "private volatile Thread currentThread;"
+          s = difflib_mojo.SequenceMatcher(lambda x: x == " ", a, b)
+          assert s.ratio() == difflib.SequenceMatcher(lambda x: x == " ", a, b).ratio()
+          assert difflib_mojo.get_close_matches("appel", ["ape", "apple", "peach", "puppy"]) == ["apple", "ape"]
+          info = difflib_mojo.backend_info()
+          assert not info["native_available"], f"pure wheel must use the fallback: {info}"
+          print("pure-wheel smoke OK:", difflib_mojo.__version__)
+          EOF
+
+      - name: Upload wheel
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: difflib-mojo-wheel-${{ matrix.os }}
+          path: python/difflib_mojo/dist/*.whl
+          retention-days: 14
