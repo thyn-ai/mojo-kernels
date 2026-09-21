@@ -44,6 +44,7 @@ for lib in "$@"; do
   # name the library and fail closed, and the remaining libraries still get
   # checked. stderr is captured apart from the listing, so a warning objdump
   # prints on a successful run can never be counted as an instruction.
+  : >"$errfile"
   if ! listing="$(objdump -d "$lib" 2>"$errfile")"; then
     echo "::error::$lib: objdump -d failed; the x86-64-v3 baseline of this library cannot be verified." >&2
     tail -n 5 "$errfile" >&2
