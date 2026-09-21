@@ -20,11 +20,6 @@
 name: bench-bm25s-arena
 
 on:
-  # TEMP(dev): branch-scoped push trigger so the workflow can run before it
-  # exists on the default branch (workflow_dispatch requires default-branch
-  # presence). Removed before the branch merges.
-  push:
-    branches: [chore/bm25-xeon-arena]
   workflow_dispatch:
     inputs:
       reps:
