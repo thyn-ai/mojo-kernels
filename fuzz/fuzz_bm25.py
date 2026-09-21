@@ -19,9 +19,13 @@ to ties inside that tolerance. Two flavours of parameters are generated:
 in-domain values (``k1`` in [0, 5], ``b`` in [0, 1], ``epsilon``/``delta``
 in [0, 3]) and raw IEEE doubles (anything: negative, huge, subnormal, NaN,
 infinite), so the parameter-validation and IEEE-propagation behaviour is
-fuzzed too. Corpora mix ASCII tokens, Unicode tokens (accents, CJK, emoji,
-the empty string), empty documents and an empty corpus; queries mix known,
-repeated and unseen terms.
+fuzzed too. Where raw parameters cancel the score's arithmetic down to
+rounding residue (``ILL_CONDITIONED_AMPLIFICATION``) no tolerance can be
+meaningful, and a divergence confined to those documents is classified as
+the ``ill-conditioned-norm`` known issue rather than reported as a finding.
+Corpora mix ASCII tokens, Unicode tokens (accents, CJK, emoji, the empty
+string), empty documents and an empty corpus; queries mix known, repeated
+and unseen terms.
 
 Run modes (see ``_harness.py``)::
 
@@ -38,6 +42,7 @@ from __future__ import annotations
 import math
 import sys
 import warnings
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -312,7 +317,117 @@ ISSUE_DEGENERATE_NAN = KnownIssue(
     applies=_degenerate_parameters,
 )
 
-KNOWN_ISSUES: tuple[KnownIssue, ...] = (ISSUE_DEGENERATE_NAN,)
+
+# Amplification of one unit of roundoff at which a summation stops carrying
+# a meaningful value. A sum whose largest summand exceeds the sum itself by
+# a factor A carries a relative rounding error of about A * 2**-53, so with
+# SCORE_RTOL = 1e-13 (~900 units of roundoff) two correct implementations
+# *may* disagree beyond the tolerance from A ~ 1e3 on, and at
+# A = 1 / SCORE_RTOL = 1e13 the amplified roundoff (~1e-3) is ten orders of
+# magnitude past it: three significant digits survive and no implementation
+# can be held to thirteen. The line is drawn at the latter so that only
+# values that are demonstrably rounding residue are excused; a divergence
+# below it stays a finding to examine.
+ILL_CONDITIONED_AMPLIFICATION = 1.0 / SCORE_RTOL
+
+
+def _amplification(total: np.ndarray, *summands: np.ndarray) -> np.ndarray:
+    """``max|summand| / |total|`` for a sum evaluated the way the reference
+    evaluates it (``total`` is that evaluation): 1 when nothing cancels
+    (summands of one sign), ``inf`` when the sum is exactly 0, 0 when every
+    summand is 0, NaN (never above any limit) when the sum is not finite."""
+    largest = np.max(np.abs(np.broadcast_arrays(*summands)), axis=0)
+    with np.errstate(all="ignore"):
+        amplification = largest / np.maximum(np.abs(total), np.finfo(np.float64).tiny)
+    return np.where(largest == 0.0, 0.0, amplification)
+
+
+def _ill_conditioned_documents(case: Case, query: Sequence[str]) -> np.ndarray:
+    """Per document: True when a posted query term's contribution is computed
+    through a summation that cancels by ``ILL_CONDITIONED_AMPLIFICATION`` or
+    more, so the document's score is rounding residue and the parity
+    tolerance cannot be meaningful there.
+
+    The summations, in the reference operation order (the kernel uses the
+    same one): the length normaliser ``(1 - b) + (b * dl) / avgdl`` and the
+    outer denominator -- ``k1 * norm + qf`` for Okapi and Plus, and for BM25L
+    ``k1 + ctd + delta`` together with its numerator factor ``ctd + delta``,
+    where ``ctd = qf / norm``. In-domain parameters (``b`` in [0, 1], ``k1``
+    and ``epsilon``/``delta`` >= 0) give every summand the same sign: nothing
+    cancels, the amplification is at most 1, and this never fires
+    (tests/test_fuzz_regression_bm25.py checks that over the domain). Only
+    raw parameters reach it: for any ``|b| > 2**53`` the 1 in ``1 - b`` is
+    below one ulp of ``b``, so at every document of average length
+    ``(1 - b) + b * 1.0`` is a residue (0 or one ulp of ``b``) whose exact
+    value is 1.
+
+    How it surfaced (#54, fuzz job 106379599687): ``BM25Plus`` with
+    ``k1 = -2.2273778232527e168``, ``b = -2.2273778232770e168`` and
+    ``delta = 2.2273778232770e168`` (libFuzzer's InsertRepeatedBytes gave the
+    three the same byte pattern) on three documents of three tokens. ``norm``
+    is 0 at every document, ``k1 * norm + qf`` is ``qf``, the term fraction
+    collapses to ``k1 + 1``, and the score ``idf * (delta + k1 + 1)`` is
+    itself a 9.2e10-fold cancellation (one ulp of ``k1`` moves it by 1.7e8
+    tolerances). The fallback evaluates it once; the kernel adds the dense
+    floor ``idf * delta`` (6.4e167) and the baked excess ``full - floor``,
+    and the two orders differ by rounding at ulp(3 * floor) = 4.2e152:
+    native 2.10031216e157 vs fallback 2.10031008e157, 9.9e6 tolerances
+    apart -- both eleven orders of magnitude from the exact-arithmetic value
+    1.9e168. Okapi and BM25L have no floor decomposition and agree bit for
+    bit on the same input, so the shape is only ever observed under Plus.
+
+    Unposted documents are left alone: their contribution is 0 (or the
+    BM25Plus floor) whatever the normaliser is, and a 0/0 there is the
+    ``degenerate-nan`` issue.
+    """
+    n_docs = len(case.corpus)
+    ill = np.zeros(n_docs, dtype=bool)
+    if n_docs == 0 or not all(math.isfinite(v) for v in (case.k1, case.b, case.third)):
+        return ill  # non-finite parameters are the degenerate-nan input class
+    doc_len = np.array([len(doc) for doc in case.corpus], dtype=np.float64)
+    avgdl = doc_len.sum() / n_docs
+    if avgdl == 0:
+        return ill  # the wrapper itself routes avgdl == 0 to the fallback
+    limit = ILL_CONDITIONED_AMPLIFICATION
+    with np.errstate(all="ignore"):
+        one_minus_b = 1.0 - case.b
+        length_term = case.b * doc_len / avgdl
+        norm = one_minus_b + length_term
+        norm_ill = _amplification(norm, one_minus_b, length_term) >= limit
+        for term in set(query):
+            qf = np.array([doc.count(term) for doc in case.corpus], dtype=np.float64)
+            posted = qf > 0
+            if case.variant == 1:  # BM25L
+                ctd = qf / norm
+                den_ill = (_amplification(ctd + case.third, ctd, case.third) >= limit) | (
+                    _amplification(case.k1 + ctd + case.third, case.k1, ctd, case.third) >= limit
+                )
+            else:  # Okapi / Plus
+                k1_norm = case.k1 * norm
+                den_ill = _amplification(k1_norm + qf, k1_norm, qf) >= limit
+            ill |= posted & (norm_ill | den_ill)
+    return ill
+
+
+def _ill_conditioned(case: Case) -> bool:
+    """Some query of the case has an ill-conditioned document
+    (``_ill_conditioned_documents``)."""
+    return any(bool(_ill_conditioned_documents(case, query).any()) for query in case.queries)
+
+
+ISSUE_ILL_CONDITIONED_NORM = KnownIssue(
+    key="ill-conditioned-norm",
+    url="https://github.com/thyn-ai/mojo-kernels/issues/58",
+    title=(
+        "bm25-mojo: raw parameters that cancel the length normaliser or the outer "
+        "denominator by 1e13 or more leave rounding residue in place of the score, and the "
+        "kernel's baked BM25Plus floor decomposition (floor + (full - floor)) rounds it "
+        "differently from the fallback's single evaluation idf * (delta + frac)"
+    ),
+    applies=_ill_conditioned,
+)
+
+KNOWN_ISSUES: tuple[KnownIssue, ...] = (ISSUE_DEGENERATE_NAN, ISSUE_ILL_CONDITIONED_NORM)
 
 
 # ---------------------------------------------------------------------------
@@ -338,16 +453,37 @@ def _check_score_array(scores: object, n_docs: int, what: str) -> None:
 def _compare_backends(
     case: Case, query: list[str], native: np.ndarray, fallback: np.ndarray
 ) -> str | None:
-    """None when the kernel matches the fallback; a KnownIssue key when the
-    disagreement has exactly a documented shape; raises otherwise."""
+    """None when the kernel matches the fallback; a KnownIssue key when every
+    disagreeing position has a documented shape; raises otherwise.
+
+    The two shapes can occur in one query: a normaliser that cancels to 0 at
+    every document of average length gives the reference 0/0 at the
+    documents that do not contain the term (``degenerate-nan``) and rounding
+    residue at the ones that do (``ill-conditioned-norm``). Each position
+    must then match one of them; the outcome is ``ill-conditioned-norm``
+    whenever any position has that shape, ``degenerate-nan`` otherwise.
+    """
     ok = _close(native, fallback)
     if ok.all():
         return None
-    # Known shape: the reference is NaN where the kernel is finite, and every
-    # other position agrees.
+    explained = ok.copy()
+    outcome: str | None = None
+    # Known shape: the reference is NaN where the kernel is finite.
     nan_only = np.isnan(fallback) & ~np.isnan(native)
-    if ISSUE_DEGENERATE_NAN.applies(case) and np.all(ok | nan_only):
-        return ISSUE_DEGENERATE_NAN.key
+    if ISSUE_DEGENERATE_NAN.applies(case) and np.any(~ok & nan_only):
+        explained |= nan_only
+        outcome = ISSUE_DEGENERATE_NAN.key
+    # Known shape: the document scores a posted term through a summation that
+    # cancelled by ILL_CONDITIONED_AMPLIFICATION or more (its value is
+    # rounding residue, so no tolerance is meaningful there). An ill mask
+    # with any True entry is exactly ISSUE_ILL_CONDITIONED_NORM.applies(case)
+    # restricted to this query, so the predicate is not evaluated again here.
+    ill = _ill_conditioned_documents(case, query)
+    if np.any(~ok & ill):
+        explained |= ill
+        outcome = ISSUE_ILL_CONDITIONED_NORM.key
+    if outcome is not None and explained.all():
+        return outcome
     bad = np.flatnonzero(~ok)
     raise Divergence(
         f"native kernel != fallback for query {query!r} at documents {bad.tolist()}: "

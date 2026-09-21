@@ -47,7 +47,8 @@ def _random_blobs(name: str) -> dict[str, bytes]:
 
 
 def _bm25_reproducers(harness) -> dict[str, bytes]:
-    """Minimal cases for KnownIssue 'degenerate-nan' (one per trigger)."""
+    """Minimal cases for KnownIssue 'degenerate-nan' (one per trigger) and
+    'ill-conditioned-norm'."""
     Case = harness.Case
     two_docs = (("w00",), ("w01",))
     cases = {
@@ -109,6 +110,32 @@ def _bm25_reproducers(harness) -> dict[str, bytes]:
                 ("w02", "w03", "w03", "w02", "w03"),
                 ("w01", "w01", "w02", "w01", "zzz-unseen"),
             ),
+        ),
+        # Raw parameters of ~2.2e168 (libFuzzer's InsertRepeatedBytes gave
+        # k1, b and delta one byte pattern): 1 - b and b * dl / avgdl cancel
+        # to exactly 0 at a document of average length (exact value 1), the
+        # term fraction collapses to k1 + 1, and the kernel's baked BM25Plus
+        # floor decomposition rounds idf * (delta + k1 + 1) -- itself a
+        # 9e10-fold cancellation -- at ulp(idf * delta) ~ 1e152, where the
+        # fallback's single evaluation does not. Found by the 60 s run on
+        # #54 (job 106379599687) on three documents of three tokens and
+        # minimised to one document; tests/test_fuzz_regression_bm25.py
+        # holds the unit verbatim.
+        "known-issue-ill-conditioned-norm-1.bin": Case(
+            variant=2, raw_params=True, k1=-2.227377823252691e168,
+            b=-2.227377823277027e168, third=2.227377823277027e168,
+            vocab_size=1, with_unicode=False, corpus=(("w00",),), queries=(("w00",),),
+        ),
+        # Both shapes in one query (found by a 60 s run of the same workflow
+        # command on the fix branch, in a linux/amd64 container): the
+        # normaliser is 0 at every document, so the document without the
+        # term is the degenerate-nan 0/0 (reference NaN, kernel floor) and
+        # the document with it is the residue above. Minimised from four
+        # documents of four tokens to two of one.
+        "known-issue-ill-conditioned-norm-2.bin": Case(
+            variant=2, raw_params=True, k1=-2.227377823252691e168,
+            b=-2.227377823277027e168, third=2.227377823277027e168,
+            vocab_size=2, with_unicode=False, corpus=(("w00",), ("w01",)), queries=(("w00",),),
         ),
     }
     return {name: harness.encode(case) for name, case in cases.items()}
