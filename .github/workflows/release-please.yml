@@ -6,7 +6,8 @@
 # `chore(release): vX.Y.Z`, that bumps every version location in the tree in
 # lockstep (pixi.toml, version.txt, python/*/pyproject.toml, every
 # `__version__`, typescript/*/package.json + packages/*/package.json +
-# package-lock.json, the two unit tests that assert the version) and
+# package-lock.json, the unit tests that assert the version, the `V=X.Y.Z`
+# line of every README install block) and
 # prepends the next CHANGELOG.md entry, all computed from the Conventional
 # Commits merged since the previous tag. That pull request is gated like any
 # other (codna review + every required check) and is merged by a maintainer

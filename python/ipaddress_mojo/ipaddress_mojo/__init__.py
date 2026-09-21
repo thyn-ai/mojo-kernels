@@ -45,7 +45,7 @@ from ipaddress_mojo.core import (
     v6_int_to_packed,
 )
 
-__version__ = "0.1.0"  # x-release-please-version
+__version__ = "0.1.2"  # x-release-please-version
 __all__ = [
     "AddressValueError",
     "IPv4Address",

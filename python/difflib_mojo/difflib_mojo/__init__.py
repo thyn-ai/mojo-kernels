@@ -33,7 +33,7 @@ from difflib_mojo.core import (
     ratio_batch,
 )
 
-__version__ = "0.1.0"  # x-release-please-version
+__version__ = "0.1.2"  # x-release-please-version
 __all__ = [
     "IS_CHARACTER_JUNK",
     "IS_LINE_JUNK",
