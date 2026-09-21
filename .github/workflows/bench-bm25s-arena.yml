@@ -50,6 +50,7 @@ defaults:
     shell: bash
 
 env:
+  PYTHONFAULTHANDLER: "1"
   OLD_WHEEL_URL: https://github.com/thyn-ai/mojo-kernels/releases/download/arena-wheels-v0.1.0/bm25_mojo-0.1.2-py3-none-manylinux_2_35_x86_64.whl
   BENCH_DEPS: "bm25s==0.3.11 numba==0.67.0 rank_bm25==0.2.2 numpy>=1.26,<3"
 
@@ -81,6 +82,27 @@ jobs:
           grep -m1 "model name" /proc/cpuinfo
           grep -m1 "flags" /proc/cpuinfo | tr ' ' '\n' | grep -E '^(avx512f|avx512bw|avx512vl|avx2|fma)$' | sort -u | tr '\n' ' '; echo
           nproc
+
+      - name: Smoke the branch wheel alone (no bm25s/numba)
+        run: |
+          set -euo pipefail
+          python3 -m venv /tmp/smoke
+          /tmp/smoke/bin/pip install --quiet --no-cache-dir "numpy>=1.26,<3" python/bm25_mojo/dist/*.whl
+          /tmp/smoke/bin/python - <<'PY'
+          import faulthandler, random
+          faulthandler.enable()
+          import bm25_mojo
+          print("backend:", bm25_mojo.backend_info())
+          rng = random.Random(1)
+          vocab = [f"w{i:05d}" for i in range(2000)]
+          corpus = [rng.choices(vocab, k=40) for _ in range(5000)]
+          bm = bm25_mojo.BM25Okapi(corpus)
+          print("index OK; scoring…")
+          s = bm.get_scores(["w00001", "w00002", "w00003"])
+          print("get_scores OK", s.shape, float(s.sum()))
+          b = bm.get_scores_batch([["w00001"], ["w00002", "w00003"]] * 5)
+          print("batch OK", b.shape, float(b.sum()))
+          PY
 
       - name: Set up the bench venv (arena pins)
         run: |
@@ -117,7 +139,8 @@ jobs:
           /tmp/bench/bin/pip install --quiet --force-reinstall --no-deps "$OLD_WHEEL_URL"
           /tmp/bench/bin/python benchmarks/bench_bm25s_arena.py --layers --cell M | tee layers-before-M.log
 
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: bench-bm25s-arena-native
           path: "*.log"
@@ -173,8 +196,10 @@ jobs:
           BM25_XRAY_REPS: ${{ inputs.reps || '5' }}
         run: |
           set -euo pipefail
+          echo "--- BEFORE ---"
           docker run --cpus=2 -e BM25_XRAY_REPS bm25-arena-bench \
             "/opt/venv-before/bin/python /bench/bench_bm25s_arena.py" | tee docker-before.log
+          echo "--- AFTER ---"
           docker run --cpus=2 -e BM25_XRAY_REPS bm25-arena-bench \
             "/opt/venv-after/bin/python /bench/bench_bm25s_arena.py" | tee docker-after.log
 
@@ -189,7 +214,8 @@ jobs:
           docker run --cpus=2 bm25-arena-bench \
             "/opt/venv-before/bin/python /bench/bench_bm25s_arena.py --layers --cell M" | tee docker-layers-before-M.log
 
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: bench-bm25s-arena-docker-2cpu
           path: "docker-*.log"
