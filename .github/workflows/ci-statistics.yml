@@ -1,0 +1,133 @@
+name: ci-statistics
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Read-only token for every job: the workflow only builds, tests and uploads a
+# build artifact (artifact upload needs no write scope).
+permissions:
+  contents: read
+
+# One run per ref; a newer push to a pull request cancels the run it supersedes.
+# Pushes to main always run to completion.
+concurrency:
+  group: ci-statistics-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  test:
+    name: statistics-mojo differential tests + wheel (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install pixi
+        uses: prefix-dev/setup-pixi@d3f436a425481402e6a95a1d1fc10331c708cd9e # v0.10.2
+        with:
+          # Install the pixi binary only. The tasks below install the environment
+          # lazily on first `pixi run`, exactly as the previous curl|bash step did;
+          # `pixi install --locked` + caching is a separate, opt-in change.
+          run-install: false
+
+      - name: Build the statistics Mojo kernel
+        run: pixi run bash kernels/statistics/build.sh
+
+      - name: Differential suite (native backend, then forced fallback)
+        # The oracle is the CPython stdlib statistics module itself — nothing to install.
+        run: PYTHONPATH="python/statistics_mojo" PYTHONNOUSERSITE=1 pixi run bash scripts/test_all_statistics.sh
+
+      - name: Build + repair the platform wheel (delocate/auditwheel)
+        run: PYTHONNOUSERSITE=1 pixi run bash python/statistics_mojo/build_wheel.sh
+
+      - name: Smoke-test the wheel in a clean venv
+        shell: bash
+        run: |
+          set -e
+          python3 -m venv /tmp/statistics-wheel-smoke
+          /tmp/statistics-wheel-smoke/bin/pip install --quiet python/statistics_mojo/dist/*.whl
+          # Hide the pixi env for the smoke: an end user has no Mojo toolchain,
+          # so the wheel must load its kernel purely from its own vendored
+          # libraries (not via the build machine's absolute rpath).
+          repo_root="$PWD"
+          mv .pixi .pixi-hidden
+          trap 'mv "$repo_root/.pixi-hidden" "$repo_root/.pixi"' EXIT
+          cd /tmp && /tmp/statistics-wheel-smoke/bin/python - <<'EOF'
+          import statistics
+
+          import numpy as np
+
+          import statistics_mojo as sm
+
+          rng = np.random.default_rng(7)
+          data = rng.standard_normal(10_000).tolist()
+          idata = [int(v * 1000) for v in data]
+          # Exact agreement with the stdlib oracle on both result types.
+          assert repr(sm.mean(data)) == repr(statistics.mean(data))
+          assert repr(sm.variance(data)) == repr(statistics.variance(data))
+          assert repr(sm.stdev(data)) == repr(statistics.stdev(data))
+          assert repr(sm.pvariance(data)) == repr(statistics.pvariance(data))
+          assert repr(sm.pstdev(data)) == repr(statistics.pstdev(data))
+          assert repr(sm.fmean(data)) == repr(statistics.fmean(data))
+          assert repr(sm.median(data)) == repr(statistics.median(data))
+          assert repr(sm.quantiles(data, n=100)) == repr(statistics.quantiles(data, n=100))
+          assert repr(sm.mean(idata)) == repr(statistics.mean(idata))
+          assert repr(sm.variance(idata)) == repr(statistics.variance(idata))
+          assert repr(sm.mean_batch([data, idata])) == repr(
+              [statistics.mean(data), statistics.mean(idata)]
+          )
+          assert repr(sm.variance_batch([data, idata])) == repr(
+              [statistics.variance(data), statistics.variance(idata)]
+          )
+          # The forced fallback must produce the same results.
+          info = sm.backend_info()
+          assert info["native_available"], f"wheel must carry the native kernel: {info}"
+          print("wheel smoke OK:", sm.__version__, info["native_source"])
+          EOF
+          STATISTICS_MOJO_DISABLE_NATIVE=1 /tmp/statistics-wheel-smoke/bin/python - <<'EOF'
+          import statistics
+
+          import statistics_mojo as sm
+
+          data = [2.75, 1.75, 1.25, 0.25, 0.5, 1.25, 3.5]
+          assert repr(sm.variance(data)) == repr(statistics.variance(data))
+          assert repr(sm.quantiles(data, n=10)) == repr(statistics.quantiles(data, n=10))
+          info = sm.backend_info()
+          assert not info["native_available"], f"fallback must be forced off: {info}"
+          print("forced-fallback smoke OK:", sm.__version__)
+          EOF
+
+      - name: Smoke-test the pure wheel (fallback-only) in a clean venv
+        shell: bash
+        run: |
+          set -e
+          cd python/statistics_mojo
+          STATISTICS_MOJO_ALLOW_PURE_WHEEL=1 pixi run python -m build --wheel --no-isolation --outdir dist-pure .
+          python3 -m venv /tmp/statistics-pure-wheel-smoke
+          /tmp/statistics-pure-wheel-smoke/bin/pip install --quiet dist-pure/*.whl
+          cd /tmp && /tmp/statistics-pure-wheel-smoke/bin/python - <<'EOF'
+          import statistics
+
+          import statistics_mojo as sm
+
+          data = [2.75, 1.75, 1.25, 0.25, 0.5, 1.25, 3.5]
+          assert repr(sm.variance(data)) == repr(statistics.variance(data))
+          assert repr(sm.mean(data)) == repr(statistics.mean(data))
+          info = sm.backend_info()
+          assert not info["native_available"], f"pure wheel must use the fallback: {info}"
+          print("pure-wheel smoke OK:", sm.__version__)
+          EOF
+
+      - name: Upload wheel
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: statistics-mojo-wheel-${{ matrix.os }}
+          path: python/statistics_mojo/dist/*.whl
+          retention-days: 14
