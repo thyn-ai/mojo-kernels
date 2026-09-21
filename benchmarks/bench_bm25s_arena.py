@@ -238,18 +238,33 @@ def run_cell(n_docs: int, q_len: int = BM25_Q_LEN, label: str = ""):
         raise SystemExit(f"GATE FAIL at {n_docs} docs/{q_len}t: max|diff| {worst:.3e} > {BM25_ATOL}")
 
     # --- warm: interleaved round-robin, median of WARM_REPS ---
+    # Per-call rusage deltas (page faults + context switches) are the
+    # contention X-ray: they separate page-fault churn (minflt), major
+    # faults (majflt), and CFS-throttle/steal evidence (nivcsw) per lane.
+    import resource
+
+    def rusage():
+        r = resource.getrusage(resource.RUSAGE_SELF)
+        return r.ru_minflt, r.ru_majflt, r.ru_nvcsw, r.ru_nivcsw
+
     samples = {name: [] for name in lanes}
+    deltas = {name: [] for name in lanes}
     for _rep in range(WARM_REPS):
         for name, fn in lanes.items():
+            r0 = rusage()
             t0 = time.perf_counter()
             fn()
-            samples[name].append(time.perf_counter() - t0)
+            dt = time.perf_counter() - t0
+            r1 = rusage()
+            samples[name].append(dt)
+            deltas[name].append(tuple(b - a for a, b in zip(r0, r1)))
 
     warm = {name: statistics.median(s) for name, s in samples.items()}
     warm_min = {name: min(s) for name, s in samples.items()}
     warm_max = {name: max(s) for name, s in samples.items()}
     best_inc = min(warm["rank_bm25"], warm["bm25s"])
     hero = best_inc / warm["bm25_mojo"]
+    med_delta = {name: tuple(statistics.median(v) for v in zip(*deltas[name])) for name in lanes}
     return {
         "n_docs": n_docs,
         "q_len": q_len,
@@ -262,6 +277,7 @@ def run_cell(n_docs: int, q_len: int = BM25_Q_LEN, label: str = ""):
         "warm_max_s": warm_max,
         "hero": hero,
         "incumbent": "bm25s" if warm["bm25s"] <= warm["rank_bm25"] else "rank_bm25",
+        "rusage": med_delta,  # per-lane median (minflt, majflt, nvcsw, nivcsw) per warm call
     }
 
 
@@ -278,6 +294,10 @@ def print_cell(r):
             f"{1e3 * r['warm_min_s'][name]:>9.3f} {1e3 * r['warm_max_s'][name]:>9.3f} "
             f"{1e3 * r['warm_s'][name] / nq:>9.4f}"
         )
+    print(f"{'lane':<12} {'minflt':>8} {'majflt':>8} {'nvcsw':>8} {'nivcsw':>8}   (median per warm call)")
+    for name in ("rank_bm25", "bm25s", "bm25_mojo"):
+        minflt, majflt, nvcsw, nivcsw = r["rusage"][name]
+        print(f"{name:<12} {minflt:>8.0f} {majflt:>8.0f} {nvcsw:>8.0f} {nivcsw:>8.0f}")
     verdict = "WIN" if r["hero"] > 1.0 else "LOSS"
     print(f"hero: {r['hero']:.3f}× vs {r['incumbent']} (warm median of {WARM_REPS}) — {verdict}")
 
