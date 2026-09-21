@@ -129,7 +129,7 @@ jobs:
           # The numba JIT segfaults intermittently on some runner CPUs (observed
           # in bm25s' warmup_numba_scorer on Emerald Rapids); it is not our
           # kernel. Retry only on exit 139; any other failure is real.
-          for i in 1 2 3 4 5; do
+          for i in 1 2 3 4 5 6 7 8; do
             set +e
             /tmp/bench/bin/python benchmarks/bench_bm25s_arena.py | tee before.log
             rc=${PIPESTATUS[0]}
@@ -137,7 +137,7 @@ jobs:
             [ "$rc" = 0 ] && break
             [ "$rc" != 139 ] && exit "$rc"
             echo "::warning::bench attempt $i: numba JIT segfault (139); retrying"
-            [ "$i" = 5 ] && exit 1
+            [ "$i" = 8 ] && exit 1
           done
 
       - name: AFTER — wheel built from this branch
@@ -146,7 +146,7 @@ jobs:
         run: |
           set -euo pipefail
           /tmp/bench/bin/pip install --quiet --force-reinstall --no-deps python/bm25_mojo/dist/*.whl
-          for i in 1 2 3 4 5; do
+          for i in 1 2 3 4 5 6 7 8; do
             set +e
             /tmp/bench/bin/python benchmarks/bench_bm25s_arena.py | tee after.log
             rc=${PIPESTATUS[0]}
@@ -154,7 +154,7 @@ jobs:
             [ "$rc" = 0 ] && break
             [ "$rc" != 139 ] && exit "$rc"
             echo "::warning::bench attempt $i: numba JIT segfault (139); retrying"
-            [ "$i" = 5 ] && exit 1
+            [ "$i" = 8 ] && exit 1
           done
 
       - name: Layer-by-layer autopsy (both wheels)
@@ -165,7 +165,7 @@ jobs:
           set -euo pipefail
           run_cell () {
             local i rc
-            for i in 1 2 3 4 5; do
+            for i in 1 2 3 4 5 6 7 8; do
               set +e
               /tmp/bench/bin/python benchmarks/bench_bm25s_arena.py --layers --cell "$1" | tee "$2"
               rc=${PIPESTATUS[0]}
@@ -249,7 +249,7 @@ jobs:
             # Retries only on 139: the numba JIT segfaults intermittently on
             # some runner CPUs (bm25s warmup), unrelated to the kernel.
             local i rc
-            for i in 1 2 3 4 5; do
+            for i in 1 2 3 4 5 6 7 8; do
               set +e
               docker run --cpus=2 -e BM25_XRAY_REPS bm25-arena-bench "$1" | tee "$2"
               rc=${PIPESTATUS[0]}
@@ -273,7 +273,7 @@ jobs:
           set -euo pipefail
           run_img () {
             local i rc
-            for i in 1 2 3 4 5; do
+            for i in 1 2 3 4 5 6 7 8; do
               set +e
               docker run --cpus=2 bm25-arena-bench "$1" | tee "$2"
               rc=${PIPESTATUS[0]}
@@ -365,7 +365,7 @@ jobs:
           set -euo pipefail
           run_hog () {
             local i rc
-            for i in 1 2 3 4 5; do
+            for i in 1 2 3 4 5 6 7 8; do
               set +e
               docker run --cpus=2 -e BM25_XRAY_REPS -e STRESS_CPU -e STRESS_VM -e STRESS_VM_BYTES                 bm25-arena-contended                 "stress-ng --cpu \$STRESS_CPU --vm \$STRESS_VM --vm-bytes \$STRESS_VM_BYTES --vm-hang 0 >/tmp/hog.log 2>&1 & \
                  HOG=\$!; sleep 1; $1; rc=\$?; kill \$HOG 2>/dev/null; exit \$rc" | tee "$2"
