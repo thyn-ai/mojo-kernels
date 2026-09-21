@@ -475,9 +475,11 @@ def _compare_backends(
         outcome = ISSUE_DEGENERATE_NAN.key
     # Known shape: the document scores a posted term through a summation that
     # cancelled by ILL_CONDITIONED_AMPLIFICATION or more (its value is
-    # rounding residue, so no tolerance is meaningful there).
+    # rounding residue, so no tolerance is meaningful there). An ill mask
+    # with any True entry is exactly ISSUE_ILL_CONDITIONED_NORM.applies(case)
+    # restricted to this query, so the predicate is not evaluated again here.
     ill = _ill_conditioned_documents(case, query)
-    if ISSUE_ILL_CONDITIONED_NORM.applies(case) and np.any(~ok & ill):
+    if np.any(~ok & ill):
         explained |= ill
         outcome = ISSUE_ILL_CONDITIONED_NORM.key
     if outcome is not None and explained.all():
