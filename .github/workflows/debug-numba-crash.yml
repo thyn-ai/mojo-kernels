@@ -20,26 +20,27 @@ jobs:
           grep -m1 "model name" /proc/cpuinfo
           grep -m1 "flags" /proc/cpuinfo | tr ' ' '\n' | grep -E '^(avx512f|avx512_fp16|amx_bf16|amx_int8|amx_tile|avx_vnni_int8|avx10)' | sort -u | tr '\n' ' '; echo
 
-      - name: Reproduce under gdb
+      - name: Race experiment: does taskset to one core avoid the crash?
         run: |
           set -euo pipefail
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq gdb > /dev/null
           python3 -m venv /tmp/dbg
           /tmp/dbg/bin/pip install --quiet bm25s==0.3.11 numba==0.67.0 "numpy==1.26.4"
-          /tmp/dbg/bin/pip list | grep -Ei 'numba|llvmlite|numpy'
           cat > /tmp/crash.py <<'EOF'
           import bm25s
           bm = bm25s.BM25(dtype="float32")
           bm.index([["a", "b"], ["a"]], show_progress=False)
           bm.compile()
           bm.warmup_numba_scorer()
-          print("NO CRASH THIS TIME")
+          print("OK")
           EOF
-          set +e
-          for i in 1 2 3; do
-            echo "=== attempt $i ==="
-            gdb -batch -ex run -ex bt -ex "info registers rip" \
-              --args /tmp/dbg/bin/python /tmp/crash.py 2>&1 | tail -30
-            echo "attempt $i exit: $?"
+          for mode in "-c 0" "-c 0,1" ""; do
+            crashes=0; ok=0
+            for i in $(seq 1 12); do
+              set +e
+              out=$(taskset $mode /tmp/dbg/bin/python /tmp/crash.py 2>&1)
+              rc=$?
+              set -e
+              if [ $rc -eq 139 ]; then crashes=$((crashes+1)); elif [ $rc -eq 0 ]; then ok=$((ok+1)); fi
+            done
+            echo "taskset '$mode': ok=$ok crashes=$crashes of 12"
           done
