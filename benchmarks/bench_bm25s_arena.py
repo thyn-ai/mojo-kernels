@@ -342,29 +342,32 @@ def layers(n_docs: int, q_len: int = BM25_Q_LEN, reps: int = 30):
     ni = ours._native_index
     vocab_get = ours._vocab.get
     lib = ni._lib
-    f64p, i32p, i64p = ni._f64p, ni._i32p, ni._i64p
     batch_fn = ni._batch_fn
     handle = ni._handle
     n_docs_ni = ni._n_docs
 
+    def _flat_pack():
+        flat = []
+        offsets = [0]
+        extend = flat.extend
+        add_offset = offsets.append
+        for q in queries:
+            extend(v for v in map(vocab_get, q) if v is not None)
+            add_offset(len(flat))
+        return (
+            np.array(flat, dtype=np.int32),
+            np.array(offsets, dtype=np.int64),
+        )
+
     def mojo_staged():
-        qids_list = [  # stage: token->id mapping + per-query array
-            np.array([v for v in map(vocab_get, q) if v is not None], dtype=np.int32)
-            for q in queries
-        ]
-        counts = np.fromiter((len(q) for q in qids_list), dtype=np.int64, count=len(qids_list))
-        qids_flat = np.concatenate(
-            [np.ascontiguousarray(q, dtype=np.int32) for q in qids_list]
-        )  # stage: pack
-        offsets = np.zeros(len(qids_list) + 1, dtype=np.int64)
-        np.cumsum(counts, out=offsets[1:])
-        panel = np.zeros((len(qids_list), n_docs_ni), dtype=np.float64)  # stage: calloc
+        qids_flat, offsets = _flat_pack()  # stage: map + flat pack
+        panel = np.zeros((len(queries), n_docs_ni), dtype=np.float64)  # stage: calloc
         rc = batch_fn(  # stage: ctypes marshal + kernel walk
             handle,
-            qids_flat.ctypes.data_as(i32p),
-            offsets.ctypes.data_as(i64p),
-            len(qids_list),
-            panel.ctypes.data_as(f64p),
+            qids_flat.ctypes.data,
+            offsets.ctypes.data,
+            len(queries),
+            panel.ctypes.data,
         )
         assert rc == 0
         return np.asarray(panel)
@@ -407,27 +410,20 @@ def layers(n_docs: int, q_len: int = BM25_Q_LEN, reps: int = 30):
          lambda outs: np.stack(outs)),
     ]
     mojo_parts = [
-        ("qmap+np.array (10q)", lambda: None,
-         lambda _c: [np.array([v for v in map(vocab_get, q) if v is not None], dtype=np.int32) for q in queries]),
-        ("pack (concat+cumsum)", lambda: [np.array([v for v in map(vocab_get, q) if v is not None], dtype=np.int32) for q in queries],
-         lambda ql: _pack(ql)),
+        ("flat map+pack (10q)", lambda: None,
+         lambda _c: _flat_pack()),
         ("panel np.zeros f64", lambda: None,
          lambda _c: np.zeros((len(queries), n_docs_ni), dtype=np.float64)),
-        ("ffi call (walk inside)", lambda: _pack([np.array([v for v in map(vocab_get, q) if v is not None], dtype=np.int32) for q in queries]),
-         lambda pk: batch_fn(handle, pk[1].ctypes.data_as(i32p), pk[2].ctypes.data_as(i64p),
-                             len(queries), pk[3].ctypes.data_as(f64p))),
+        ("ffi call (walk inside)", lambda: (*_flat_pack(), np.zeros((len(queries), n_docs_ni), dtype=np.float64)),
+         lambda pk: batch_fn(handle, pk[0].ctypes.data, pk[1].ctypes.data,
+                             len(queries), pk[2].ctypes.data)),
     ]
-
-    def _pack(qids_list):
-        counts = np.fromiter((len(q) for q in qids_list), dtype=np.int64, count=len(qids_list))
-        qids_flat = np.concatenate([np.ascontiguousarray(q, dtype=np.int32) for q in qids_list])
-        offsets = np.zeros(len(qids_list) + 1, dtype=np.int64)
-        np.cumsum(counts, out=offsets[1:])
-        panel = np.zeros((len(qids_list), n_docs_ni), dtype=np.float64)
-        return counts, qids_flat, offsets, panel
 
     # microcosts
     def micro():
+        import ctypes
+
+        f64p = ctypes.POINTER(ctypes.c_double)
         rows = []
         t = timeit(lambda: np.zeros((10, n_docs), dtype=np.float64), reps=50)
         rows.append((f"np.zeros (10x{n_docs}) f64 [{10 * n_docs * 8 / 1024:.0f} KiB]", t))
@@ -439,6 +435,8 @@ def layers(n_docs: int, q_len: int = BM25_Q_LEN, reps: int = 30):
         arr = np.zeros((10, n_docs), dtype=np.float64)
         t = timeit(lambda: arr.ctypes.data_as(f64p), reps=200)
         rows.append((".ctypes.data_as (one)", t))
+        t = timeit(lambda: arr.ctypes.data, reps=200)
+        rows.append((".ctypes.data (one)", t))
         abi = lib.bm25mojo_abi_version
         t = timeit(lambda: abi(), reps=200)
         rows.append(("cached ctypes call (abi_version)", t))

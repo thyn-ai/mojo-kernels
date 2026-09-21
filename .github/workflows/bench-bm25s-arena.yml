@@ -117,7 +117,14 @@ jobs:
         run: |
           set -euo pipefail
           /tmp/bench/bin/pip install --quiet "$OLD_WHEEL_URL"
-          /tmp/bench/bin/python benchmarks/bench_bm25s_arena.py | tee before.log
+          # The numba JIT segfaults intermittently on some runner CPUs (observed
+          # in bm25s' warmup_numba_scorer on Emerald Rapids); it is not our
+          # kernel. Retry the whole bench up to 3x; a complete log is what counts.
+          for i in 1 2 3; do
+            if /tmp/bench/bin/python benchmarks/bench_bm25s_arena.py | tee before.log; then break; fi
+            echo "::warning::bench attempt $i crashed (flaky numba JIT); retrying"
+            [ "$i" = 3 ] && exit 1
+          done
 
       - name: AFTER — wheel built from this branch
         env:
@@ -125,7 +132,11 @@ jobs:
         run: |
           set -euo pipefail
           /tmp/bench/bin/pip install --quiet --force-reinstall --no-deps python/bm25_mojo/dist/*.whl
-          /tmp/bench/bin/python benchmarks/bench_bm25s_arena.py | tee after.log
+          for i in 1 2 3; do
+            if /tmp/bench/bin/python benchmarks/bench_bm25s_arena.py | tee after.log; then break; fi
+            echo "::warning::bench attempt $i crashed (flaky numba JIT); retrying"
+            [ "$i" = 3 ] && exit 1
+          done
 
       - name: Layer-by-layer autopsy (both wheels)
         if: ${{ github.event_name != 'workflow_dispatch' || inputs.layers }}
@@ -133,11 +144,18 @@ jobs:
           BM25_XRAY_REPS: ${{ inputs.reps || '5' }}
         run: |
           set -euo pipefail
-          /tmp/bench/bin/python benchmarks/bench_bm25s_arena.py --layers --cell M | tee layers-after-M.log
-          /tmp/bench/bin/python benchmarks/bench_bm25s_arena.py --layers --cell S | tee layers-after-S.log
-          /tmp/bench/bin/python benchmarks/bench_bm25s_arena.py --layers --cell L | tee layers-after-L.log
+          run_cell () {
+            for i in 1 2 3; do
+              if /tmp/bench/bin/python benchmarks/bench_bm25s_arena.py --layers --cell "$1" | tee "$2"; then return 0; fi
+              echo "::warning::layers $1 attempt $i crashed (flaky numba JIT); retrying"
+            done
+            return 1
+          }
+          run_cell M layers-after-M.log
+          run_cell S layers-after-S.log
+          run_cell L layers-after-L.log
           /tmp/bench/bin/pip install --quiet --force-reinstall --no-deps "$OLD_WHEEL_URL"
-          /tmp/bench/bin/python benchmarks/bench_bm25s_arena.py --layers --cell M | tee layers-before-M.log
+          run_cell M layers-before-M.log
 
       - if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -196,12 +214,19 @@ jobs:
           BM25_XRAY_REPS: ${{ inputs.reps || '5' }}
         run: |
           set -euo pipefail
+          run_img () {
+            # Retries: the numba JIT segfaults intermittently on some runner
+            # CPUs (bm25s warmup), unrelated to the kernel under test.
+            for i in 1 2 3; do
+              if docker run --cpus=2 -e BM25_XRAY_REPS bm25-arena-bench "$1" | tee "$2"; then return 0; fi
+              echo "::warning::docker bench attempt $i crashed (flaky numba JIT); retrying"
+            done
+            return 1
+          }
           echo "--- BEFORE ---"
-          docker run --cpus=2 -e BM25_XRAY_REPS bm25-arena-bench \
-            "/opt/venv-before/bin/python /bench/bench_bm25s_arena.py" | tee docker-before.log
+          run_img "/opt/venv-before/bin/python /bench/bench_bm25s_arena.py" docker-before.log
           echo "--- AFTER ---"
-          docker run --cpus=2 -e BM25_XRAY_REPS bm25-arena-bench \
-            "/opt/venv-after/bin/python /bench/bench_bm25s_arena.py" | tee docker-after.log
+          run_img "/opt/venv-after/bin/python /bench/bench_bm25s_arena.py" docker-after.log
 
       - name: Layers inside --cpus=2
         if: ${{ github.event_name != 'workflow_dispatch' || inputs.layers }}
@@ -209,10 +234,14 @@ jobs:
           BM25_XRAY_REPS: ${{ inputs.reps || '5' }}
         run: |
           set -euo pipefail
-          docker run --cpus=2 bm25-arena-bench \
-            "/opt/venv-after/bin/python /bench/bench_bm25s_arena.py --layers --cell M" | tee docker-layers-after-M.log
-          docker run --cpus=2 bm25-arena-bench \
-            "/opt/venv-before/bin/python /bench/bench_bm25s_arena.py --layers --cell M" | tee docker-layers-before-M.log
+          for i in 1 2 3; do
+            if docker run --cpus=2 bm25-arena-bench "/opt/venv-after/bin/python /bench/bench_bm25s_arena.py --layers --cell M" | tee docker-layers-after-M.log; then break; fi
+            echo "::warning::attempt $i crashed (flaky numba JIT); retrying"; [ "$i" = 3 ] && exit 1
+          done
+          for i in 1 2 3; do
+            if docker run --cpus=2 bm25-arena-bench "/opt/venv-before/bin/python /bench/bench_bm25s_arena.py --layers --cell M" | tee docker-layers-before-M.log; then break; fi
+            echo "::warning::attempt $i crashed (flaky numba JIT); retrying"; [ "$i" = 3 ] && exit 1
+          done
 
       - if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
