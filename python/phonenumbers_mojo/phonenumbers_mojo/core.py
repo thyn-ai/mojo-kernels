@@ -166,10 +166,22 @@ def _tables() -> fb.Tables:
 
 
 def _store():
-    """Lazily resolve the native kernel; None when unavailable."""
+    """Lazily resolve the native kernel; None when unavailable.
+
+    PHONENUMBERS_MOJO_DISABLE_NATIVE=1 is honored at call time (the
+    differential suite and users can force the fallback mid-process)."""
     global _STORE, _BACKEND
-    if _BACKEND is not None:
+    import os
+
+    if os.environ.get("PHONENUMBERS_MOJO_DISABLE_NATIVE") == "1":
+        if _BACKEND != "fallback":
+            _STORE, _BACKEND = None, "fallback"
+        return None
+    if _BACKEND == "native":
         return _STORE
+    if _BACKEND == "fallback" and _STORE is None:
+        # Native was unavailable before; do not retry on every call.
+        return None
     from phonenumbers_mojo import _native
 
     try:
@@ -243,7 +255,9 @@ def _phone_number_from_parsed(p: fb.Parsed) -> PhoneNumber:
 def parse(number: str, region: str | None = None) -> PhoneNumber:
     """Parse a phone number string. Raises NumberParseException on failure,
     with the same error_type and message as the oracle."""
-    store = _store()
+    # Non-ASCII input is outside the kernel's scope by design; the
+    # pure-Python engine (full Unicode support) handles it transparently.
+    store = _store() if (isinstance(number, str) and number.isascii()) else None
     if store is not None:
         from phonenumbers_mojo import _native
 
@@ -251,12 +265,17 @@ def parse(number: str, region: str | None = None) -> PhoneNumber:
             p = store.parse(number, _region_index(region))
         except _native.ParseFailure as exc:
             raise NumberParseException(exc.error_type, exc.message) from None
+        if p is None:
+            p = _fallback_parse(number, region)
         return _phone_number_from_parsed(p)
+    return _phone_number_from_parsed(_fallback_parse(number, region))
+
+
+def _fallback_parse(number: str, region: str | None) -> fb.Parsed:
     try:
-        p = fb.parse(_tables(), number, region)
+        return fb.parse(_tables(), number, region)
     except fb.ParseError as exc:
         raise NumberParseException(exc.error_type, exc.message) from None
-    return _phone_number_from_parsed(p)
 
 
 def _nsn_of(numobj: PhoneNumber) -> str:
@@ -300,12 +319,28 @@ def validate_column(numbers, region: str | None = None) -> list[bool]:
     """Batch API: validate a column of raw phone-number strings.
 
     Returns one bool per input: True when the string parses and is a valid
-    number. On the native backend the whole column crosses the FFI once.
+    number. On the native backend the whole column crosses the FFI once;
+    non-ASCII rows are served by the pure-Python engine.
     """
     values = list(numbers)
     store = _store()
     if store is not None:
-        return store.validate_column(values, _region_index(region))
+        rows = store.validate_column(values, _region_index(region))
+        if all(r is not None for r in rows):
+            return rows  # type: ignore[return-value]
+        # Fill kernel-unserved rows (non-ASCII) with the fallback engine.
+        tables = _tables()
+        out = []
+        for v, r in zip(values, rows):
+            if r is not None:
+                out.append(r)
+                continue
+            try:
+                p = fb.parse(tables, v, region)
+                out.append(fb.is_valid(tables, p.cc, p.nsn))
+            except fb.ParseError:
+                out.append(False)
+        return out
     tables = _tables()
     out = []
     for v in values:

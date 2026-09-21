@@ -160,6 +160,7 @@ def _bind_abi(lib: ctypes.CDLL) -> None:
         i32p,
         ctypes.c_int64,
         u8p,
+        i32p,
     ]
     lib.phonenumbersmojo_validate_batch.restype = ctypes.c_int32
     lib.phonenumbersmojo_metadata_destroy.argtypes = [ctypes.c_void_p]
@@ -250,18 +251,19 @@ def _as_u8_buffer(data: bytes) -> tuple[ctypes.POINTER(ctypes.c_uint8), object]:
 
 
 # Parse error messages must match the oracle; the kernel returns the
-# error_type, the wrapper maps it to the canonical message.
+# error_type and a message-variant selector in the `ccs` detail field.
 _ERROR_MESSAGES = {
-    0: "Could not interpret numbers after plus-sign.",
-    1: "The string supplied did not seem to be a phone number.",
-    2: "Phone number had an IDD, but after this was not long enough to be a viable phone number.",
-    3: "The string supplied is too short to be a phone number.",
-    4: "The string supplied is too long to be a phone number.",
+    (0, 1): "Could not interpret numbers after plus-sign.",
+    (0, 5): "Country calling code supplied was not recognised.",
+    (0, -1): "Missing or invalid default region.",
+    (1, 0): "The string supplied did not seem to be a phone number.",
+    (1, -3): "The phone-context value is invalid",
+    (1, -4): "The phone number supplied was None.",
+    (2, 0): "Phone number had an IDD, but after this was not long enough to be a viable phone number.",
+    (3, 0): "The string supplied is too short to be a phone number.",
+    (4, 0): "The string supplied is too long to be a phone number.",
+    (4, -2): "The string supplied was too long to parse.",
 }
-# error_type 0 has two oracle messages depending on the path; the kernel
-# encodes the IDD variant as status detail. See NativeStore.parse.
-_ERROR_MESSAGE_IDD_CC = "Country calling code supplied was not recognised."
-_ERROR_MESSAGE_NO_REGION = "Missing or invalid default region."
 
 
 class NativeStore:
@@ -280,7 +282,9 @@ class NativeStore:
         self._lib = lib
         self._handle = handle
 
-    def parse(self, text: str, region_idx: int) -> fb.Parsed:
+    def parse(self, text: str, region_idx: int) -> fb.Parsed | None:
+        """Parse via the kernel; None when the input is outside the kernel's
+        ASCII scope and must be handled by the pure-Python engine."""
         if self._handle is None:
             raise NativeUnavailable("native store is closed")
         data = text.encode("utf-8")
@@ -292,12 +296,12 @@ class NativeStore:
         )
         if rc != 0 or out.status == 2:
             raise NativeUnavailable(f"native parse failed with status {rc or out.status}")
+        if out.status == 3:
+            return None  # non-ASCII input: caller routes to the fallback engine
         if out.status == 1:
-            msg = _ERROR_MESSAGES.get(out.error_type, "Invalid phone number.")
-            if out.error_type == 0 and out.ccs == -1:
-                msg = _ERROR_MESSAGE_NO_REGION
-            elif out.error_type == 0 and out.ccs == 5:
-                msg = _ERROR_MESSAGE_IDD_CC
+            msg = _ERROR_MESSAGES.get((out.error_type, out.ccs))
+            if msg is None:
+                msg = _ERROR_MESSAGES[(out.error_type, 0)]
             raise ParseFailure(out.error_type, msg)
         return fb.Parsed(
             cc=out.cc,
@@ -344,7 +348,10 @@ class NativeStore:
             raise NativeUnavailable(f"native format failed with status {rc}")
         raise NativeUnavailable("native format buffer keeps growing")
 
-    def validate_column(self, values: list[str], region_idx: int) -> list[bool]:
+    def validate_column(self, values: list[str], region_idx: int) -> list[bool | None]:
+        """One FFI call for the whole column. Rows the kernel cannot serve
+        (non-ASCII input) come back as None and are routed by the caller to
+        the pure-Python engine."""
         if self._handle is None:
             raise NativeUnavailable("native store is closed")
         n = len(values)
@@ -358,13 +365,22 @@ class NativeStore:
         off_arr = (ctypes.c_int64 * (n + 1))(*offsets)
         reg_arr = (ctypes.c_int32 * n)(*([region_idx] * n))
         out_arr = (ctypes.c_uint8 * n)()
+        status_arr = (ctypes.c_int32 * n)()
         pptr, _pin = _as_u8_buffer(packed)
         rc = self._lib.phonenumbersmojo_validate_batch(
-            self._handle, pptr, off_arr, reg_arr, ctypes.c_int64(n), out_arr
+            self._handle, pptr, off_arr, reg_arr, ctypes.c_int64(n), out_arr, status_arr
         )
         if rc != 0:
             raise NativeUnavailable(f"native batch validate failed with status {rc}")
-        return [bool(out_arr[i]) for i in range(n)]
+        out: list[bool | None] = []
+        for i in range(n):
+            if status_arr[i] == 0:
+                out.append(bool(out_arr[i]))
+            elif status_arr[i] == 1:
+                out.append(False)
+            else:  # 3: non-ASCII, out of kernel scope
+                out.append(None)
+        return out
 
     def close(self) -> None:
         handle, self._handle = self._handle, None
