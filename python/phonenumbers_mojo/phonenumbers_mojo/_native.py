@@ -127,7 +127,7 @@ def _bind_abi(lib: ctypes.CDLL) -> None:
     lib.phonenumbersmojo_metadata_create.restype = ctypes.c_void_p
     lib.phonenumbersmojo_parse.argtypes = [
         ctypes.c_void_p,
-        u8p,
+        ctypes.c_char_p,
         ctypes.c_int64,
         ctypes.c_int32,
         ctypes.POINTER(_PNMOut),
@@ -136,7 +136,7 @@ def _bind_abi(lib: ctypes.CDLL) -> None:
     lib.phonenumbersmojo_validate.argtypes = [
         ctypes.c_void_p,
         ctypes.c_int32,
-        u8p,
+        ctypes.c_char_p,
         ctypes.c_int64,
         i32p,
     ]
@@ -144,9 +144,9 @@ def _bind_abi(lib: ctypes.CDLL) -> None:
     lib.phonenumbersmojo_format.argtypes = [
         ctypes.c_void_p,
         ctypes.c_int32,
-        u8p,
+        ctypes.c_char_p,
         ctypes.c_int64,
-        u8p,
+        ctypes.c_char_p,
         ctypes.c_int64,
         ctypes.c_int32,
         u8p,
@@ -155,7 +155,7 @@ def _bind_abi(lib: ctypes.CDLL) -> None:
     lib.phonenumbersmojo_format.restype = ctypes.c_int32
     lib.phonenumbersmojo_validate_batch.argtypes = [
         ctypes.c_void_p,
-        u8p,
+        ctypes.c_char_p,
         i64p,
         i32p,
         ctypes.c_int64,
@@ -250,6 +250,11 @@ def _as_u8_buffer(data: bytes) -> tuple[ctypes.POINTER(ctypes.c_uint8), object]:
     return ctypes.cast(view, ctypes.POINTER(ctypes.c_uint8)), view
 
 
+def _as_u8(data: bytes) -> tuple[ctypes.c_char_p, object]:
+    """Cheaper pin: c_char_p over the bytes' internal buffer (zero-copy)."""
+    return ctypes.c_char_p(data), data
+
+
 # Parse error messages must match the oracle; the kernel returns the
 # error_type and a message-variant selector in the `ccs` detail field.
 _ERROR_MESSAGES = {
@@ -288,7 +293,7 @@ class NativeStore:
         if self._handle is None:
             raise NativeUnavailable("native store is closed")
         data = text.encode("utf-8")
-        ptr, _pin = _as_u8_buffer(data)
+        ptr, _pin = _as_u8(data)
         out = _PNMOut()
         rc = self._lib.phonenumbersmojo_parse(
             self._handle, ptr, ctypes.c_int64(len(data)), ctypes.c_int32(region_idx),
@@ -315,7 +320,7 @@ class NativeStore:
         if self._handle is None:
             raise NativeUnavailable("native store is closed")
         data = nsn.encode("ascii")
-        ptr, _pin = _as_u8_buffer(data)
+        ptr, _pin = _as_u8(data)
         flags = ctypes.c_int32(0)
         rc = self._lib.phonenumbersmojo_validate(
             self._handle, ctypes.c_int32(cc), ptr, ctypes.c_int64(len(data)),
@@ -330,8 +335,8 @@ class NativeStore:
             raise NativeUnavailable("native store is closed")
         ndata = nsn.encode("ascii")
         edata = (ext or "").encode("ascii")
-        nptr, _npin = _as_u8_buffer(ndata)
-        eptr, _epin = _as_u8_buffer(edata)
+        nptr, _npin = _as_u8(ndata)
+        eptr, _epin = _as_u8(edata)
         cap = 128
         for _ in range(3):
             buf = (ctypes.c_uint8 * cap)()
@@ -366,7 +371,7 @@ class NativeStore:
         reg_arr = (ctypes.c_int32 * n)(*([region_idx] * n))
         out_arr = (ctypes.c_uint8 * n)()
         status_arr = (ctypes.c_int32 * n)()
-        pptr, _pin = _as_u8_buffer(packed)
+        pptr, _pin = _as_u8(packed)
         rc = self._lib.phonenumbersmojo_validate_batch(
             self._handle, pptr, off_arr, reg_arr, ctypes.c_int64(n), out_arr, status_arr
         )

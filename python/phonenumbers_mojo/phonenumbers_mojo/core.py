@@ -18,6 +18,8 @@ both paths.
 
 from __future__ import annotations
 
+import os
+
 from phonenumbers_mojo import _fallback as fb
 
 __all__ = [
@@ -155,7 +157,8 @@ class PhoneNumber:
 
 _TABLES: fb.Tables | None = None
 _STORE = None  # native store handle, when the kernel is available
-_BACKEND: str | None = None
+_BACKEND: str | None = None  # "native" | "fallback"; None = never attempted
+_FORCED = False  # was the fallback env-forced at the previous call?
 
 
 def _tables() -> fb.Tables:
@@ -166,30 +169,27 @@ def _tables() -> fb.Tables:
 
 
 def _store():
-    """Lazily resolve the native kernel; None when unavailable.
+    """Lazily resolve the native kernel; None when unavailable or disabled.
 
-    PHONENUMBERS_MOJO_DISABLE_NATIVE=1 is honored at call time (the
-    differential suite and users can force the fallback mid-process)."""
-    global _STORE, _BACKEND
-    import os
+    PHONENUMBERS_MOJO_DISABLE_NATIVE=1 is honored at call time; when it is
+    unset again the native kernel is re-attempted once."""
+    global _STORE, _BACKEND, _FORCED
 
     if os.environ.get("PHONENUMBERS_MOJO_DISABLE_NATIVE") == "1":
-        if _BACKEND != "fallback":
-            _STORE, _BACKEND = None, "fallback"
+        _FORCED = True
         return None
-    if _BACKEND == "native":
-        return _STORE
-    if _BACKEND == "fallback" and _STORE is None:
-        # Native was unavailable before; do not retry on every call.
-        return None
-    from phonenumbers_mojo import _native
+    if _FORCED:
+        _FORCED = False
+        _BACKEND = None  # env flip back: allow one re-attempt
+    if _BACKEND is None:
+        from phonenumbers_mojo import _native
 
-    try:
-        _STORE = _native.NativeStore(_tables_blob())
-        _BACKEND = "native"
-    except _native.NativeUnavailable:
-        _STORE = None
-        _BACKEND = "fallback"
+        try:
+            _STORE = _native.NativeStore(_tables_blob())
+            _BACKEND = "native"
+        except _native.NativeUnavailable:
+            _STORE = None
+            _BACKEND = "fallback"
     return _STORE
 
 
@@ -202,6 +202,8 @@ def _tables_blob() -> bytes:
 def backend() -> str:
     """Which backend serves this process: "native" or "fallback"."""
     _store()
+    if os.environ.get("PHONENUMBERS_MOJO_DISABLE_NATIVE") == "1":
+        return "fallback"
     return _BACKEND or "fallback"
 
 

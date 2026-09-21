@@ -130,6 +130,7 @@ struct Meta(Copyable, Movable):
     # formats, both lists laid back to back: per format 4 x i32
     var reg_fmt_ptr: I64Ptr  # [n_regions] flat index into fmt_words
     var fmt_words: I32Ptr  # [4 * (nfmt + nifmt) summed]
+    var max_insts: Int64
     var n_cc: Int64
     var cc_val: I32Ptr  # [n_cc] ascending
     var cc_start: I32Ptr  # [n_cc] start index into cc_region
@@ -168,6 +169,7 @@ struct Meta(Copyable, Movable):
         reg_nifmt: I32Ptr,
         reg_fmt_ptr: I64Ptr,
         fmt_words: I32Ptr,
+        max_insts: Int64,
         n_cc: Int64,
         cc_val: I32Ptr,
         cc_start: I32Ptr,
@@ -203,6 +205,7 @@ struct Meta(Copyable, Movable):
         self.reg_nifmt = reg_nifmt
         self.reg_fmt_ptr = reg_fmt_ptr
         self.fmt_words = fmt_words
+        self.max_insts = max_insts
         self.n_cc = n_cc
         self.cc_val = cc_val
         self.cc_start = cc_start
@@ -486,6 +489,11 @@ def _parse_blob(blob: U8Ptr, blob_len: Int64) -> Handle:
         p += 8 + 4 * n
 
     var slot = unsafe_alloc[Meta](1)
+    var maxi = Int64(1)
+    for i in range(Int(n_programs)):
+        var n = Int64(prog_insts[unsafe_offset=i])
+        if n > maxi:
+            maxi = n
     slot[] = Meta(
         n_programs,
         prog_insts,
@@ -516,6 +524,7 @@ def _parse_blob(blob: U8Ptr, blob_len: Int64) -> Handle:
         reg_nifmt,
         reg_fmt_ptr,
         fmt_words,
+        maxi,
         n_cc,
         cc_val,
         cc_start,
@@ -1763,7 +1772,7 @@ def phonenumbersmojo_parse(
         return 2
     var meta = handle.value().unsafe_bitcast[Meta]()
     var scr = unsafe_alloc[Scratch](1)
-    scr[] = Scratch(_max_insts(meta))
+    scr[] = Scratch(Int(meta[].max_insts))
     var out_nsn = dst.unsafe_bitcast[UInt8]() + 36
     var out_ext = dst.unsafe_bitcast[UInt8]() + 60
     var status = _parse_full(
@@ -1787,7 +1796,7 @@ def phonenumbersmojo_validate(
         return 2
     var meta = handle.value().unsafe_bitcast[Meta]()
     var scr = unsafe_alloc[Scratch](1)
-    scr[] = Scratch(_max_insts(meta))
+    scr[] = Scratch(Int(meta[].max_insts))
     var valid = _is_valid(meta, scr, cc, nsn, Int(nsn_len))
     var possible = _is_possible(meta, scr, cc, Int(nsn_len))
     out_flags[unsafe_offset=0] = (Int32(1) if valid else Int32(0)) | (Int32(2) if possible else Int32(0))
@@ -1812,7 +1821,7 @@ def phonenumbersmojo_format(
         return -1
     var meta = handle.value().unsafe_bitcast[Meta]()
     var scr = unsafe_alloc[Scratch](1)
-    scr[] = Scratch(_max_insts(meta))
+    scr[] = Scratch(Int(meta[].max_insts))
     var nsn_l = List[UInt8]()
     for i in range(Int(nsn_len)):
         nsn_l.append(nsn[unsafe_offset=i])
@@ -1843,7 +1852,7 @@ def phonenumbersmojo_validate_batch(
         return 2
     var meta = handle.value().unsafe_bitcast[Meta]()
     var scr = unsafe_alloc[Scratch](1)
-    scr[] = Scratch(_max_insts(meta))
+    scr[] = Scratch(Int(meta[].max_insts))
     var intbuf = unsafe_alloc[Int32](9)
     var nsnbuf = unsafe_alloc[UInt8](NSN_CAP)
     var extbuf = unsafe_alloc[UInt8](EXT_CAP)
