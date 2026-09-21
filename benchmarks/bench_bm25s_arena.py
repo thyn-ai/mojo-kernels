@@ -514,6 +514,7 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--layers", action="store_true", help="staged layer autopsy")
     ap.add_argument("--cell", choices=["S", "M", "L"], help="one arena size only")
+    ap.add_argument("--arena-only", action="store_true", help="run only the arena S/M/L cells")
     ap.add_argument("--sweep-only", action="store_true", help="skip arena S/M/L cells, run only the sweep")
     args = ap.parse_args()
 
@@ -539,11 +540,12 @@ def main() -> None:
 
     print("\n== sweep (same protocol; seed = SEED + n_docs + q_len) ==")
     sweep = []
-    for n_docs in SWEEP_DOCS:
-        for q_len in SWEEP_QLENS:
-            r = run_cell(n_docs, q_len, label=f"{n_docs:,} docs · 10q × {q_len}t")
-            sweep.append(r)
-            print_cell(r)
+    if not args.arena_only:
+        for n_docs in SWEEP_DOCS:
+            for q_len in SWEEP_QLENS:
+                r = run_cell(n_docs, q_len, label=f"{n_docs:,} docs · 10q × {q_len}t")
+                sweep.append(r)
+                print_cell(r)
 
     for r in results:
         print_cell(r)
