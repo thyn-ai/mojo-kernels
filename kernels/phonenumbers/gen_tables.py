@@ -583,7 +583,9 @@ def serialize(progs: ProgramTable, strs: StringTable, regions: list[dict]) -> by
 
 
 def main() -> None:
-    root = ElementTree.parse(XML_PATH).getroot()
+    # XML_PATH is the libphonenumber metadata vendored in this repository
+    # (kernels/phonenumbers/data/), a build-time input -- not untrusted input.
+    root = ElementTree.parse(XML_PATH).getroot()  # nosemgrep: use-defused-xml-parse
     progs, strs = ProgramTable(), StringTable()
     regions = build_regions(root, progs, strs)
     blob = serialize(progs, strs, regions)

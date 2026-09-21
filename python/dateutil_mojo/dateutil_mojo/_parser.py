@@ -746,8 +746,12 @@ class _Parser:
             self._hard()
         st.mark(self.toks[i])
         offset *= sign
-        if st.tzname is not None and st.tzname_known and st.tzoffset is None:
-            # "UTC +02:00" (spaced): the recognized name wins, offset dropped.
+        if (
+            st.tzname is not None
+            and (st.tzname in _UTC_ZERO or st.tzname.lower() == "z")
+            and st.tzoffset is None
+        ):
+            # "UTC +02:00" (spaced): the UTC-zone name wins, offset dropped.
             if self.fuzzy:
                 self.extra_kept += 1
             return
@@ -955,19 +959,20 @@ class _Parser:
 
         # Unknown ALL-UPPERCASE name (<=5 chars): consumed as a tz name,
         # warned about (and dropped) at build unless tzinfos resolves it.
-        # An attached signed offset after an unknown name is an error.
+        # An attached signed offset flips POSIX-style, exactly as after a
+        # recognized name: the oracle parses "EST+2" as tzoffset('EST', -7200).
         if (
             st.hour is not None
             and w.isalpha()
             and w.upper() == w
             and 1 <= len(w) <= 5
-            and not self._attached_signed(i)
         ):
             st.tzname = w
             st.tzname_known = False
             st.mark(tok)
             if self.fuzzy:
                 self.extra_kept += 1
+            self._attached_offset_after_name(i)
             return
 
         self._unconsumable(i)
@@ -997,6 +1002,11 @@ class _Parser:
                 self._unconsumable(i + 1)
                 return
             st.tzoffset = -sign * offset
+            if st.tzname in _UTC_ZERO or (st.tzname or "").lower() == "z":
+                # The oracle drops a UTC-zone name here: "UTC+2" is *not* UTC,
+                # it is a numeric offset ("GMT+3" means "my time +3 is GMT").
+                st.tzname = None
+                st.tzname_known = False
             st.mark(nxt)
             nxt.kind = 3
 
@@ -1197,13 +1207,10 @@ def _build_tzaware(st: _State, tzinfos):
     if tzoffset_s is not None:
         if tzoffset_s == 0:
             return tzutc()
-        # The name is kept in the tzoffset only when it was a recognized
-        # non-UTC-zero name ("UT+5" -> tzoffset('UT', -18000)).
-        keep = (
-            tzname
-            if (st.tzname_known and tzname not in _UTC_ZERO and not is_z)
-            else None
-        )
+        # The name rides along in the tzoffset unless it is a UTC-zero name
+        # ("UT+5" -> tzoffset('UT', -18000), "EST +2" -> tzoffset('EST', 7200);
+        # recognized or not makes no difference to the oracle here).
+        keep = tzname if (tzname not in _UTC_ZERO and not is_z) else None
         return tzoffset(keep, tzoffset_s)
 
     if tzname is not None:

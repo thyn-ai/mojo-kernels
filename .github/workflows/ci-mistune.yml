@@ -70,13 +70,16 @@ jobs:
           trap 'mv "$repo_root/.pixi-hidden" "$repo_root/.pixi"' EXIT
           cd /tmp
           cat > /tmp/mistune_smoke.py <<'EOF'
+          import os
+
           import mistune_mojo
 
           doc = "# smoke\n\n- *em* `code` [link](https://example.com)\n\n> quote\n"
           html = mistune_mojo.markdown(doc)
           assert html.startswith("<h1>smoke</h1>"), html
           info = mistune_mojo.backend_info()
-          assert info["native_available"], f"wheel must carry the native kernel: {info}"
+          if os.environ.get("MISTUNE_MOJO_DISABLE_NATIVE") != "1":
+              assert info["native_available"], f"wheel must carry the native kernel: {info}"
           import hashlib
           print("sha256:", hashlib.sha256(html.encode()).hexdigest())
           EOF
