@@ -20,7 +20,7 @@ jobs:
           grep -m1 "model name" /proc/cpuinfo
           grep -m1 "flags" /proc/cpuinfo | tr ' ' '\n' | grep -E '^(avx512f|avx512_fp16|amx_bf16|amx_int8|amx_tile|avx_vnni_int8|avx10)' | sort -u | tr '\n' ' '; echo
 
-      - name: Race experiment: does taskset to one core avoid the crash?
+      - name: "Race experiment: does taskset to one core avoid the crash?"
         run: |
           set -euo pipefail
           python3 -m venv /tmp/dbg
