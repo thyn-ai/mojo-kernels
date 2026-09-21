@@ -23,7 +23,7 @@ PY=()
 if ~/.pixi/bin/pixi run python -c "import phonenumbers" 2>/dev/null; then
   PY=(~/.pixi/bin/pixi run python)
 elif ~/.pixi/bin/pixi run python -m pip --version >/dev/null 2>&1; then
-  ~/.pixi/bin/pixi run python -m pip install --quiet "$ORACLE_PIN"
+  ~/.pixi/bin/pixi run python -m pip install --quiet "$ORACLE_PIN" "defusedxml>=0.7.1"
   PY=(~/.pixi/bin/pixi run python)
 else
   VENV=/tmp/phonenumbers-mojo-venv

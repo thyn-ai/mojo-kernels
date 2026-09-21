@@ -46,12 +46,12 @@ REGION_CC = {
 
 def build_corpus() -> list[tuple[str, str | None]]:
     """Golden example numbers for the top regions + generated variants."""
-    import xml.etree.ElementTree as ET
+    from defusedxml import ElementTree as ET
     from pathlib import Path
 
     # Parses the repo-vendored libphonenumber metadata to build the corpus --
     # a repo file, not untrusted input.
-    root = ET.parse(  # nosemgrep: use-defused-xml-parse
+    root = ET.parse(
         Path(__file__).resolve().parents[1]
         / "kernels/phonenumbers/data/PhoneNumberMetadata.xml"
     ).getroot()

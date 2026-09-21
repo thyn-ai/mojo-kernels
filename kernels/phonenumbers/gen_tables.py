@@ -51,7 +51,7 @@ import struct
 import sys
 import zlib
 from pathlib import Path
-from xml.etree import ElementTree
+from defusedxml import ElementTree as ET
 
 HERE = Path(__file__).resolve().parent
 XML_PATH = HERE / "data" / "PhoneNumberMetadata.xml"
@@ -585,7 +585,7 @@ def serialize(progs: ProgramTable, strs: StringTable, regions: list[dict]) -> by
 def main() -> None:
     # XML_PATH is the libphonenumber metadata vendored in this repository
     # (kernels/phonenumbers/data/), a build-time input -- not untrusted input.
-    root = ElementTree.parse(XML_PATH).getroot()  # nosemgrep: use-defused-xml-parse
+    root = ET.parse(XML_PATH).getroot()
     progs, strs = ProgramTable(), StringTable()
     regions = build_regions(root, progs, strs)
     blob = serialize(progs, strs, regions)

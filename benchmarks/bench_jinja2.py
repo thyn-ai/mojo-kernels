@@ -140,7 +140,7 @@ def _cold_fresh_process(src: str) -> tuple[float, float]:
     code_stock = (
         "import time,jinja2;"
         "t0=time.perf_counter();"
-        f"jinja2.Environment().from_string(open({path!r}).read());"
+        f"jinja2.Environment(autoescape=True).from_string(open({path!r}).read());"
         "print(f'{(time.perf_counter()-t0)*1e6:.1f}')"
     )
     code_ours = (
@@ -186,7 +186,7 @@ def main() -> None:
     # Autoescape stays off everywhere below: the benchmark must mirror stock
     # jinja2 defaults (autoescape is opt-in upstream) to keep parity meaningful.
     for label, src in mediums.items():
-        expected = jinja2.Environment().from_string(src).render(_ctx())  # nosemgrep: missing-autoescape-disabled
+        expected = jinja2.Environment(autoescape=True).from_string(src).render(_ctx())  # nosemgrep: missing-autoescape-disabled
         got = jinja2_mojo.compile_template(src).render(_ctx())
         assert got == expected, f"render mismatch on {label}"
     print("correctness gate: render output byte-identical to stock jinja2 on all sizes")
@@ -206,7 +206,7 @@ def main() -> None:
     print(f"== cold compile, steady state ({N_COLD_SOURCES} unique sources, cache off) ==")
     for label, src in mediums.items():
         sources = [_make_unique(src, i) for i in range(N_COLD_SOURCES)]
-        env = jinja2.Environment()  # nosemgrep: missing-autoescape-disabled
+        env = jinja2.Environment(autoescape=True)
         stock_us = _median_us(lambda: [env.from_string(s) for s in sources]) / len(sources)
         ours_us = _median_us(
             lambda: [jinja2_mojo.compile_template(s, cache=False) for s in sources]
@@ -227,7 +227,7 @@ def main() -> None:
     # ---- tokenize stage only ------------------------------------------------
     print("== tokenize stage only (stock _tokenize vs native scan+build) ==")
     for label, src in mediums.items():
-        env = jinja2.Environment()  # nosemgrep: missing-autoescape-disabled
+        env = jinja2.Environment(autoescape=True)
         src_bytes = src.encode("utf-8")
         stock_us = _median_us(lambda: list(env._tokenize(src, None, None, None)))
         ours_us = _median_us(lambda: _tokens.build_tokens(src))
@@ -243,7 +243,7 @@ def main() -> None:
     for label, src in mediums.items():
         iters = warm_iters[label]
         jinja2_mojo.compile_template(src)  # prime the cache
-        env = jinja2.Environment()  # nosemgrep: missing-autoescape-disabled
+        env = jinja2.Environment(autoescape=True)
         stock_us = _median_us(lambda: [env.from_string(src) for _ in range(iters)]) / iters
         ours_us = _median_us(
             lambda: [jinja2_mojo.compile_template(src) for _ in range(iters)]
@@ -256,7 +256,7 @@ def main() -> None:
     print(f"== batch compile ({N_BATCH} unique sources) ==")
     src = mediums["medium (~6 KB)"]
     sources = [_make_unique(src, i) for i in range(N_BATCH)]
-    env = jinja2.Environment()  # nosemgrep: missing-autoescape-disabled
+    env = jinja2.Environment(autoescape=True)
     stock_ms = _median_us(lambda: [env.from_string(s) for s in sources], runs=3) / 1e3
     seq_ms = _median_us(lambda: jinja2_mojo.compile_batch(sources, cache=False), runs=3) / 1e3
     par_ms = _median_us(lambda: jinja2_mojo.compile_batch(sources, cache=False, workers=4), runs=3) / 1e3
