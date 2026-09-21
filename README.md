@@ -212,7 +212,7 @@ enabled ([RELEASING.md § Registries](RELEASING.md#registries)).
 ### bm25-mojo (Python 3.12+)
 
 ```bash
-V=0.1.2  # x-release-please-version
+V=0.1.3  # x-release-please-version
 case "$(uname -sm)" in
   "Darwin arm64") WHEEL="bm25_mojo-$V-py3-none-macosx_14_0_arm64.whl" ;;
   "Linux x86_64") WHEEL="bm25_mojo-$V-py3-none-manylinux_2_35_x86_64.whl" ;;
@@ -250,7 +250,7 @@ the active backend with `bm25_mojo.backend_info()`. Full API parity notes:
 ### fuse-mojo (TypeScript / Node 18+)
 
 ```bash
-V=0.1.2  # x-release-please-version
+V=0.1.3  # x-release-please-version
 URL="https://github.com/thyn-ai/mojo-kernels/releases/download/v$V"
 case "$(uname -sm)" in
   "Darwin arm64") PLATFORM_PKG="fuse-mojo-darwin-arm64-$V.tgz" ;;
@@ -287,7 +287,7 @@ Full option matrix: [`typescript/fuse-mojo/README.md`](typescript/fuse-mojo/READ
 ### cclib-mojo (Python 3.12+, computational chemistry)
 
 ```bash
-V=0.1.2  # x-release-please-version
+V=0.1.3  # x-release-please-version
 case "$(uname -sm)" in
   "Darwin arm64") WHEEL="cclib_mojo-$V-py3-none-macosx_14_0_arm64.whl" ;;
   "Linux x86_64") WHEEL="cclib_mojo-$V-py3-none-manylinux_2_35_x86_64.whl" ;;
