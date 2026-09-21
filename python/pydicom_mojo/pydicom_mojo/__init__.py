@@ -44,7 +44,7 @@ from pydicom_mojo.core import (
     get_backend,
 )
 
-__version__ = "0.1.2"  # x-release-please-version
+__version__ = "0.1.3"  # x-release-please-version
 __all__ = [
     "decode_frame",
     "encode_frame",

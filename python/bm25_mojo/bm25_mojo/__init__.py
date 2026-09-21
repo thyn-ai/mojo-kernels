@@ -16,7 +16,7 @@ Set BM25_MOJO_DISABLE_NATIVE=1 to force the pure-Python fallback.
 from bm25_mojo._native import backend_info, native_available
 from bm25_mojo.core import BM25, BM25L, BM25Okapi, BM25Plus
 
-__version__ = "0.1.2"  # x-release-please-version
+__version__ = "0.1.3"  # x-release-please-version
 __all__ = [
     "BM25",
     "BM25Okapi",
