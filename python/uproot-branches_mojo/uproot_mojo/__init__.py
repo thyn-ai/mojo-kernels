@@ -29,7 +29,7 @@ from uproot_mojo._rootfile import (
 )
 from uproot_mojo.core import JaggedArray, JaggedStringArray, read_branch
 
-__version__ = "0.1.3"  # x-release-please-version
+__version__ = "0.1.4"  # x-release-please-version
 __all__ = [
     "BasketDataError",
     "JaggedArray",

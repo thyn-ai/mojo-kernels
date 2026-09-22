@@ -27,7 +27,7 @@ zsh; PyPI distribution follows once the registry is enabled, see
 [RELEASING.md § Registries](../../RELEASING.md#registries)):
 
 ```bash
-V=0.1.3  # x-release-please-version
+V=0.1.4  # x-release-please-version
 case "$(uname -sm)" in
   "Darwin arm64") WHEEL="cclib_mojo-$V-py3-none-macosx_14_0_arm64.whl" ;;
   "Linux x86_64") WHEEL="cclib_mojo-$V-py3-none-manylinux_2_35_x86_64.whl" ;;

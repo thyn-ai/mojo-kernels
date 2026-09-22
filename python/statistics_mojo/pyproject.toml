@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "statistics-mojo"
-version = "0.1.3"
+version = "0.1.4"
 description = "Drop-in faster replacement for the stdlib statistics module, powered by a Mojo kernel (pure-Python fallback included)."
 readme = "README.md"
 requires-python = ">=3.12"

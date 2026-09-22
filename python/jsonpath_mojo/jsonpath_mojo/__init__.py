@@ -20,7 +20,7 @@ the active backend with jsonpath_mojo.backend_info().
 from jsonpath_mojo._native import backend_info, native_available
 from jsonpath_mojo.core import JsonPathError, find, find_parsed, parse
 
-__version__ = "0.1.3"  # x-release-please-version
+__version__ = "0.1.4"  # x-release-please-version
 __all__ = [
     "JsonPathError",
     "backend_info",

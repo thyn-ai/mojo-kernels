@@ -29,7 +29,7 @@ from pymavlink_mojo.core import (
     parse_buffer,
 )
 
-__version__ = "0.1.3"  # x-release-please-version
+__version__ = "0.1.4"  # x-release-please-version
 __all__ = [
     "parse_buffer",
     "iter_parse",

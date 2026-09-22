@@ -1,6 +1,6 @@
 {
   "name": "ckmeans-mojo-workspace",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "private": true,
   "description": "ckmeans-mojo: drop-in faster ckmeans for simple-statistics, powered by a Mojo kernel.",
   "workspaces": [
