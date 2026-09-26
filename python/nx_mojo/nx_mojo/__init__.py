@@ -19,7 +19,7 @@ Set NX_MOJO_DISABLE_NATIVE=1 to force the pure-Python fallback.
 from nx_mojo._native import backend_info, native_available
 from nx_mojo.core import betweenness_centrality, single_source_dijkstra
 
-__version__ = "0.1.4"  # x-release-please-version
+__version__ = "0.1.5"  # x-release-please-version
 __all__ = [
     "betweenness_centrality",
     "single_source_dijkstra",

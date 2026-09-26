@@ -28,7 +28,7 @@ from pdf_mojo import _native, _reference
 from pdf_mojo._native import backend_info, native_available
 from pdf_mojo._reference import PdfFilterError
 
-__version__ = "0.1.4"  # x-release-please-version
+__version__ = "0.1.5"  # x-release-please-version
 __all__ = [
     "decode_png_prediction",
     "decode_lzw",

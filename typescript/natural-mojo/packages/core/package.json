@@ -1,6 +1,6 @@
 {
   "name": "@natural-mojo/core",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "Drop-in faster replacement for natural's Levenshtein/Damerau-Levenshtein distance, powered by a Mojo kernel (pure-JS fallback included).",
   "license": "Apache-2.0",
   "author": "Algenta",
@@ -39,8 +39,8 @@
     "koffi": "^3.3.1"
   },
   "optionalDependencies": {
-    "@natural-mojo/darwin-arm64": "0.1.4",
-    "@natural-mojo/linux-x64": "0.1.4"
+    "@natural-mojo/darwin-arm64": "0.1.5",
+    "@natural-mojo/linux-x64": "0.1.5"
   },
   "repository": {
     "type": "git",

@@ -22,7 +22,7 @@ Set PYKALMAN_MOJO_DISABLE_NATIVE=1 to force the pure-NumPy fallback.
 from pykalman_mojo._native import backend_info, native_available
 from pykalman_mojo.core import KalmanFilter, filter, smooth
 
-__version__ = "0.1.4"  # x-release-please-version
+__version__ = "0.1.5"  # x-release-please-version
 __all__ = [
     "KalmanFilter",
     "filter",

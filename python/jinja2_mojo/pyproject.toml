@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "jinja2-mojo"
-version = "0.1.4"
+version = "0.1.5"
 description = "Faster jinja2 template compilation, powered by a Mojo lexer kernel (stock-jinja2 lexer fallback included; render output byte-identical)."
 readme = "README.md"
 requires-python = ">=3.12"

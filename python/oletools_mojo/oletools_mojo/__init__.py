@@ -24,7 +24,7 @@ import os
 from oletools_mojo import _native, _reference
 from oletools_mojo._native import backend_info, native_available
 
-__version__ = "0.1.4"  # x-release-please-version
+__version__ = "0.1.5"  # x-release-please-version
 __all__ = [
     "decompress_stream",
     "get_backend",
