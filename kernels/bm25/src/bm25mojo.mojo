@@ -43,12 +43,28 @@ Score formulas (reference operation order, PyPI rank_bm25 0.2.2):
 BM25Plus gives even unposted documents a per-term floor idf * delta. The
 baked posting value is the posted excess `full - floor`; per query the floor
 sum F (accumulated in query-token order) is written with one dense SIMD fill,
-and posted excess is gathered on top. When idf * delta is not finite
-(|idf * delta| overflows to +-inf or is NaN), the reference's per-document
-value for that term is the same non-finite constant for EVERY document
-(posted or not, because delta + frac rounds to delta), so the term is flagged
-at index time and contributes that constant via the dense fill; its postings
-are skipped exactly as the reference's single evaluation requires.
+and posted excess is gathered on top. That decomposition is the reference's
+sum of per-term values `idf * (delta + frac)` reassociated as
+`(sum of floors) + sum of (full - floor)`: identical in exact arithmetic, and
+identical in IEEE-754 float64 whenever no intermediate in either order
+overflows. Reassociation is NOT overflow-safe, though: the floor sum can
+overflow to +-inf while the reference's interleaved sum stays finite (or hits
+the opposite infinity, making the kernel's fill + excess a NaN where the
+reference is +-inf). The kernel therefore bounds the magnitudes before
+scoring a query the fast way: with `bound[t] = |floor_t| + max_j |excess_j|`
+per term (any non-finite piece poisoning the bound to +inf), a query whose
+bound sum (in query-token order) reaches SAFE_BOUND (= Float64 max / 2) is
+scored term by term in the reference's own order instead — every document
+receives the term's value (the baked `full` where posted, the floor
+elsewhere) in query-token order, bit-identical to the reference's dense
+evaluation. Below the bound every partial sum of either order stays below
+SAFE_BOUND, so neither order can produce an infinity or NaN the other does
+not; the only remaining difference between the orders is rounding (the
+ill-conditioned-norm known issue). In-domain parameters never reach the
+bound (floors and excesses are single-digit), so the fast path always runs
+there. Where the reference itself evaluates 0/0 for a document without the
+term (the degenerate-nan known issue: k1 * norm == 0), the precise path still
+adds the floor; those inputs are exactly the harness's degenerate class.
 
 ABI v3 additions (motivated by the live-Space Xeon arena: at 5k docs the
 batch call is dominated by the Python vocab dict's cache footprint — the
@@ -70,13 +86,18 @@ mapping itself is microseconds, the evicted dict's misses are not):
   its id-mapping path for that batch.
 """
 
-from std.math import isfinite
+from std.math import inf, isfinite
 from std.memory import Pointer, unsafe_memcpy
 from std.memory.alloc import unsafe_alloc
 from std.origin import MutUntrackedOrigin
 from std.sys import simd_width_of
 
 comptime ABI_VERSION: Int32 = 3
+
+# Fast-path magnitude bound for the BM25Plus floor decomposition (see module
+# docs): Float64 max / 2. A query whose per-term |floor| + max|excess| sum
+# stays below it cannot overflow in either evaluation order.
+comptime SAFE_BOUND: Float64 = 8.9884656743115795e307
 
 # Fixed-width 'S' token slots wider than this are refused (the Python wrapper
 # falls back to its id-mapping path for such batches).
@@ -113,8 +134,9 @@ struct BM25Index(Copyable, Movable):
     var docs: I32Ptr  # [nnz] posting doc ids (ascending per term)
     var weights: F64Ptr  # [nnz] baked contribution (full - floor), see module docs
     var idf: F64Ptr  # [n_terms]
-    var overflow: Pointer[Bool, MutUntrackedOrigin]  # [n_terms] Plus only
+    var bound: F64Ptr  # [n_terms] Plus only: |floor| + max|excess| (see module docs)
     var floor0: F64Ptr  # [n_terms] Plus only: idf * delta per term
+    var fulls: F64Ptr  # [nnz] Plus only: baked per-posting idf * (delta + frac)
     # Optional native vocabulary map (ABI v3, bm25mojo_vocab_attach).
     var vocab_keys: Pointer[UInt8, MutUntrackedOrigin]  # [vocab_cap * vocab_width]
     var vocab_lens: I32Ptr  # [vocab_cap] token byte length (0 = empty slot)
@@ -136,8 +158,9 @@ struct BM25Index(Copyable, Movable):
         docs: I32Ptr,
         weights: F64Ptr,
         idf: F64Ptr,
-        overflow: Pointer[Bool, MutUntrackedOrigin],
+        bound: F64Ptr,
         floor0: F64Ptr,
+        fulls: F64Ptr,
     ):
         self.n_docs = n_docs
         self.avgdl = avgdl
@@ -151,8 +174,9 @@ struct BM25Index(Copyable, Movable):
         self.docs = docs
         self.weights = weights
         self.idf = idf
-        self.overflow = overflow
+        self.bound = bound
         self.floor0 = floor0
+        self.fulls = fulls
         # Placeholder pointer targets: the vocab fields are only ever
         # dereferenced when vocab_cap != 0 (every access is guarded), so any
         # valid pointer does as the "not attached" initial value — Mojo
@@ -295,18 +319,18 @@ def bm25mojo_index_create(
             e += 1
     cursor.unsafe_free()
 
-    # --- per-term floors (Plus) and overflow flags ---
+    # --- per-term floors and magnitude bounds (Plus) ---
     var idf_copy = unsafe_alloc[Float64](Int(n_terms))
     if n_terms > 0:
         unsafe_memcpy(dest=idf_copy, src=idf, count=Int(n_terms))
     var floor0 = unsafe_alloc[Float64](Int(n_terms))
-    var overflow = unsafe_alloc[Bool](Int(n_terms))
+    var bound = unsafe_alloc[Float64](Int(n_terms))
     for t in range(Int(n_terms)):
         var f = Float64(0.0)
         if variant == VARIANT_PLUS:
             f = idf_copy[unsafe_offset=t] * delta
         floor0[unsafe_offset=t] = f
-        overflow[unsafe_offset=t] = not isfinite(f)
+        bound[unsafe_offset=t] = Float64(0.0)  # finalized after the bake below
 
     # --- bake weights = full - floor per posting (reference op order) ---
     # Copy raw frequencies into a temp CSR-ordered buffer (reusing df as the
@@ -327,6 +351,11 @@ def bm25mojo_index_create(
             e += 1
     df.unsafe_free()
     var weights = unsafe_alloc[Float64](Int(nnz))
+    # Plus also keeps the reference's per-posting value itself, for the
+    # precise path (aliased placeholder for the other variants, never read).
+    var fulls = weights
+    if variant == VARIANT_PLUS:
+        fulls = unsafe_alloc[Float64](Int(nnz))
     for t in range(Int(n_terms)):
         var idf_t = idf_copy[unsafe_offset=t]
         var floor_t = floor0[unsafe_offset=t]
@@ -337,9 +366,12 @@ def bm25mojo_index_create(
             var dl = SIMD[DType.float64, WIDTH]()
             for lane in range(WIDTH):
                 dl[lane] = doc_len[unsafe_offset=Int(docs[unsafe_offset=j + lane])]
-            var w = _term_score[WIDTH](
+            var full = _term_score[WIDTH](
                 variant, qf, dl, idf_t, k1, b, avgdl, delta
-            ) - SIMD[DType.float64, WIDTH](floor_t)
+            )
+            if variant == VARIANT_PLUS:
+                fulls.unsafe_store(j, full)
+            var w = full - SIMD[DType.float64, WIDTH](floor_t)
             weights.unsafe_store(j, w)
             j += WIDTH
         while j < end:
@@ -347,12 +379,31 @@ def bm25mojo_index_create(
             var dl = SIMD[DType.float64, 1](
                 doc_len[unsafe_offset=Int(docs[unsafe_offset=j])]
             )
-            var w = _term_score[1](
+            var full = _term_score[1](
                 variant, qf, dl, idf_t, k1, b, avgdl, delta
-            ) - SIMD[DType.float64, 1](floor_t)
+            )
+            if variant == VARIANT_PLUS:
+                fulls[unsafe_offset=j] = full[0]
+            var w = full - SIMD[DType.float64, 1](floor_t)
             weights[unsafe_offset=j] = w[0]
             j += 1
     freqs.unsafe_free()
+    if variant == VARIANT_PLUS:
+        # bound[t] = |floor_t| + max_j |excess_j|; any non-finite piece
+        # poisons the bound (+inf here, NaN via abs(NaN) + m for a NaN floor),
+        # and a non-finite bound never passes the query-time SAFE_BOUND check.
+        for t in range(Int(n_terms)):
+            var m = Float64(0.0)
+            var j = Int(offsets[unsafe_offset=t])
+            var end = Int(offsets[unsafe_offset=t + 1])
+            while j < end:
+                var aw = abs(weights[unsafe_offset=j])
+                if not isfinite(aw):
+                    m = inf[DType.float64]()
+                elif aw > m:
+                    m = aw
+                j += 1
+            bound[unsafe_offset=t] = abs(floor0[unsafe_offset=t]) + m
 
     var idx = unsafe_alloc[BM25Index](1)
     idx[] = BM25Index(
@@ -368,10 +419,43 @@ def bm25mojo_index_create(
         docs,
         weights,
         idf_copy,
-        overflow,
+        bound,
         floor0,
+        fulls,
     )
     return idx.unsafe_bitcast[UInt8]()
+
+
+def _plus_term_precise(
+    idx: Pointer[BM25Index, MutUntrackedOrigin],
+    t: Int,
+    out_scores: F64Ptr,
+):
+    """Add one BM25Plus term to `out_scores` in reference evaluation order.
+
+    Every document receives the term's value — the baked `full` where the
+    term is posted, the floor `idf * delta` where it is not — exactly as the
+    reference's dense per-term pass computes it (same IEEE-754 operation
+    order per document; the caller iterates the query in token order, so the
+    per-document accumulation order matches too). Used when the magnitude
+    bound cannot rule out overflow in the decomposed order.
+    """
+    var n_docs = Int(idx[].n_docs)
+    var floor_t = idx[].floor0[unsafe_offset=t]
+    var j = Int(idx[].offsets[unsafe_offset=t])
+    var end = Int(idx[].offsets[unsafe_offset=t + 1])
+    var d = 0
+    while j < end:
+        var doc = Int(idx[].docs[unsafe_offset=j])
+        while d < doc:
+            out_scores[unsafe_offset=d] += floor_t
+            d += 1
+        out_scores[unsafe_offset=doc] += idx[].fulls[unsafe_offset=j]
+        d = doc + 1
+        j += 1
+    while d < n_docs:
+        out_scores[unsafe_offset=d] += floor_t
+        d += 1
 
 
 def _score_one(
@@ -387,40 +471,46 @@ def _score_one(
     var offsets = idx[].offsets
     var docs = idx[].docs
     var weights = idx[].weights
-    var overflow = idx[].overflow
+    var bound = idx[].bound
     var floor0 = idx[].floor0
 
     if variant == VARIANT_PLUS:
-        # Dense floor: F = sum of per-term floors in query-token order, then
-        # one write-only SIMD fill (bit-identical to zero + F). Overflowing
-        # terms contribute their non-finite constant here; their postings are
-        # skipped below because the reference's per-document value for them
-        # is that same constant everywhere.
+        # The decomposed fast order (one dense fill of the floor sum, then
+        # gather-add of the posted excess) is exact whenever neither it nor
+        # the reference's interleaved order can overflow; the per-query bound
+        # sum proves that below SAFE_BOUND (see module docs). Above it the
+        # query is scored term by term in the reference's own order.
         var floor_total = Float64(0.0)
+        var bound_total = Float64(0.0)
         for qi in range(Int(n_query)):
             var t = Int(qids[unsafe_offset=qi])
             if t < 0 or t >= n_terms:
                 return 2
             floor_total += floor0[unsafe_offset=t]
-        var fill = SIMD[DType.float64, WIDTH](floor_total)
-        var d = 0
-        while d + WIDTH <= n_docs:
-            out_scores.unsafe_store(d, fill)
-            d += WIDTH
-        while d < n_docs:
-            out_scores[unsafe_offset=d] = floor_total
-            d += 1
-        for qi in range(Int(n_query)):
-            var t = Int(qids[unsafe_offset=qi])
-            if overflow[unsafe_offset=t]:
-                continue
-            var j = Int(offsets[unsafe_offset=t])
-            var end = Int(offsets[unsafe_offset=t + 1])
-            while j < end:
-                out_scores[unsafe_offset=Int(docs[unsafe_offset=j])] += weights[
-                    unsafe_offset=j
-                ]
-                j += 1
+            bound_total += bound[unsafe_offset=t]
+        if bound_total < SAFE_BOUND:
+            # Dense floor: F = sum of per-term floors in query-token order,
+            # then one write-only SIMD fill (bit-identical to zero + F).
+            var fill = SIMD[DType.float64, WIDTH](floor_total)
+            var d = 0
+            while d + WIDTH <= n_docs:
+                out_scores.unsafe_store(d, fill)
+                d += WIDTH
+            while d < n_docs:
+                out_scores[unsafe_offset=d] = floor_total
+                d += 1
+            for qi in range(Int(n_query)):
+                var t = Int(qids[unsafe_offset=qi])
+                var j = Int(offsets[unsafe_offset=t])
+                var end = Int(offsets[unsafe_offset=t + 1])
+                while j < end:
+                    out_scores[unsafe_offset=Int(docs[unsafe_offset=j])] += weights[
+                        unsafe_offset=j
+                    ]
+                    j += 1
+        else:
+            for qi in range(Int(n_query)):
+                _plus_term_precise(idx, Int(qids[unsafe_offset=qi]), out_scores)
     else:
         for qi in range(Int(n_query)):
             var t = Int(qids[unsafe_offset=qi])
@@ -664,7 +754,7 @@ def bm25mojo_score_batch_str(
         return 4
     var n_docs = Int(idx[].n_docs)
     var variant = idx[].variant
-    var overflow = idx[].overflow
+    var bound = idx[].bound
     var floor0 = idx[].floor0
     var base = Int64(0)
     for q in range(Int(n_queries)):
@@ -673,10 +763,11 @@ def bm25mojo_score_batch_str(
             return 2
         var row = out_panel.unsafe_offset(q * n_docs)
         if variant == VARIANT_PLUS:
-            # Floor sum over FOUND tokens only, in query-token order (exactly
-            # the filtered-id order of the v2 path), then one dense SIMD fill
-            # and the posted excess on top.
+            # Floor sum and bound sum over FOUND tokens only, in query-token
+            # order (exactly the filtered-id order of the v2 path); then the
+            # same fast-or-precise dispatch as `_score_one`.
             var floor_total = Float64(0.0)
+            var bound_total = Float64(0.0)
             for j in range(cnt):
                 var slot = toks.unsafe_offset(Int((base + Int64(j)) * width))
                 var L = _slot_scan(slot, Int(width))
@@ -685,21 +776,30 @@ def bm25mojo_score_batch_str(
                 var t = _vocab_lookup(idx, slot, L)
                 if t >= 0:
                     floor_total += floor0[unsafe_offset=Int(t)]
-            var fill = SIMD[DType.float64, WIDTH](floor_total)
-            var d = 0
-            while d + WIDTH <= n_docs:
-                row.unsafe_store(d, fill)
-                d += WIDTH
-            while d < n_docs:
-                row[unsafe_offset=d] = floor_total
-                d += 1
-            for j in range(cnt):
-                var slot = toks.unsafe_offset(Int((base + Int64(j)) * width))
-                var L = _slot_scan(slot, Int(width))
-                var t = _vocab_lookup(idx, slot, L)
-                if t < 0 or overflow[unsafe_offset=Int(t)]:
-                    continue
-                _accumulate(idx, Int(t), row)
+                    bound_total += bound[unsafe_offset=Int(t)]
+            if bound_total < SAFE_BOUND:
+                var fill = SIMD[DType.float64, WIDTH](floor_total)
+                var d = 0
+                while d + WIDTH <= n_docs:
+                    row.unsafe_store(d, fill)
+                    d += WIDTH
+                while d < n_docs:
+                    row[unsafe_offset=d] = floor_total
+                    d += 1
+                for j in range(cnt):
+                    var slot = toks.unsafe_offset(Int((base + Int64(j)) * width))
+                    var L = _slot_scan(slot, Int(width))
+                    var t = _vocab_lookup(idx, slot, L)
+                    if t < 0:
+                        continue
+                    _accumulate(idx, Int(t), row)
+            else:
+                for j in range(cnt):
+                    var slot = toks.unsafe_offset(Int((base + Int64(j)) * width))
+                    var L = _slot_scan(slot, Int(width))
+                    var t = _vocab_lookup(idx, slot, L)
+                    if t >= 0:
+                        _plus_term_precise(idx, Int(t), row)
         else:
             for j in range(cnt):
                 var slot = toks.unsafe_offset(Int((base + Int64(j)) * width))
@@ -723,8 +823,10 @@ def bm25mojo_index_destroy(handle: Handle) abi("C"):
     idx[].docs.unsafe_free()
     idx[].weights.unsafe_free()
     idx[].idf.unsafe_free()
-    idx[].overflow.unsafe_free()
+    idx[].bound.unsafe_free()
     idx[].floor0.unsafe_free()
+    if idx[].variant == VARIANT_PLUS:
+        idx[].fulls.unsafe_free()  # allocated only for Plus (placeholder else)
     if idx[].vocab_cap != 0:
         idx[].vocab_keys.unsafe_free()
         idx[].vocab_lens.unsafe_free()

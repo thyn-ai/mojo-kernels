@@ -159,6 +159,70 @@ def test_plus_overflowing_floor_matches_reference(delta):
     assert np.isinf(expected).all() and (np.sign(expected) == np.sign(delta)).all()
     assert_scores_close(actual, expected)
 
+
+def test_plus_floor_sum_overflow_scores_in_reference_order():
+    """A repeated query term can overflow the kernel's floor sum even when
+    every per-term floor idf * delta is finite.
+
+    Nightly fuzz run 36214935571 (job "atheris differential fuzzing (bm25)",
+    crash-53769e383747a285f0845fc9fea0cdeb2798f75e): k1 ~= -float64 max makes
+    the numerator qf * (k1 + 1) overflow to -inf for qf >= 2, so frac = +inf
+    and every posted document's value is idf * (delta + inf) = +inf. The
+    kernel's decomposed order sums the four finite floors (-8.9e307 each)
+    to -inf first, then adds the +inf excess: -inf + inf = NaN where the
+    reference's interleaved evaluation is +inf from the first term on
+    (native=[nan nan] fallback=[inf inf]). Above the kernel's magnitude
+    bound the query is now scored term by term in the reference's own order.
+    Seed: fuzz/corpus/bm25/regression-plus-overflowing-floor-sum-1.bin.
+    """
+    corpus = [
+        ["w02", "w02", "w02", "w02", "w02", "w03", "w03", "w00", "w00", "w02",
+         "w01", "w03", "w02", "w01", "w01", "w02", "w02", "w02"],
+        ["w02", "w02", "w01", "w02", "w01", "w00", "w02", "w00", "w00", "w01",
+         "w02", "w00", "w01", "w00", "w00", "w00", "w00"],
+        ["w00"],
+        ["w03"],
+    ]
+    kwargs = {"k1": -sys.float_info.max, "b": 2.1220929297e-314,
+              "delta": -1.7415152244109487e308}
+    ours = BM25Plus(corpus, **kwargs)
+    ref = RefBM25Plus(corpus, **kwargs)
+    assert ours.backend == _expected_backend()
+    query = ["w00", "w00", "w00", "w00"]
+    with np.errstate(all="ignore"):
+        expected = ref.get_scores(query)
+        actual = ours.get_scores(query)
+        batch = ours.get_scores_batch([query])
+    assert np.array_equal(expected, np.array([np.inf, np.inf, -np.inf, -np.inf]))
+    assert np.array_equal(actual, expected)
+    assert np.array_equal(batch[0], expected)
+
+
+def test_plus_overflowing_floor_with_nonfinite_frac_scores_in_reference_order():
+    """The floor idf * delta overflows (to -inf) AND the tf fraction is
+    non-finite, so the term's value is not the floor constant everywhere.
+
+    k1 ~= -float64 max again overflows qf * (k1 + 1) at qf = 2, so
+    delta + frac = -1.2e308 + inf = +inf and the posted document scores +inf
+    while every unposted document keeps the -inf floor. The kernel used to
+    contribute the floor constant for such a term and skip its postings
+    (-inf everywhere). Seed:
+    fuzz/corpus/bm25/regression-plus-overflowing-frac-1.bin.
+    """
+    corpus = [["w00", "w00"], ["w01", "w01"], ["w02", "w02"], ["w03", "w03"]]
+    kwargs = {"k1": -sys.float_info.max, "b": 0.75, "delta": -1.2e308}
+    ours = BM25Plus(corpus, **kwargs)
+    ref = RefBM25Plus(corpus, **kwargs)
+    assert ours.backend == _expected_backend()
+    with np.errstate(all="ignore"):
+        expected = ref.get_scores(["w00"])
+        actual = ours.get_scores(["w00"])
+        batch = ours.get_scores_batch([["w00"], ["w00", "w00", "w00"]])
+    assert np.array_equal(expected, np.array([np.inf, -np.inf, -np.inf, -np.inf]))
+    assert np.array_equal(actual, expected)
+    assert np.array_equal(batch[0], expected)
+    assert np.array_equal(batch[1], expected)
+
 @pytest.mark.parametrize("ours_cls,ref_cls,params", VARIANTS)
 def test_top_n_tie_order(ours_cls, ref_cls, params):
     # docs 2 and 3 are token-identical => bit-identical scores on both
