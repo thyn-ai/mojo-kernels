@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "pypdf-filters-mojo"
-version = "0.1.4"
+version = "0.1.5"
 description = "Mojo-accelerated PNG-predictor and LZW decoders for PDF streams, byte-compatible with pypdf (pure-Python fallback included)."
 readme = "README.md"
 requires-python = ">=3.12"

@@ -10,6 +10,13 @@ Entries after 0.1.0 are written by [release-please](https://github.com/googleapi
 from the Conventional Commits merged since the previous tag, in the release
 pull request that cuts the version ([RELEASING.md](RELEASING.md)).
 
+## [0.1.5](https://github.com/thyn-ai/mojo-kernels/compare/v0.1.4...v0.1.5) (2026-09-26)
+
+
+### Fixed
+
+* **bm25:** score BM25Plus queries in reference order when the floor decomposition can overflow ([#63](https://github.com/thyn-ai/mojo-kernels/issues/63)) ([225640a](https://github.com/thyn-ai/mojo-kernels/commit/225640aeb631d32fa297f363d4e5fdc557ecb255))
+
 ## [0.1.4](https://github.com/thyn-ai/mojo-kernels/compare/v0.1.3...v0.1.4) (2026-09-21)
 
 

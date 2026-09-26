@@ -21,7 +21,7 @@ from capa_mojo.core import RuleSet, ScopeMatches, load_rules, match
 from capa_mojo.features import InvalidRuleError, UnsupportedRuleError
 from capa_mojo.rules import ParsedRule, parse_rule_dict, parse_rule_yaml
 
-__version__ = "0.1.4"  # x-release-please-version
+__version__ = "0.1.5"  # x-release-please-version
 __all__ = [
     "InvalidRuleError",
     "ParsedRule",

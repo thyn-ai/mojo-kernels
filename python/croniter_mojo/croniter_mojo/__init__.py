@@ -20,7 +20,7 @@ from ._errors import (
 from ._native import backend_info, native_available
 from .core import get_next, get_prev
 
-__version__ = "0.1.4"  # x-release-please-version
+__version__ = "0.1.5"  # x-release-please-version
 __all__ = [
     "get_next",
     "get_prev",

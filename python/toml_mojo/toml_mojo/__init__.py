@@ -26,7 +26,7 @@ import tomllib
 from toml_mojo._decode import assemble
 from toml_mojo._native import NativeUnavailable, backend_info, native_available, parse_bytes
 
-__version__ = "0.1.4"  # x-release-please-version
+__version__ = "0.1.5"  # x-release-please-version
 __all__ = [
     "TOMLDecodeError",
     "backend_info",

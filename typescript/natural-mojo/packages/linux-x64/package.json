@@ -1,6 +1,6 @@
 {
   "name": "@natural-mojo/linux-x64",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "Prebuilt naturalmojo Mojo kernel for Linux x86_64 (used by @natural-mojo/core).",
   "license": "Apache-2.0",
   "author": "Algenta",

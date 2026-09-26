@@ -20,7 +20,7 @@ Set OBSPY_MOJO_DISABLE_NATIVE=1 to force the pure-Python fallback.
 from obspy_mojo._native import backend_info, native_available
 from obspy_mojo.core import konno_ohmachi_smoothing
 
-__version__ = "0.1.4"  # x-release-please-version
+__version__ = "0.1.5"  # x-release-please-version
 __all__ = [
     "konno_ohmachi_smoothing",
     "backend_info",
