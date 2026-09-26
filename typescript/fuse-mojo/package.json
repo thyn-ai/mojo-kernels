@@ -16,7 +16,7 @@
     "bench": "node ../../benchmarks/bench_fuse.mjs"
   },
   "devDependencies": {
-    "fast-check": "4.10.0",
+    "fast-check": "4.10.1",
     "fuse.js": "7.1.0"
   }
 }
