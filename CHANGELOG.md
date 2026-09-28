@@ -10,6 +10,14 @@ Entries after 0.1.0 are written by [release-please](https://github.com/googleapi
 from the Conventional Commits merged since the previous tag, in the release
 pull request that cuts the version ([RELEASING.md](RELEASING.md)).
 
+## [0.2.2](https://github.com/thyn-ai/mojo-kernels/compare/v0.2.1...v0.2.2) (2026-09-28)
+
+
+### Fixed
+
+* **ci:** release the croniter, jsonpath, jsonschema and sacrebleu wheels again ([#77](https://github.com/thyn-ai/mojo-kernels/issues/77)) ([4f7597c](https://github.com/thyn-ai/mojo-kernels/commit/4f7597ca842d6aaed835f50a24abed27507aa7e9))
+* **release:** pin every TypeScript core's platform packages at pack time, not in the source tree ([#79](https://github.com/thyn-ai/mojo-kernels/issues/79)) ([b735e59](https://github.com/thyn-ai/mojo-kernels/commit/b735e59009f0b568762d85a8ab75418fa4260fbc))
+
 ## [0.2.1](https://github.com/thyn-ai/mojo-kernels/compare/v0.2.0...v0.2.1) (2026-09-28)
 
 

@@ -26,7 +26,7 @@ from motmetrics_mojo.core import (
     compute,
 )
 
-__version__ = "0.2.1"  # x-release-please-version
+__version__ = "0.2.2"  # x-release-please-version
 __all__ = [
     "MOTAccumulator",
     "MetricSummary",
