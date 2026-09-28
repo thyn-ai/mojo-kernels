@@ -121,10 +121,57 @@ jobs:
 
       - name: Open or update the release pull request; on a merged one, tag and publish the Release
         if: steps.creds.outputs.configured == 'true'
+        id: release
         uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
         with:
           token: ${{ steps.app-token.outputs.token }}
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
-      # Nothing after this step. Building, signing, attesting and publishing
+
+      # The version bump text-edits the spec strings in every
+      # typescript/*/package-lock.json but cannot regenerate their resolved
+      # entries (that takes a real npm resolution pass), so right after any
+      # release bump every `npm ci` in those directories fails EUSAGE until
+      # the locks are refreshed (seen on v0.1.7: fuse-mojo's differential and
+      # property jobs went red repo-wide). Refresh them on the release PR
+      # branch itself, in the same run, so the PR is mergeable as proposed.
+      # Only runs when a release PR was created or updated -- on a merge run
+      # (tag + Release) there is nothing to refresh.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: steps.creds.outputs.configured == 'true' && steps.release.outputs.prs_created == 'true'
+        with:
+          ref: ${{ fromJSON(steps.release.outputs.pr).headBranchName }}
+          token: ${{ steps.app-token.outputs.token }}
+          persist-credentials: true
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        if: steps.creds.outputs.configured == 'true' && steps.release.outputs.prs_created == 'true'
+        with:
+          node-version: 24
+          package-manager-cache: false
+
+      - name: Regenerate the TS kernel package-locks for the bumped versions
+        if: steps.creds.outputs.configured == 'true' && steps.release.outputs.prs_created == 'true'
+        run: |
+          set -euo pipefail
+          for dir in typescript/*/; do
+            [ -f "$dir/package-lock.json" ] || continue
+            echo "== $dir =="
+            npm install --package-lock-only --ignore-scripts --no-audit --no-fund --prefix "$dir"
+          done
+
+      - name: Commit the refreshed lockfiles to the release PR (if any changed)
+        if: steps.creds.outputs.configured == 'true' && steps.release.outputs.prs_created == 'true'
+        run: |
+          set -euo pipefail
+          git config user.name "algenta-sdk-sync[bot]"
+          git config user.email "4614082+algenta-sdk-sync[bot]@users.noreply.github.com"
+          git add 'typescript/*/package-lock.json'
+          if git diff --cached --quiet; then
+            echo "lockfiles already in sync; nothing to commit."
+            exit 0
+          fi
+          git commit -m "chore: regenerate TS package-locks for the release version bump"
+          git push
+      # Building, signing, attesting and publishing
       # the assets is release.yml's job, started by the tag this step pushes.
