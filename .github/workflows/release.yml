@@ -4,7 +4,8 @@
 # per-kernel CI workflows use (pixi tasks, delocate/auditwheel/patchelf repair,
 # clean-environment smoke tests):
 #
-#   * bm25-mojo and cclib-mojo platform wheels (macOS arm64, Linux x86_64)
+#   * bm25-mojo, cclib-mojo, croniter-mojo, jsonpath-mojo, jsonschema-mojo and sacrebleu-mojo
+#     platform wheels (macOS arm64, Linux x86_64)
 #   * the @thyn-ai/fuse-mojo-core, @thyn-ai/fuse-mojo-darwin-arm64 and @thyn-ai/fuse-mojo-linux-x64
 #     npm tarballs
 #   * SHA256SUMS over all of the above
@@ -272,6 +273,14 @@ jobs:
       # The Linux assets must run on every x86-64 CPU the README names, not
       # only on the CPU of the runner that built them: build.sh compiles for
       # the x86-64-v3 baseline and this refuses any AVX-512 encoding.
+      - name: Build the croniter Mojo kernel
+        run: pixi run bash kernels/croniter/build.sh
+      - name: Build the jsonpath Mojo kernel
+        run: pixi run bash kernels/jsonpath/build.sh
+      - name: Build the jsonschema Mojo kernel
+        run: pixi run bash kernels/jsonschema/build.sh
+      - name: Build the sacrebleu Mojo kernel
+        run: pixi run bash kernels/sacrebleu/build.sh
       - name: Assert the Linux kernels stay on the x86-64-v3 baseline
         if: runner.os == 'Linux'
         run: bash scripts/check_x86_64_baseline.sh kernels/bm25/build/libbm25mojo.so kernels/gaussgrid/build/libgaussgridmojo.so kernels/fuse/build/libfusemojo.so
@@ -282,12 +291,49 @@ jobs:
           pixi run test
           pixi run test-cclib
           pixi run test-fuse
+      - name: Differential suite for croniter-mojo (native backend, then forced fallback)
+        shell: bash
+        run: |
+          export PYTHONPATH="python/croniter_mojo"
+          export PYTHONNOUSERSITE=1
+          pixi run bash scripts/test_all_croniter.sh
+      - name: Differential suite for jsonpath-mojo (native backend, then forced fallback)
+        run: pixi run bash scripts/test_all_jsonpath.sh
+      - name: Differential suite for jsonschema-mojo (native backend, then forced fallback)
+        run: pixi run bash scripts/test_all_jsonschema.sh
+      - name: Differential suite for sacrebleu-mojo (native backend, then forced fallback)
+        shell: bash
+        run: |
+          export PYTHONPATH="python/sacrebleu_mojo"
+          export PYTHONNOUSERSITE=1
+          pixi run python -m pytest tests/test_sacrebleu_differential.py tests/test_sacrebleu_loader.py -q
+          SACREBLEU_MOJO_DISABLE_NATIVE=1 pixi run python -m pytest tests/test_sacrebleu_differential.py tests/test_sacrebleu_loader.py -q
 
       - name: Build + repair the platform wheels (delocate/auditwheel)
         run: |
           set -euo pipefail
           pixi run wheel-bm25
           pixi run wheel-cclib
+      - name: Build + repair the croniter-mojo platform wheel (delocate/auditwheel)
+        run: pixi run bash python/croniter_mojo/build_wheel.sh
+      - name: Build + repair the jsonpath-mojo platform wheel (delocate/auditwheel)
+        run: pixi run bash python/jsonpath_mojo/build_wheel.sh
+      - name: Build + repair the jsonschema-mojo platform wheel (delocate/auditwheel)
+        run: pixi run bash python/jsonschema_mojo/build_wheel.sh
+      - name: Build + repair the sacrebleu-mojo platform wheel (delocate/auditwheel)
+        shell: bash
+        run: |
+          cd python/sacrebleu_mojo
+          export MACOSX_DEPLOYMENT_TARGET="${MACOSX_DEPLOYMENT_TARGET:-14.0}"
+          rm -rf dist dist-repaired
+          pixi run python -m build --wheel --no-isolation --outdir dist .
+          raw="$(ls dist/*.whl)"
+          case "$(uname -s)" in
+            Darwin) pixi run delocate-wheel -v -w dist-repaired "$raw" ;;
+            Linux)  pixi run auditwheel repair "$raw" -w dist-repaired ;;
+          esac
+          rm -rf dist && mv dist-repaired dist
+          ls -la dist/
 
       - name: Pack + repair the fuse-mojo platform package (delocate/patchelf)
         run: pixi run pack-fuse
@@ -351,6 +397,162 @@ jobs:
           print("wheel smoke OK:", cclib_mojo.__version__, info["native_source"])
           EOF
 
+      - name: Smoke-test the croniter-mojo wheel in a clean venv
+        shell: bash
+        run: |
+          set -e
+          python3 -m venv /tmp/croniter-wheel-smoke
+          /tmp/croniter-wheel-smoke/bin/pip install --quiet python/croniter_mojo/dist/*.whl
+          # Hide the pixi env for the smoke: an end user has no Mojo toolchain,
+          # so the wheel must load its kernel purely from its own vendored
+          # libraries (not via the build machine's absolute rpath).
+          repo_root="$PWD"
+          mv .pixi .pixi-hidden
+          trap 'mv "$repo_root/.pixi-hidden" "$repo_root/.pixi"' EXIT
+          cd /tmp
+          /tmp/croniter-wheel-smoke/bin/python -m croniter_mojo | tee /tmp/qs-native.txt
+          CRONITER_MOJO_DISABLE_NATIVE=1 /tmp/croniter-wheel-smoke/bin/python -m croniter_mojo | tee /tmp/qs-fallback.txt
+          /tmp/croniter-wheel-smoke/bin/python - <<'EOF'
+          import croniter_mojo
+
+          info = croniter_mojo.backend_info()
+          assert info["native_available"], f"wheel must carry the native kernel: {info}"
+
+          def checksum(path):
+              for line in open(path):
+                  if line.startswith("checksum: "):
+                      return int(line.split(":")[1])
+              raise AssertionError(f"no checksum in {path}")
+
+          assert checksum("/tmp/qs-native.txt") == checksum("/tmp/qs-fallback.txt")
+          print("wheel smoke OK:", croniter_mojo.__version__, info["native_source"])
+          EOF
+      - name: Smoke-test the jsonpath-mojo wheel in a clean venv
+        shell: bash
+        run: |
+          set -e
+          python3 -m venv /tmp/jp-wheel-smoke
+          /tmp/jp-wheel-smoke/bin/pip install --quiet python/jsonpath_mojo/dist/*.whl
+          # Hide the pixi env for the smoke: an end user has no Mojo toolchain,
+          # so the wheel must load its kernel purely from its own vendored
+          # libraries (not via the build machine's absolute rpath).
+          repo_root="$PWD"
+          mv .pixi .pixi-hidden
+          trap 'mv "$repo_root/.pixi-hidden" "$repo_root/.pixi"' EXIT
+          cd /tmp
+          /tmp/jp-wheel-smoke/bin/python - <<'EOF'
+          import os
+
+          import jsonpath_mojo
+
+          info = jsonpath_mojo.backend_info()
+          assert info["native_available"], f"wheel must carry the native kernel: {info}"
+
+          data = {
+              "store": {
+                  "book": [
+                      {"title": "Sayings", "price": 8.95},
+                      {"title": "Sword", "price": 12.99},
+                      {"title": "Moby Dick", "price": 8.99, "isbn": "0-553"},
+                  ],
+                  "bicycle": {"color": "red", "price": 19.95},
+              },
+              "expensive": 10,
+          }
+
+          native = jsonpath_mojo.find("$.store.book[?(@.price < 10)].title", data)
+          assert native == [
+              ("Sayings", "store.book.[0].title"),
+              ("Moby Dick", "store.book.[2].title"),
+          ], native
+
+          # The forced fallback must produce identical results.
+          os.environ["JSONPATH_MOJO_DISABLE_NATIVE"] = "1"
+          fallback = jsonpath_mojo.find("$.store.book[?(@.price < 10)].title", data)
+          assert fallback == native, (native, fallback)
+
+          # A recursive-descent + slice + wildcard quickstart for good measure.
+          both = jsonpath_mojo.find("$..book[::-1].title", data)
+          assert both == [
+              ("Moby Dick", "store.book.[2].title"),
+              ("Sword", "store.book.[1].title"),
+              ("Sayings", "store.book.[0].title"),
+          ], both
+          print("wheel smoke OK:", jsonpath_mojo.__version__, info["native_source"])
+          EOF
+      - name: Smoke-test the jsonschema-mojo wheel in a clean venv
+        shell: bash
+        run: |
+          set -e
+          python3 -m venv /tmp/jsonschema-wheel-smoke
+          /tmp/jsonschema-wheel-smoke/bin/pip install --quiet python/jsonschema_mojo/dist/*.whl
+          # Hide the pixi env for the smoke: an end user has no Mojo
+          # toolchain, so the wheel must load its kernel purely from its own
+          # vendored libraries (not via the build machine's absolute rpath).
+          repo_root="$PWD"
+          mv .pixi .pixi-hidden
+          trap 'mv "$repo_root/.pixi-hidden" "$repo_root/.pixi"' EXIT
+          cd /tmp
+          /tmp/jsonschema-wheel-smoke/bin/python "$repo_root/python/jsonschema_mojo/examples/quickstart.py" | tee /tmp/quickstart-native.txt
+          # The forced fallback must produce the same results (the only
+          # intentional difference is the reported backend name).
+          JSONSCHEMA_MOJO_DISABLE_NATIVE=1 /tmp/jsonschema-wheel-smoke/bin/python "$repo_root/python/jsonschema_mojo/examples/quickstart.py" | tee /tmp/quickstart-fallback.txt
+          diff <(grep -v '^backend: ' /tmp/quickstart-native.txt) <(grep -v '^backend: ' /tmp/quickstart-fallback.txt)
+          /tmp/jsonschema-wheel-smoke/bin/python - <<'EOF'
+          import jsonschema_mojo
+
+          info = jsonschema_mojo.backend_info()
+          assert info["native_available"], f"wheel must carry the native kernel: {info}"
+          print("wheel smoke OK:", jsonschema_mojo.__version__, info["native_source"])
+          EOF
+      - name: Smoke-test the sacrebleu-mojo wheel in a clean venv
+        shell: bash
+        run: |
+          set -e
+          python3 -m venv /tmp/sacrebleu-wheel-smoke
+          /tmp/sacrebleu-wheel-smoke/bin/pip install --quiet python/sacrebleu_mojo/dist/*.whl
+          # Hide the pixi env for the smoke: an end user has no Mojo toolchain,
+          # so the wheel must load its kernel purely from its own vendored
+          # libraries (not via the build machine's absolute rpath).
+          repo_root="$PWD"
+          mv .pixi .pixi-hidden
+          trap 'mv "$repo_root/.pixi-hidden" "$repo_root/.pixi"' EXIT
+          cd /tmp
+          /tmp/sacrebleu-wheel-smoke/bin/python - <<'EOF'
+          import sacrebleu_mojo
+
+          hyps = ["the quick brown fox jumps over the lazy dog", "hello world"]
+          refs = [["the quick brown fox jumps over the lazy dog", "hello there world"]]
+
+          bleu = sacrebleu_mojo.corpus_bleu(hyps, refs)
+          chrf = sacrebleu_mojo.corpus_chrf(hyps, refs)
+          info = sacrebleu_mojo.backend_info()
+          assert info["native_available"], f"wheel must carry the native kernel: {info}"
+          assert bleu.backend == "native" and chrf.backend == "native"
+          # Reference values from the published oracle package (identical to
+          # all printed digits on both backends).
+          assert abs(bleu.score - 88.66057689902036) <= 1e-9, bleu.score
+          assert abs(chrf.score - 84.8339703264813) <= 1e-9, chrf.score
+          assert bleu.counts == [11, 8, 7, 6]
+          assert bleu.totals == [11, 9, 7, 6]
+          print(str(bleu))
+          print(str(chrf))
+          print("wheel smoke OK:", sacrebleu_mojo.__version__, info["native_source"])
+          EOF
+          # The forced fallback must produce the same scores (1e-9 tolerance).
+          SACREBLEU_MOJO_DISABLE_NATIVE=1 /tmp/sacrebleu-wheel-smoke/bin/python - <<'EOF'
+          import sacrebleu_mojo
+
+          hyps = ["the quick brown fox jumps over the lazy dog", "hello world"]
+          refs = [["the quick brown fox jumps over the lazy dog", "hello there world"]]
+          bleu = sacrebleu_mojo.corpus_bleu(hyps, refs)
+          chrf = sacrebleu_mojo.corpus_chrf(hyps, refs)
+          assert bleu.backend == "fallback" and chrf.backend == "fallback"
+          assert abs(bleu.score - 88.66057689902036) <= 1e-9, bleu.score
+          assert abs(chrf.score - 84.8339703264813) <= 1e-9, chrf.score
+          assert bleu.counts == [11, 8, 7, 6]
+          print("fallback smoke OK")
+          EOF
       - name: Smoke-test the fuse-mojo tarballs in a fresh npm project (native + simulated-Windows fallback)
         env:
           FUSE_MOJO_DIST: typescript/fuse-mojo/dist
@@ -370,7 +572,9 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p release-assets
-          cp python/bm25_mojo/dist/*.whl python/cclib_mojo/dist/*.whl release-assets/
+          cp python/bm25_mojo/dist/*.whl python/cclib_mojo/dist/*.whl \
+            python/croniter_mojo/dist/*.whl python/jsonpath_mojo/dist/*.whl \
+            python/jsonschema_mojo/dist/*.whl python/sacrebleu_mojo/dist/*.whl release-assets/
           case "$RUNNER_OS" in
             Linux) cp typescript/fuse-mojo/dist/thyn-ai-fuse-mojo-core-*.tgz typescript/fuse-mojo/dist/thyn-ai-fuse-mojo-linux-x64-*.tgz release-assets/ ;;
             macOS) cp typescript/fuse-mojo/dist/thyn-ai-fuse-mojo-darwin-arm64-*.tgz release-assets/ ;;
@@ -418,8 +622,8 @@ jobs:
           wheels=$(find . -maxdepth 1 -name '*.whl' | wc -l)
           tarballs=$(find . -maxdepth 1 -name '*.tgz' | wc -l)
           total=$(find . -maxdepth 1 -type f | wc -l)
-          if [ "$wheels" -ne 4 ] || [ "$tarballs" -ne 3 ] || [ "$total" -ne 7 ]; then
-            echo "::error::Expected 4 wheels + 3 npm tarballs, found $wheels + $tarballs ($total files)." >&2
+          if [ "$wheels" -ne 12 ] || [ "$tarballs" -ne 3 ] || [ "$total" -ne 15 ]; then
+            echo "::error::Expected 12 wheels (6 projects x 2 platforms) + 3 npm tarballs, found $wheels + $tarballs ($total files)." >&2
             exit 1
           fi
           for f in *; do
@@ -646,9 +850,13 @@ jobs:
       - name: Stage the wheels per project
         run: |
           set -euo pipefail
-          mkdir -p pypi/bm25-mojo pypi/cclib-mojo
+          mkdir -p pypi/bm25-mojo pypi/cclib-mojo pypi/croniter-mojo pypi/jsonpath-mojo pypi/jsonschema-mojo pypi/sacrebleu-mojo
           cp release-assets/bm25_mojo-*.whl pypi/bm25-mojo/
           cp release-assets/cclib_mojo-*.whl pypi/cclib-mojo/
+          cp release-assets/croniter_mojo-*.whl pypi/croniter-mojo/
+          cp release-assets/jsonpath_mojo-*.whl pypi/jsonpath-mojo/
+          cp release-assets/jsonschema_mojo-*.whl pypi/jsonschema-mojo/
+          cp release-assets/sacrebleu_mojo-*.whl pypi/sacrebleu-mojo/
           ls -la pypi/*
 
       - name: Publish bm25-mojo
@@ -669,6 +877,30 @@ jobs:
         uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
         with:
           packages-dir: pypi/cclib-mojo/
+          skip-existing: true
+          password: ${{ secrets.PYPI_TOKEN }}
+      - name: Publish croniter-mojo
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+        with:
+          packages-dir: pypi/croniter-mojo/
+          skip-existing: true
+          password: ${{ secrets.PYPI_TOKEN }}
+      - name: Publish jsonpath-mojo
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+        with:
+          packages-dir: pypi/jsonpath-mojo/
+          skip-existing: true
+          password: ${{ secrets.PYPI_TOKEN }}
+      - name: Publish jsonschema-mojo
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+        with:
+          packages-dir: pypi/jsonschema-mojo/
+          skip-existing: true
+          password: ${{ secrets.PYPI_TOKEN }}
+      - name: Publish sacrebleu-mojo
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+        with:
+          packages-dir: pypi/sacrebleu-mojo/
           skip-existing: true
           password: ${{ secrets.PYPI_TOKEN }}
 
