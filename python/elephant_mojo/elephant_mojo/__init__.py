@@ -27,7 +27,7 @@ from elephant_mojo.core import (
     pvalue_spectrum,
 )
 
-__version__ = "0.1.6"  # x-release-please-version
+__version__ = "0.1.7"  # x-release-please-version
 __all__ = [
     "DitherError",
     "METHOD_DITHER_SPIKES",
