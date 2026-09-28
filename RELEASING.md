@@ -135,7 +135,7 @@ that disagrees with any of them. The release pull request writes the new
 | `pixi.toml` (`[workspace] version`) | TOML path `$.workspace.version` |
 | `python/*/pyproject.toml` (`[project] version`) | TOML path `$.project.version`, globbed |
 | `python/*/*/__init__.py` (`__version__ = "X.Y.Z"  # x-release-please-version`) | the line marker |
-| `typescript/*/package.json`, `typescript/*/packages/*/package.json` (`version`) | JSON paths, globbed; the core package's `optionalDependencies` pins on its platform packages are written into the packed manifest by `scripts/smoke.sh` at exactly the packed version, never into the source `package.json`, so the workspace lockfile never depends on a platform package that is not on the registry yet |
+| `typescript/*/package.json`, `typescript/*/packages/*/package.json` (`version`) | JSON paths, globbed; each TypeScript package's core pins its platform packages (`optionalDependencies`) only inside the packed manifest — its `scripts/smoke.sh` stages a copy of `packages/core` with the pins at exactly the packed version and verifies the tarball — never in the source `package.json`, so no workspace lockfile ever depends on a platform package that is not on the registry yet |
 | `typescript/*/package-lock.json` (root `version`, `packages[""]`, `packages/core`) | JSON paths, globbed |
 | `typescript/fuse-mojo/tests/unit.test.cjs`, `typescript/natural-mojo/tests/unit.test.cjs` (`assert.equal(..., 'X.Y.Z') // x-release-please-version`) | the line marker |
 | `README.md`, `python/cclib_mojo/README.md`, `typescript/fuse-mojo/README.md` (the `V=X.Y.Z  # x-release-please-version` line of each install block, which downloads the Release assets for that version) | the line marker |
