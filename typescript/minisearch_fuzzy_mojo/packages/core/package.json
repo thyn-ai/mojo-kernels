@@ -1,6 +1,6 @@
 {
   "name": "@thyn-ai/minisearch-mojo-core",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "Drop-in faster replacement for MiniSearch fuzzy/prefix search and auto-suggestions, powered by a Mojo kernel (pure-JS fallback included).",
   "license": "Apache-2.0",
   "author": {
