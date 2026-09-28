@@ -1,6 +1,6 @@
 {
   "name": "@thyn-ai/ckmeans-mojo-darwin-arm64",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Prebuilt ckmeansmojo Mojo kernel for macOS Apple Silicon (used by @thyn-ai/ckmeans-mojo-core).",
   "license": "Apache-2.0",
   "author": {
