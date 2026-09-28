@@ -1,9 +1,12 @@
 {
   "name": "@thyn-ai/ckmeans-mojo-core",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Drop-in faster ckmeans for simple-statistics, powered by a Mojo kernel (pure-JS fallback included).",
   "license": "Apache-2.0",
-  "author": { "name": "Thyn", "url": "https://thyn.ai" },
+  "author": {
+    "name": "Thyn",
+    "url": "https://thyn.ai"
+  },
   "keywords": [
     "ckmeans",
     "k-means",
@@ -38,8 +41,8 @@
     "koffi": "^3.3.1"
   },
   "optionalDependencies": {
-    "@thyn-ai/ckmeans-mojo-darwin-arm64": "0.2.0",
-    "@thyn-ai/ckmeans-mojo-linux-x64": "0.2.0"
+    "@thyn-ai/ckmeans-mojo-darwin-arm64": "0.2.1",
+    "@thyn-ai/ckmeans-mojo-linux-x64": "0.2.1"
   },
   "repository": {
     "type": "git",

@@ -1,9 +1,12 @@
 {
   "name": "@thyn-ai/minisearch-mojo-darwin-arm64",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Prebuilt Mojo kernel for @thyn-ai/minisearch-mojo-core (macOS arm64).",
   "license": "Apache-2.0",
-  "author": { "name": "Thyn", "url": "https://thyn.ai" },
+  "author": {
+    "name": "Thyn",
+    "url": "https://thyn.ai"
+  },
   "os": [
     "darwin"
   ],

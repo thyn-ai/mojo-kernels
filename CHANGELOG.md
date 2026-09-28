@@ -10,6 +10,13 @@ Entries after 0.1.0 are written by [release-please](https://github.com/googleapi
 from the Conventional Commits merged since the previous tag, in the release
 pull request that cuts the version ([RELEASING.md](RELEASING.md)).
 
+## [0.2.1](https://github.com/thyn-ai/mojo-kernels/compare/v0.2.0...v0.2.1) (2026-09-28)
+
+
+### Fixed
+
+* **meta:** declare Thyn as author and maintainer, with https://thyn.ai, on every package ([#75](https://github.com/thyn-ai/mojo-kernels/issues/75)) ([3872c03](https://github.com/thyn-ai/mojo-kernels/commit/3872c032fc2a1415b54e6d64b772f27ae000f6e4))
+
 ## [0.2.0](https://github.com/thyn-ai/mojo-kernels/compare/v0.1.7...v0.2.0) (2026-09-28)
 
 
