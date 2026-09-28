@@ -87,6 +87,7 @@ jobs:
           assert fallback == native, (native, fallback)
 
           # A recursive-descent + slice + wildcard quickstart for good measure.
+          del os.environ["JSONPATH_MOJO_DISABLE_NATIVE"]  # back to the native backend for the last check
           both = jsonpath_mojo.find("$..book[::-1].title", data)
           assert both == [
               ("Moby Dick", "store.book.[2].title"),

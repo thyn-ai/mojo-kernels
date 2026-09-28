@@ -283,7 +283,7 @@ jobs:
         run: pixi run bash kernels/sacrebleu/build.sh
       - name: Assert the Linux kernels stay on the x86-64-v3 baseline
         if: runner.os == 'Linux'
-        run: bash scripts/check_x86_64_baseline.sh kernels/bm25/build/libbm25mojo.so kernels/gaussgrid/build/libgaussgridmojo.so kernels/fuse/build/libfusemojo.so
+        run: bash scripts/check_x86_64_baseline.sh kernels/bm25/build/libbm25mojo.so kernels/gaussgrid/build/libgaussgridmojo.so kernels/fuse/build/libfusemojo.so kernels/croniter/build/libcronitermojo.so kernels/jsonpath/build/libjsonpathmojo.so kernels/jsonschema/build/libjsonschemamojo.so kernels/sacrebleu/build/libsacremojo.so
 
       - name: Differential suites (native backend, then forced fallback)
         run: |
@@ -323,11 +323,14 @@ jobs:
       - name: Build + repair the sacrebleu-mojo platform wheel (delocate/auditwheel)
         shell: bash
         run: |
+          set -euo pipefail
           cd python/sacrebleu_mojo
           export MACOSX_DEPLOYMENT_TARGET="${MACOSX_DEPLOYMENT_TARGET:-14.0}"
           rm -rf dist dist-repaired
           pixi run python -m build --wheel --no-isolation --outdir dist .
-          raw="$(ls dist/*.whl)"
+          wheels=(dist/*.whl)
+          if [ "${#wheels[@]}" -ne 1 ] || [ ! -f "${wheels[0]}" ]; then echo "::error::expected exactly one wheel in dist/, found: ${wheels[*]}" >&2; exit 1; fi
+          raw="${wheels[0]}"
           case "$(uname -s)" in
             Darwin) pixi run delocate-wheel -v -w dist-repaired "$raw" ;;
             Linux)  pixi run auditwheel repair "$raw" -w dist-repaired ;;
@@ -472,6 +475,7 @@ jobs:
           assert fallback == native, (native, fallback)
 
           # A recursive-descent + slice + wildcard quickstart for good measure.
+          del os.environ["JSONPATH_MOJO_DISABLE_NATIVE"]  # back to the native backend for the last check
           both = jsonpath_mojo.find("$..book[::-1].title", data)
           assert both == [
               ("Moby Dick", "store.book.[2].title"),
