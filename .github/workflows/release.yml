@@ -616,14 +616,17 @@ jobs:
       # a branch, not on a new tag, so the generator must be told the Release.
       upload-tag-name: ${{ needs.preflight.outputs.tag }}
 
-  # PyPI, gated on the repository variable PUBLISH_PYPI == "true". Trusted
-  # Publishing: no token anywhere; PyPI trusts this workflow file in this
-  # repository, in the `pypi` environment, for both projects (registered by
-  # the owner; RELEASING.md). The action also uploads PEP 740 attestations.
+  # PyPI, gated on the repository variable PUBLISH_PYPI == "true". Dual-mode
+  # auth: while the PYPI_TOKEN secret exists the publish steps use it (no PEP
+  # 740 attestations -- those need OIDC); once trusted publishers are
+  # registered on PyPI for both projects AND the secret is deleted, the same
+  # steps flip back to OIDC + attestations with no code change (RELEASING.md).
+  # The token mode exists because the OIDC-only exchange fails with
+  # `invalid-publisher` when no publisher is registered (v0.1.5, v0.1.6).
   # Runs only after the Release and its provenance exist. No checkout, by
   # design: it publishes artifacts the `build` job produced and nothing else.
   publish-pypi:
-    name: publish the wheels to PyPI (Trusted Publishing)
+    name: publish the wheels to PyPI (token now, OIDC once publishers are registered)
     needs: [preflight, sign, release, provenance]
     if: needs.preflight.outputs.dry_run != 'true' && vars.PUBLISH_PYPI == 'true'
     runs-on: ubuntu-latest
@@ -653,12 +656,21 @@ jobs:
         with:
           packages-dir: pypi/bm25-mojo/
           skip-existing: true
+          # Dual-mode auth: while the PYPI_TOKEN secret exists the step publishes with the
+          # token (PEP 740 attestations are skipped -- they require OIDC). Once trusted
+          # publishers are registered on PyPI for these projects AND the secret is deleted,
+          # this same step flips back to OIDC + attestations with no code change (an empty
+          # password selects the OIDC path). Until then the token keeps releases green --
+          # the OIDC-only exchange fails with `invalid-publisher` when no publisher is
+          # registered (v0.1.5 and v0.1.6 both failed this job on exactly that).
+          password: ${{ secrets.PYPI_TOKEN }}
 
       - name: Publish cclib-mojo
         uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
         with:
           packages-dir: pypi/cclib-mojo/
           skip-existing: true
+          password: ${{ secrets.PYPI_TOKEN }}
 
   # npm, gated on the repository variable PUBLISH_NPM == "true". Trusted
   # Publishing (npm >= 11.5.1, Node 24) with `--provenance`, so every version
@@ -700,7 +712,10 @@ jobs:
         run: |
           set -euo pipefail
           npm_version="$(npm --version)"
-          if ! node -e 'const [a, b, c] = process.versions.npm.split(".").map(Number); process.exit(a > 11 || (a === 11 && (b > 5 || (b === 5 && c >= 1))) ? 0 : 1)'; then
+          # Version-check the CLI's own output: `process.versions.npm` is not populated on
+          # every Node distribution (it is undefined on the runners' Node 24, which crashed
+          # this gate and mis-reported npm 11.19.0 as older than 11.5.1).
+          if ! awk -F. '{ exit !( $1 > 11 || ($1 == 11 && ($2 > 5 || ($2 == 5 && $3 >= 1))) ) }' <<< "$npm_version"; then
             echo "::error::npm $npm_version is older than 11.5.1, the first version with Trusted Publishing." >&2
             exit 1
           fi
