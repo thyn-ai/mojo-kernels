@@ -326,23 +326,23 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # package: directory under typescript/; scope: the npm scope of the
-          # core package; prefix: the package's environment-variable prefix.
+          # package: directory under typescript/; core_pkg: the core package's npm
+          # name; prefix: the package's environment-variable prefix.
           - package: ckmeans-mojo
-            scope: "@ckmeans-mojo"
+            core_pkg: "@thyn-ai/ckmeans-mojo-core"
             prefix: CKMEANS_MOJO
           - package: fuse-mojo
-            scope: "@fuse-mojo"
+            core_pkg: "@thyn-ai/fuse-mojo-core"
             prefix: FUSE_MOJO
           - package: minisearch_fuzzy_mojo
-            scope: "@minisearch-mojo"
+            core_pkg: "@thyn-ai/minisearch-mojo-core"
             prefix: MINISEARCH_MOJO
           - package: natural-mojo
-            scope: "@natural-mojo"
+            core_pkg: "@thyn-ai/natural-mojo-core"
             prefix: NATURAL_MOJO
     env:
       PACKAGE: ${{ matrix.package }}
-      SCOPE: ${{ matrix.scope }}
+      CORE_PKG: ${{ matrix.core_pkg }}
       PREFIX: ${{ matrix.prefix }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -363,13 +363,13 @@ jobs:
         run: |
           set -e
           node - <<EOF
-          const core = require("${SCOPE}/core")
+          const core = require("${CORE_PKG}")
           const info = core.backendInfo()
           console.log(JSON.stringify(info, null, 2))
           if (process.platform !== "win32") throw new Error("expected win32, got " + process.platform)
           if (info.native_available !== false) throw new Error("a Windows install must not find a native kernel")
           if (info.disabled_by_env !== false) throw new Error("the fallback must be selected without any override")
-          console.log("end-user fallback OK:", "${SCOPE}/core", require("${SCOPE}/core/package.json").version)
+          console.log("end-user fallback OK:", "${CORE_PKG}", require("${CORE_PKG}/package.json").version)
           EOF
 
       - name: Forced-fallback differential suite (npm run test:fallback)

@@ -296,7 +296,7 @@ so the very first publish of each package uses a short-lived token; every
 later release uses OpenID Connect and no token at all.
 
 1. First publish (token). On npmjs.com create a **granular access token**
-   with *Read and write* on packages in the `@fuse-mojo` scope, *Bypass
+   with *Read and write* on packages in the `@thyn-ai` scope, *Bypass
    2FA* enabled (the workflow cannot answer a one-time code) and the
    shortest expiry offered. Store it and enable the job:
 
