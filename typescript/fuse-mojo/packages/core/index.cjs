@@ -1,7 +1,7 @@
 'use strict'
 
 /**
- * @fuse-mojo/core — drop-in faster replacement for Fuse.js v7 fuzzy search.
+ * @thyn-ai/fuse-mojo-core — drop-in faster replacement for Fuse.js v7 fuzzy search.
  *
  * The heavy Bitap matching runs on a native Mojo kernel when its shared
  * library is available (macOS arm64 / Linux x64 platform packages); on any

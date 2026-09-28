@@ -5,7 +5,7 @@
 # Extracts every ```bash block that carries an `x-release-please-version`
 # line from the README files below, runs each one verbatim (bash, and zsh
 # where it is installed) in a fresh Python 3.12 venv and a fresh npm project,
-# then asserts that bm25_mojo, cclib_mojo and @fuse-mojo/core report the
+# then asserts that bm25_mojo, cclib_mojo and @thyn-ai/fuse-mojo-core report the
 # native backend at the README's version. Finally it downloads the assets
 # the blocks installed and checks them against the Release's SHA256SUMS.
 #
@@ -72,10 +72,10 @@ fi
 
 case "$(uname -sm)" in
   "Darwin arm64")
-    assets=("bm25_mojo-${version}-py3-none-macosx_14_0_arm64.whl" "cclib_mojo-${version}-py3-none-macosx_14_0_arm64.whl" "fuse-mojo-darwin-arm64-${version}.tgz" "fuse-mojo-core-${version}.tgz")
+    assets=("bm25_mojo-${version}-py3-none-macosx_14_0_arm64.whl" "cclib_mojo-${version}-py3-none-macosx_14_0_arm64.whl" "thyn-ai-fuse-mojo-darwin-arm64-${version}.tgz" "thyn-ai-fuse-mojo-core-${version}.tgz")
     sha256="shasum -a 256" ;;
   "Linux x86_64")
-    assets=("bm25_mojo-${version}-py3-none-manylinux_2_35_x86_64.whl" "cclib_mojo-${version}-py3-none-manylinux_2_35_x86_64.whl" "fuse-mojo-linux-x64-${version}.tgz" "fuse-mojo-core-${version}.tgz")
+    assets=("bm25_mojo-${version}-py3-none-manylinux_2_35_x86_64.whl" "cclib_mojo-${version}-py3-none-manylinux_2_35_x86_64.whl" "thyn-ai-fuse-mojo-linux-x64-${version}.tgz" "thyn-ai-fuse-mojo-core-${version}.tgz")
     sha256="sha256sum" ;;
   *) echo "::error::no prebuilt assets for $(uname -sm); this check runs on macOS arm64 and Linux x86_64 only." >&2; exit 1 ;;
 esac
@@ -120,11 +120,11 @@ assert scores.shape == (3,) and scores[0] > 0 and scores[1] == 0 and scores[2] =
 PY
 node - "$version" <<'JS'
 const version = process.argv[2]
-const Fuse = require('@fuse-mojo/core')
+const Fuse = require('@thyn-ai/fuse-mojo-core')
 const info = Fuse.backendInfo()
-console.log(`  @fuse-mojo/core ${Fuse.version}: native_available=${info.native_available} native_source=${info.native_source}`)
-if (Fuse.version !== version) throw new Error(`@fuse-mojo/core is ${Fuse.version}, README says ${version}`)
-if (!info.native_available) throw new Error(`@fuse-mojo/core fell back: ${JSON.stringify(info)}`)
+console.log(`  @thyn-ai/fuse-mojo-core ${Fuse.version}: native_available=${info.native_available} native_source=${info.native_source}`)
+if (Fuse.version !== version) throw new Error(`@thyn-ai/fuse-mojo-core is ${Fuse.version}, README says ${version}`)
+if (!info.native_available) throw new Error(`@thyn-ai/fuse-mojo-core fell back: ${JSON.stringify(info)}`)
 const hits = new Fuse([{ title: 'The Lock Artist' }, { title: 'Syrup' }], { keys: ['title'] }).search('lock')
 if (hits.length !== 1 || hits[0].refIndex !== 0) throw new Error(`unexpected search result ${JSON.stringify(hits)}`)
 JS

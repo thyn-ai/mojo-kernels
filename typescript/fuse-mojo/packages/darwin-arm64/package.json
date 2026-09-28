@@ -1,7 +1,7 @@
 {
-  "name": "@fuse-mojo/darwin-arm64",
+  "name": "@thyn-ai/fuse-mojo-darwin-arm64",
   "version": "0.1.5",
-  "description": "Prebuilt fusemojo Mojo kernel for macOS Apple Silicon (used by @fuse-mojo/core).",
+  "description": "Prebuilt fusemojo Mojo kernel for macOS Apple Silicon (used by @thyn-ai/fuse-mojo-core).",
   "license": "Apache-2.0",
   "author": "Algenta",
   "os": [

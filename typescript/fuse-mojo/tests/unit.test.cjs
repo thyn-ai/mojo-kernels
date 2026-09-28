@@ -7,7 +7,7 @@
 
 const test = require('node:test')
 const assert = require('node:assert/strict')
-const Fuse = require('@fuse-mojo/core')
+const Fuse = require('@thyn-ai/fuse-mojo-core')
 
 const NATIVE_EXPECTED = process.env.FUSE_MOJO_DISABLE_NATIVE !== '1'
 
@@ -111,7 +111,7 @@ test('explicit destroy + GC does not double-free the native index', { skip: !NAT
   // the child's stderr; assert clean exit and clean stderr.
   const { spawnSync } = require('node:child_process')
   const script = `
-    const Fuse = require('@fuse-mojo/core')
+    const Fuse = require('@thyn-ai/fuse-mojo-core')
     const docs = Array.from({ length: 20000 }, (_, i) => 'tok' + i + ' alpha beta gamma')
     for (let r = 0; r < 3; r++) {
       const f = new Fuse(docs, { includeScore: true })

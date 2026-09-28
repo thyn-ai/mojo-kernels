@@ -2,8 +2,8 @@
 
 A release of this repository is one `vX.Y.Z` tag that ships every
 distributable at that version: the `bm25-mojo` and `cclib-mojo` platform
-wheels (macOS arm64, Linux x86_64) and the `@fuse-mojo/core`,
-`@fuse-mojo/darwin-arm64` and `@fuse-mojo/linux-x64` npm tarballs. Two
+wheels (macOS arm64, Linux x86_64) and the `@thyn-ai/fuse-mojo-core`,
+`@thyn-ai/fuse-mojo-darwin-arm64` and `@thyn-ai/fuse-mojo-linux-x64` npm tarballs. Two
 workflows cut it: [`release-please.yml`](./.github/workflows/release-please.yml)
 opens the release pull request and, when that merges, creates the tag and
 the GitHub Release; [`release.yml`](./.github/workflows/release.yml) builds,
@@ -23,8 +23,8 @@ for that tag:
 | --- | --- |
 | `bm25_mojo-X.Y.Z-py3-none-{manylinux_2_35_x86_64,macosx_14_0_arm64}.whl` | bm25-mojo wheels, Mojo runtime vendored |
 | `cclib_mojo-X.Y.Z-py3-none-{manylinux_2_35_x86_64,macosx_14_0_arm64}.whl` | cclib-mojo wheels, Mojo runtime vendored |
-| `fuse-mojo-core-X.Y.Z.tgz` | `@fuse-mojo/core` (wrapper + vendored Fuse.js fallback) |
-| `fuse-mojo-linux-x64-X.Y.Z.tgz`, `fuse-mojo-darwin-arm64-X.Y.Z.tgz` | `@fuse-mojo/*` platform packages, one kernel each |
+| `fuse-mojo-core-X.Y.Z.tgz` | `@thyn-ai/fuse-mojo-core` (wrapper + vendored Fuse.js fallback) |
+| `fuse-mojo-linux-x64-X.Y.Z.tgz`, `fuse-mojo-darwin-arm64-X.Y.Z.tgz` | `@thyn-ai/fuse-mojo-*` platform packages, one kernel each |
 | `SHA256SUMS` | SHA-256 of the seven files above |
 | `<asset>.sigstore.json` (one per asset, `SHA256SUMS` included) | keyless [Sigstore](https://www.sigstore.dev/) signature bundle, signed by the `release.yml` run itself |
 | `multiple.intoto.jsonl` | [SLSA](https://slsa.dev/) build provenance covering all eight assets, from the [SLSA generic generator](https://github.com/slsa-framework/slsa-github-generator) |
@@ -286,7 +286,7 @@ job. Adding a required reviewer to it (Settings → Environments → `pypi`)
 puts a manual approval in front of every PyPI upload without touching the
 workflow.
 
-### npm: `@fuse-mojo/core`, `@fuse-mojo/darwin-arm64`, `@fuse-mojo/linux-x64`
+### npm: `@thyn-ai/fuse-mojo-core`, `@thyn-ai/fuse-mojo-darwin-arm64`, `@thyn-ai/fuse-mojo-linux-x64`
 
 Scoped packages need their scope to exist: create the `fuse-mojo`
 organization on npmjs.com (or confirm it is owned) before the first publish.
@@ -387,5 +387,5 @@ Two details of the identity string:
 On the registries: PyPI shows the PEP 740 attestations uploaded with each
 wheel on the file's page (the **Provenance** entry links back to the
 `release.yml` run), and `npm audit signatures` in a project that depends on
-`@fuse-mojo/core` verifies the registry signature and the `--provenance`
-attestation of every installed `@fuse-mojo/*` version.
+`@thyn-ai/fuse-mojo-core` verifies the registry signature and the `--provenance`
+attestation of every installed `@thyn-ai/fuse-mojo-*` version.

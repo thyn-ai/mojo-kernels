@@ -1,7 +1,7 @@
 NOTICE
 ======
 
-@fuse-mojo/core includes a vendored copy of Fuse.js v7.1.0
+@thyn-ai/fuse-mojo-core includes a vendored copy of Fuse.js v7.1.0
 (vendor/fuse.basic.cjs), used as the pure-JavaScript fallback backend on
 platforms without a prebuilt native kernel, and as the reference oracle in
 the differential test suite.

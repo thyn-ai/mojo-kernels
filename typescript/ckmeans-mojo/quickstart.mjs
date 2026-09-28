@@ -1,12 +1,12 @@
 /**
- * End-user smoke test for @ckmeans-mojo/core: the simple-statistics ckmeans
+ * End-user smoke test for @thyn-ai/ckmeans-mojo-core: the simple-statistics ckmeans
  * README example, unmodified except for the import, plus a larger mixed
  * workload. Must produce identical results on the native kernel and on the
  * pure-JS fallback.
  *
  * Usage: node quickstart.mjs [--assert-native|--assert-fallback]
  */
-import ckmeans, { backendInfo } from '@ckmeans-mojo/core'
+import ckmeans, { backendInfo } from '@thyn-ai/ckmeans-mojo-core'
 
 // --- simple-statistics README ckmeans example ------------------------------
 // https://github.com/simple-statistics/simple-statistics#ckmeans

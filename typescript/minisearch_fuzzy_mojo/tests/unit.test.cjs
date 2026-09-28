@@ -7,8 +7,8 @@
 
 const test = require('node:test')
 const assert = require('node:assert/strict')
-const MiniSearchMojo = require('@minisearch-mojo/core')
-const { UnsupportedOptionError } = require('@minisearch-mojo/core')
+const MiniSearchMojo = require('@thyn-ai/minisearch-mojo-core')
+const { UnsupportedOptionError } = require('@thyn-ai/minisearch-mojo-core')
 
 const BACKEND = process.env.MINISEARCH_MOJO_DISABLE_NATIVE === '1' ? 'fallback' : 'native'
 

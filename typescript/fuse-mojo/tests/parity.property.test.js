@@ -1,7 +1,7 @@
 'use strict'
 
 /**
- * Property-based parity: @fuse-mojo/core vs the published Fuse.js 7.1.0 on
+ * Property-based parity: @thyn-ai/fuse-mojo-core vs the published Fuse.js 7.1.0 on
  * generated corpora, patterns and option sets (fast-check).
  *
  * Where tests/differential.test.cjs replays fixed seeded corpora through a
@@ -27,7 +27,7 @@
 const test = require('node:test')
 const assert = require('node:assert/strict')
 const fc = require('fast-check')
-const Fuse = require('@fuse-mojo/core')
+const Fuse = require('@thyn-ai/fuse-mojo-core')
 const ReferenceFuse = require('fuse.js')
 const { compareResults } = require('./helpers.cjs')
 

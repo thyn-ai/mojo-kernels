@@ -2,7 +2,7 @@
 
 /**
  * Option handling, tokenization, and term-weight rules for
- * @minisearch-mojo/core.
+ * @thyn-ai/minisearch-mojo-core.
  *
  * These functions replicate the *observable* behavior of the corresponding
  * MiniSearch v7 code paths (default tokenizer splitting on Unicode

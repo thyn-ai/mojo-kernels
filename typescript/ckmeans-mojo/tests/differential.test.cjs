@@ -1,7 +1,7 @@
 'use strict'
 
 /**
- * Differential suite: @ckmeans-mojo/core (native backend, or forced fallback
+ * Differential suite: @thyn-ai/ckmeans-mojo-core (native backend, or forced fallback
  * when CKMEANS_MOJO_DISABLE_NATIVE=1) vs the published simple-statistics
  * 7.12.0 package, on exhaustive small grids, deterministic seeded datasets,
  * and the documented edge cases.
@@ -13,7 +13,7 @@
 
 const test = require('node:test')
 const assert = require('node:assert/strict')
-const ckmeans = require('@ckmeans-mojo/core')
+const ckmeans = require('@thyn-ai/ckmeans-mojo-core')
 const reference = require('simple-statistics')
 const { rng, makeDataset, KINDS, gridArrays, compareClusters } = require('./helpers.cjs')
 

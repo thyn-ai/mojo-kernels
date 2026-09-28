@@ -7,8 +7,8 @@
  * Resolution order:
  *
  *   1. `$CKMEANS_MOJO_NATIVE_LIB` (explicit path override, for development)
- *   2. the platform package (`@ckmeans-mojo/<platform>-<arch>`) installed as
- *      an optional dependency of `@ckmeans-mojo/core`
+ *   2. the platform package (`@thyn-ai/ckmeans-mojo-<platform>-<arch>`) installed as
+ *      an optional dependency of `@thyn-ai/ckmeans-mojo-core`
  *   3. the repository development build output `kernels/ckmeans/build/`
  *
  * If the kernel cannot be found, fails to load, or reports an ABI version
@@ -59,7 +59,7 @@ function candidatePaths() {
   }
   // Platform package, resolved relative to this package so npm's nested or
   // hoisted layouts both work.
-  const platformPkg = `@ckmeans-mojo/${process.platform}-${process.arch}`
+  const platformPkg = `@thyn-ai/ckmeans-mojo-${process.platform}-${process.arch}`
   try {
     const pkgJson = require.resolve(`${platformPkg}/package.json`, { paths: [__dirname] })
     out.push([`platform package ${platformPkg}`, path.join(path.dirname(pkgJson), 'lib', libBasename())])

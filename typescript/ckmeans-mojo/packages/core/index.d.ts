@@ -1,4 +1,4 @@
-// Type definitions for @ckmeans-mojo/core.
+// Type definitions for @thyn-ai/ckmeans-mojo-core.
 // Mirrors the simple-statistics ckmeans(x, nClusters) API shape.
 
 declare function ckmeans(x: number[], nClusters: number): number[][]

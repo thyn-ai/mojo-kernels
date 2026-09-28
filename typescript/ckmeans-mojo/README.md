@@ -9,14 +9,14 @@ without a native build (e.g. Windows — tested there in CI: [`windows-fallback`
 time.
 
 ```js
-// npm install @ckmeans-mojo/core   →   then use it exactly like simple-statistics' ckmeans
-import ckmeans from '@ckmeans-mojo/core'
+// npm install @thyn-ai/ckmeans-mojo-core   →   then use it exactly like simple-statistics' ckmeans
+import ckmeans from '@thyn-ai/ckmeans-mojo-core'
 
 ckmeans([-1, 2, -1, 2, 4, 5, 6, -1, 2, -1], 3)
 // → [[-1, -1, -1, -1], [2, 2, 2], [4, 5, 6]]
 ```
 
-CommonJS works too: `const ckmeans = require('@ckmeans-mojo/core')`.
+CommonJS works too: `const ckmeans = require('@thyn-ai/ckmeans-mojo-core')`.
 
 ## Benchmark
 
@@ -98,14 +98,14 @@ per measurement), which is why adjacent cells vary.
 ## How it works
 
 ```
-npm install @ckmeans-mojo/core
+npm install @thyn-ai/ckmeans-mojo-core
         │
         ▼
-@ckmeans-mojo/core (thin JS wrapper)
+@thyn-ai/ckmeans-mojo-core (thin JS wrapper)
         │  validation identical to the reference (k > n error, ceil row
         │  count, single-unique-value fast path), one conversion pass
         ▼
-@ckmeans-mojo/darwin-arm64 | @ckmeans-mojo/linux-x64   (optionalDependencies)
+@thyn-ai/ckmeans-mojo-darwin-arm64 | @thyn-ai/ckmeans-mojo-linux-x64   (optionalDependencies)
         │  libckmeansmojo.{dylib,so} (Mojo kernel), loaded with koffi,
         │  ABI-version handshaked
         ▼
@@ -169,7 +169,7 @@ missing — so any load or ABI failure transparently selects the **vendored
 simple-statistics 7.12.0 ckmeans** (`vendor/`, ISC license, see `NOTICE`):
 
 - Resolution order: `$CKMEANS_MOJO_NATIVE_LIB` → the platform package
-  (`@ckmeans-mojo/<platform>-<arch>` optionalDependency) → the repository
+  (`@thyn-ai/ckmeans-mojo-<platform>-<arch>` optionalDependency) → the repository
   development build output.
 - `CKMEANS_MOJO_DISABLE_NATIVE=1` forces the fallback (the test suite runs
   this way as its second pass).
@@ -187,7 +187,7 @@ npm run test:fallback  # CKMEANS_MOJO_DISABLE_NATIVE=1, vendored fallback
 # or from the repo root: bash typescript/ckmeans-mojo/scripts/test_all.sh (both passes)
 ```
 
-`tests/` compares `@ckmeans-mojo/core` against the published
+`tests/` compares `@thyn-ai/ckmeans-mojo-core` against the published
 `simple-statistics` 7.12.0 package and asserts **exact cluster-assignment
 equality** (identical cluster count, lengths, and SameValue-equal elements —
 partitions are discrete and values pass through unmodified, so equality is
@@ -204,7 +204,7 @@ and string k, signed zeros, error class+message parity, input non-mutation).
 ```
 kernels/ckmeans/src/ckmeansmojo.mojo  # clean-room Ckmeans.1d.dp Mojo kernel, batch C ABI
 kernels/ckmeans/build.sh              # mojo build --emit shared-lib (--fp-mode contract=off)
-typescript/ckmeans-mojo/packages/core/      # @ckmeans-mojo/core: JS API, koffi
+typescript/ckmeans-mojo/packages/core/      # @thyn-ai/ckmeans-mojo-core: JS API, koffi
                                             #   loader, vendored fallback, NOTICE
 typescript/ckmeans-mojo/packages/<platform>-<arch>/  # prebuilt native libs (packed +
                                             #   repaired by scripts/pack-platform.sh)

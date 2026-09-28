@@ -1,11 +1,11 @@
 /**
- * End-user smoke test for @natural-mojo/core: the natural README distance
+ * End-user smoke test for @thyn-ai/natural-mojo-core: the natural README distance
  * examples, unmodified except for the import. Must produce identical results
  * on the native kernel and on the pure-JS fallback.
  *
  * Usage: node quickstart.mjs [--assert-native|--assert-fallback]
  */
-import natural, { nativeAvailable, backendInfo } from '@natural-mojo/core'
+import natural, { nativeAvailable, backendInfo } from '@thyn-ai/natural-mojo-core'
 
 // --- natural README quick-start (https://github.com/NaturalNode/natural) ---
 const results = {

@@ -51,7 +51,7 @@ updates:
           - "*"
     ignore:
       # fuse.js is not a runtime dependency: it is the differential-test ORACLE that
-      # @fuse-mojo/core (the kernels/fuse Bitap kernel and the vendored 7.1.0 fallback) must match
+      # @thyn-ai/fuse-mojo-core (the kernels/fuse Bitap kernel and the vendored 7.1.0 fallback) must match
       # bit-for-bit. Fuse.js 7.2.0 and later change observable search semantics, so a bump turns
       # every `includeMatches` cell red -- not a lockfile or API-shape problem but a real
       # divergence from what the kernel implements (verified on 7.2.0, 7.3.0, 7.4.x and 7.5.0):

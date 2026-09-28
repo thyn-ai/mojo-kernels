@@ -5,7 +5,7 @@
 # clean-environment smoke tests):
 #
 #   * bm25-mojo and cclib-mojo platform wheels (macOS arm64, Linux x86_64)
-#   * the @fuse-mojo/core, @fuse-mojo/darwin-arm64 and @fuse-mojo/linux-x64
+#   * the @thyn-ai/fuse-mojo-core, @thyn-ai/fuse-mojo-darwin-arm64 and @thyn-ai/fuse-mojo-linux-x64
 #     npm tarballs
 #   * SHA256SUMS over all of the above
 #
@@ -372,8 +372,8 @@ jobs:
           mkdir -p release-assets
           cp python/bm25_mojo/dist/*.whl python/cclib_mojo/dist/*.whl release-assets/
           case "$RUNNER_OS" in
-            Linux) cp typescript/fuse-mojo/dist/fuse-mojo-core-*.tgz typescript/fuse-mojo/dist/fuse-mojo-linux-x64-*.tgz release-assets/ ;;
-            macOS) cp typescript/fuse-mojo/dist/fuse-mojo-darwin-arm64-*.tgz release-assets/ ;;
+            Linux) cp typescript/fuse-mojo/dist/thyn-ai-fuse-mojo-core-*.tgz typescript/fuse-mojo/dist/thyn-ai-fuse-mojo-linux-x64-*.tgz release-assets/ ;;
+            macOS) cp typescript/fuse-mojo/dist/thyn-ai-fuse-mojo-darwin-arm64-*.tgz release-assets/ ;;
             *) echo "::error::Unexpected runner OS '$RUNNER_OS'." >&2; exit 1 ;;
           esac
           ls -la release-assets
@@ -664,7 +664,7 @@ jobs:
   # Publishing (npm >= 11.5.1, Node 24) with `--provenance`, so every version
   # on the registry carries a Sigstore attestation of this run. npm can only
   # be told to trust a workflow for a package that already exists, so the
-  # first publish of each @fuse-mojo/* package uses a short-lived granular
+  # first publish of each @thyn-ai/fuse-mojo-* package uses a short-lived granular
   # token in the NPM_TOKEN secret; after that the secret is deleted and OIDC
   # is the only path (RELEASING.md). npm tries OIDC first and falls back to
   # the token only when the exchange fails, so both paths run this same job.
@@ -708,8 +708,8 @@ jobs:
           # Platform packages first: core lists them as optionalDependencies,
           # so they must be resolvable the moment core is.
           for pkg in linux-x64 darwin-arm64 core; do
-            name="@fuse-mojo/${pkg}"
-            matches=(release-assets/fuse-mojo-"${pkg}"-*.tgz)
+            name="@thyn-ai/fuse-mojo-${pkg}"
+            matches=(release-assets/thyn-ai-fuse-mojo-"${pkg}"-*.tgz)
             if [ "${#matches[@]}" -ne 1 ] || [ ! -f "${matches[0]}" ]; then
               echo "::error::Expected exactly one tarball for ${name}, found: ${matches[*]}" >&2
               exit 1

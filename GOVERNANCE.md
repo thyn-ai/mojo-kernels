@@ -72,7 +72,7 @@ request.
 
 ## Releases
 
-- Each wrapper package (`bm25-mojo` and `cclib-mojo` on PyPI, `@fuse-mojo/core`
+- Each wrapper package (`bm25-mojo` and `cclib-mojo` on PyPI, `@thyn-ai/fuse-mojo-core`
   and its platform packages on npm) follows
   [Semantic Versioning](https://semver.org/); notable changes are recorded in
   [CHANGELOG.md](./CHANGELOG.md).

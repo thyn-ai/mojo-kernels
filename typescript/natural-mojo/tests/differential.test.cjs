@@ -1,7 +1,7 @@
 'use strict'
 
 /**
- * Differential suite: @natural-mojo/core (native backend, or forced fallback
+ * Differential suite: @thyn-ai/natural-mojo-core (native backend, or forced fallback
  * when NATURAL_MOJO_DISABLE_NATIVE=1) vs the published natural 8.1.1
  * package, on deterministic seeded string pairs.
  *
@@ -12,7 +12,7 @@
 
 const test = require('node:test')
 const assert = require('node:assert/strict')
-const naturalMojo = require('@natural-mojo/core')
+const naturalMojo = require('@thyn-ai/natural-mojo-core')
 const natural = require('natural')
 const {
   generatePairs,

@@ -7,8 +7,8 @@
  *
  *   1. `$FUSE_MOJO_NATIVE_LIB` (explicit path override, for development; the
  *      pthread shim is expected next to it)
- *   2. the platform package (`@fuse-mojo/<platform>-<arch>`) installed as an
- *      optional dependency of `@fuse-mojo/core`
+ *   2. the platform package (`@thyn-ai/fuse-mojo-<platform>-<arch>`) installed as an
+ *      optional dependency of `@thyn-ai/fuse-mojo-core`
  *   3. the repository development build output `kernels/fuse/build/`
  *
  * The pthread shim (`libfusemojoshim`) is loaded from the same directory as
@@ -86,7 +86,7 @@ function candidatePaths() {
   }
   // Platform package, resolved relative to this package so npm's nested or
   // hoisted layouts both work.
-  const platformPkg = `@fuse-mojo/${process.platform}-${process.arch}`
+  const platformPkg = `@thyn-ai/fuse-mojo-${process.platform}-${process.arch}`
   try {
     const pkgJson = require.resolve(`${platformPkg}/package.json`, { paths: [__dirname] })
     out.push([`platform package ${platformPkg}`, path.join(path.dirname(pkgJson), 'lib', libBasename())])

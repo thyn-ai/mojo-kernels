@@ -9,8 +9,8 @@ automatic fallback on platforms without a native build (e.g. Windows — tested 
 Mojo toolchain required at install time.
 
 ```js
-// npm install @natural-mojo/core   →   then use it exactly like natural
-const { LevenshteinDistance, DamerauLevenshteinDistance } = require('@natural-mojo/core')
+// npm install @thyn-ai/natural-mojo-core   →   then use it exactly like natural
+const { LevenshteinDistance, DamerauLevenshteinDistance } = require('@thyn-ai/natural-mojo-core')
 
 LevenshteinDistance('kitten', 'sitting')                          // 3
 LevenshteinDistance('kitten', 'sitting', { substitution_cost: 2 }) // 5
@@ -18,7 +18,7 @@ DamerauLevenshteinDistance('ca', 'abc')                           // 2 (unrestri
 DamerauLevenshteinDistance('ca', 'abc', { restricted: true })     // 3 (OSA)
 ```
 
-ESM works too: `import { LevenshteinDistance } from '@natural-mojo/core'`.
+ESM works too: `import { LevenshteinDistance } from '@thyn-ai/natural-mojo-core'`.
 
 ## Benchmark
 
@@ -87,14 +87,14 @@ quadratically while the kernel scales linearly per cell.
 ## How it works
 
 ```
-npm install @natural-mojo/core
+npm install @thyn-ai/natural-mojo-core
         │
         ▼
-@natural-mojo/core (thin JS wrapper)
+@thyn-ai/natural-mojo-core (thin JS wrapper)
         │  validate strings, merge options with the reference's exact
         │  semantics (isNaN cost defaults, NaN-disables-transpositions)
         ▼
-@natural-mojo/darwin-arm64 | @natural-mojo/linux-x64   (optionalDependencies)
+@thyn-ai/natural-mojo-darwin-arm64 | @thyn-ai/natural-mojo-linux-x64   (optionalDependencies)
         │  libnaturalmojo.{dylib,so} (Mojo kernel), loaded with koffi,
         │  ABI-version handshaked
         ▼
@@ -156,7 +156,7 @@ natural 8.1.1 distance module** (`vendor/natural_distance.cjs`, MIT, see
 the package is self-contained):
 
 - Resolution order: `$NATURAL_MOJO_NATIVE_LIB` → the platform package
-  (`@natural-mojo/<platform>-<arch>` optionalDependency) → the repository
+  (`@thyn-ai/natural-mojo-<platform>-<arch>` optionalDependency) → the repository
   development build output.
 - `NATURAL_MOJO_DISABLE_NATIVE=1` forces the fallback (the test suite runs
   this way as its second pass).
@@ -174,7 +174,7 @@ npm run test:fallback  # NATURAL_MOJO_DISABLE_NATIVE=1, vendored fallback
 # or from the repo root: bash scripts/test_all_natural.sh (both passes)
 ```
 
-`tests/` compares `@natural-mojo/core` against the published `natural`
+`tests/` compares `@thyn-ai/natural-mojo-core` against the published `natural`
 8.1.1 package on deterministic seeded pairs: ~200 generated word pairs
 (identical, typo'd, unrelated, prefix/truncated, empty, unicode, block
 moves) across 15 option cells (default, `substitution_cost` 0/2,
@@ -197,7 +197,7 @@ there by design).
 ```
 kernels/natural/src/naturalmojo.mojo    # clean-room edit-distance Mojo kernel, stateless C ABI
 kernels/natural/build.sh                # mojo build --emit shared-lib
-typescript/natural-mojo/packages/core/  # @natural-mojo/core: JS API, koffi loader,
+typescript/natural-mojo/packages/core/  # @thyn-ai/natural-mojo-core: JS API, koffi loader,
                                         #   vendored natural fallback, NOTICE
 typescript/natural-mojo/packages/<platform>-<arch>/  # prebuilt native libs (packed +
                                         #   repaired by scripts/pack-platform.sh)

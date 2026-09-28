@@ -1,7 +1,7 @@
 'use strict'
 
 /**
- * Differential suite: @fuse-mojo/core (native backend, or forced fallback
+ * Differential suite: @thyn-ai/fuse-mojo-core (native backend, or forced fallback
  * when FUSE_MOJO_DISABLE_NATIVE=1) vs the published Fuse.js 7.1.0 package,
  * on deterministic seeded corpora and ~200 generated patterns per cell.
  *
@@ -12,7 +12,7 @@
 
 const test = require('node:test')
 const assert = require('node:assert/strict')
-const Fuse = require('@fuse-mojo/core')
+const Fuse = require('@thyn-ai/fuse-mojo-core')
 const ReferenceFuse = require('fuse.js')
 const {
   generateCorpus,

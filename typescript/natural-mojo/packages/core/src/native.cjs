@@ -7,8 +7,8 @@
  * Resolution order:
  *
  *   1. `$NATURAL_MOJO_NATIVE_LIB` (explicit path override, for development)
- *   2. the platform package (`@natural-mojo/<platform>-<arch>`) installed as
- *      an optional dependency of `@natural-mojo/core`
+ *   2. the platform package (`@thyn-ai/natural-mojo-<platform>-<arch>`) installed as
+ *      an optional dependency of `@thyn-ai/natural-mojo-core`
  *   3. the repository development build output `kernels/natural/build/`
  *
  * If the kernel cannot be found, fails to load, or reports an ABI version
@@ -67,7 +67,7 @@ function candidatePaths() {
   }
   // Platform package, resolved relative to this package so npm's nested or
   // hoisted layouts both work.
-  const platformPkg = `@natural-mojo/${process.platform}-${process.arch}`
+  const platformPkg = `@thyn-ai/natural-mojo-${process.platform}-${process.arch}`
   try {
     const pkgJson = require.resolve(`${platformPkg}/package.json`, { paths: [__dirname] })
     out.push([`platform package ${platformPkg}`, path.join(path.dirname(pkgJson), 'lib', libBasename())])

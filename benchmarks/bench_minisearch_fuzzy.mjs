@@ -22,7 +22,7 @@ import os from 'node:os'
 
 const require = createRequire(new URL('../typescript/minisearch_fuzzy_mojo/package.json', import.meta.url))
 const MiniSearchRef = require('minisearch')
-const MiniSearchMojo = require('@minisearch-mojo/core')
+const MiniSearchMojo = require('@thyn-ai/minisearch-mojo-core')
 const { generateVocab, generateCorpus, generateQueries, compareSearch, compareSuggest } = require('./tests/helpers.cjs')
 
 const CORPUS_SIZES = [10_000, 50_000, 100_000]
