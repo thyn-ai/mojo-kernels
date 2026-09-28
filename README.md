@@ -253,19 +253,19 @@ the active backend with `bm25_mojo.backend_info()`. Full API parity notes:
 V=0.1.5  # x-release-please-version
 URL="https://github.com/thyn-ai/mojo-kernels/releases/download/v$V"
 case "$(uname -sm)" in
-  "Darwin arm64") PLATFORM_PKG="fuse-mojo-darwin-arm64-$V.tgz" ;;
-  "Linux x86_64") PLATFORM_PKG="fuse-mojo-linux-x64-$V.tgz" ;;
+  "Darwin arm64") PLATFORM_PKG="thyn-ai-fuse-mojo-darwin-arm64-$V.tgz" ;;
+  "Linux x86_64") PLATFORM_PKG="thyn-ai-fuse-mojo-linux-x64-$V.tgz" ;;
 esac
-npm install "$URL/${PLATFORM_PKG:?no prebuilt package for this platform}" "$URL/fuse-mojo-core-$V.tgz"
+npm install "$URL/${PLATFORM_PKG:?no prebuilt package for this platform}" "$URL/thyn-ai-fuse-mojo-core-$V.tgz"
 ```
 
-Install the platform package together with `@fuse-mojo/core`: core on its
+Install the platform package together with `@thyn-ai/fuse-mojo-core`: core on its
 own installs cleanly but runs on the vendored Fuse.js fallback, because its
 optional dependency on the platform package resolves only from a registry.
 
 ```js
 // then use it exactly like fuse.js
-import Fuse from '@fuse-mojo/core'
+import Fuse from '@thyn-ai/fuse-mojo-core'
 
 const books = [
   { title: "Old Man's War", author: { firstName: 'John', lastName: 'Scalzi' } },
@@ -277,7 +277,7 @@ fuse.search('lock')
 // → [{ item: {...}, refIndex: 1 }]
 ```
 
-CommonJS works too: `const Fuse = require('@fuse-mojo/core')`. The 90% option
+CommonJS works too: `const Fuse = require('@thyn-ai/fuse-mojo-core')`. The 90% option
 surface (`keys`, `threshold`, `location`, `distance`, `minMatchCharLength`,
 `includeScore`, `includeMatches`, ...) is bit-exact vs Fuse.js 7.1.0;
 unsupported options throw `UnsupportedOptionError` on both backends. Force the

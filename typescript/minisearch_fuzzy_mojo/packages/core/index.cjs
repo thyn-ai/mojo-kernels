@@ -1,7 +1,7 @@
 'use strict'
 
 /**
- * @minisearch-mojo/core — drop-in faster replacement for MiniSearch v7
+ * @thyn-ai/minisearch-mojo-core — drop-in faster replacement for MiniSearch v7
  * fuzzy/prefix search and auto-suggestions.
  *
  * Term resolution (bounded edit-distance DP and prefix scans over the

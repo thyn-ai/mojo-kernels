@@ -19,10 +19,10 @@ here="$(cd "$(dirname "$0")/.." && pwd)"
 if [ -n "${NATURAL_MOJO_DIST:-}" ]; then
   dist="$here/../../$NATURAL_MOJO_DIST"
   mkdir -p "$dist"
-  trap 'rm -rf /tmp/natural-mojo-smoke-native /tmp/natural-mojo-smoke-win' EXIT
+  trap 'rm -rf /tmp/thyn-ai-natural-mojo-smoke-native /tmp/thyn-ai-natural-mojo-smoke-win' EXIT
 else
-  dist="$(mktemp -d /tmp/natural-mojo-dist.XXXXXX)"
-  trap 'rm -rf "$dist" /tmp/natural-mojo-smoke-native /tmp/natural-mojo-smoke-win' EXIT
+  dist="$(mktemp -d /tmp/thyn-ai-natural-mojo-dist.XXXXXX)"
+  trap 'rm -rf "$dist" /tmp/thyn-ai-natural-mojo-smoke-native /tmp/thyn-ai-natural-mojo-smoke-win' EXIT
 fi
 
 # npm pack names every tarball <name>-<version>.tgz from its package.json, so the
@@ -30,8 +30,8 @@ fi
 version="$(node -p "require('$here/packages/core/package.json').version")"
 
 case "$(uname -s)-$(uname -m)" in
-  Darwin-arm64) platform_pkg="natural-mojo-darwin-arm64-${version}.tgz" ;;
-  Linux-x86_64) platform_pkg="natural-mojo-linux-x64-${version}.tgz" ;;
+  Darwin-arm64) platform_pkg="thyn-ai-natural-mojo-darwin-arm64-${version}.tgz" ;;
+  Linux-x86_64) platform_pkg="thyn-ai-natural-mojo-linux-x64-${version}.tgz" ;;
   *) echo "error: no platform package for $(uname -s)-$(uname -m); run the core-only fallback path manually" >&2; exit 1 ;;
 esac
 
@@ -42,10 +42,10 @@ done
 ls "$dist"
 
 echo "== native smoke (fresh project, core + platform tarballs) =="
-rm -rf /tmp/natural-mojo-smoke-native
-mkdir -p /tmp/natural-mojo-smoke-native/vendor
-cp "$dist/natural-mojo-core-${version}.tgz" "$dist/$platform_pkg" /tmp/natural-mojo-smoke-native/vendor/
-cd /tmp/natural-mojo-smoke-native
+rm -rf /tmp/thyn-ai-natural-mojo-smoke-native
+mkdir -p /tmp/thyn-ai-natural-mojo-smoke-native/vendor
+cp "$dist/thyn-ai-natural-mojo-core-${version}.tgz" "$dist/$platform_pkg" /tmp/thyn-ai-natural-mojo-smoke-native/vendor/
+cd /tmp/thyn-ai-natural-mojo-smoke-native
 node "$here/../scripts/consumer-lockfile.cjs" "$here/package-lock.json" vendor/*.tgz
 npm ci --no-audit --no-fund --loglevel=error
 cp "$here/quickstart.mjs" .
@@ -53,10 +53,10 @@ node quickstart.mjs --assert-native > native.json
 head -3 native.json
 
 echo "== simulated-Windows smoke (core tarball only; fallback engages) =="
-rm -rf /tmp/natural-mojo-smoke-win
-mkdir -p /tmp/natural-mojo-smoke-win/vendor
-cp "$dist/natural-mojo-core-${version}.tgz" /tmp/natural-mojo-smoke-win/vendor/
-cd /tmp/natural-mojo-smoke-win
+rm -rf /tmp/thyn-ai-natural-mojo-smoke-win
+mkdir -p /tmp/thyn-ai-natural-mojo-smoke-win/vendor
+cp "$dist/thyn-ai-natural-mojo-core-${version}.tgz" /tmp/thyn-ai-natural-mojo-smoke-win/vendor/
+cd /tmp/thyn-ai-natural-mojo-smoke-win
 node "$here/../scripts/consumer-lockfile.cjs" "$here/package-lock.json" vendor/*.tgz
 npm ci --no-audit --no-fund --loglevel=error
 cp "$here/quickstart.mjs" .
@@ -67,9 +67,9 @@ NATURAL_MOJO_DISABLE_NATIVE=1 node quickstart.mjs --assert-fallback > fallback-e
 
 echo "== comparing native vs fallback results =="
 node -e '
-const a = require("/tmp/natural-mojo-smoke-native/native.json")
-const b = require("/tmp/natural-mojo-smoke-win/fallback.json")
-const c = require("/tmp/natural-mojo-smoke-win/fallback-env.json")
+const a = require("/tmp/thyn-ai-natural-mojo-smoke-native/native.json")
+const b = require("/tmp/thyn-ai-natural-mojo-smoke-win/fallback.json")
+const c = require("/tmp/thyn-ai-natural-mojo-smoke-win/fallback-env.json")
 if (a.backend !== "native") throw new Error("native run did not use the native backend")
 if (b.backend !== "fallback" || c.backend !== "fallback") throw new Error("fallback run did not use the fallback backend")
 const strip = ({ backend, ...rest }) => rest

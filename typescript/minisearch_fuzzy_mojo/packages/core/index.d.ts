@@ -1,5 +1,5 @@
 /**
- * @minisearch-mojo/core — drop-in faster replacement for MiniSearch v7
+ * @thyn-ai/minisearch-mojo-core — drop-in faster replacement for MiniSearch v7
  * fuzzy/prefix search and auto-suggestions, powered by a Mojo kernel.
  */
 

@@ -1,7 +1,7 @@
 'use strict'
 
 /**
- * Unit tests for @ckmeans-mojo/core: API surface, backend reporting, and
+ * Unit tests for @thyn-ai/ckmeans-mojo-core: API surface, backend reporting, and
  * wrapper-level behavior that does not involve the reference package.
  * Runs on the native backend by default and on the forced fallback when
  * CKMEANS_MOJO_DISABLE_NATIVE=1.
@@ -9,7 +9,7 @@
 
 const test = require('node:test')
 const assert = require('node:assert/strict')
-const ckmeans = require('@ckmeans-mojo/core')
+const ckmeans = require('@thyn-ai/ckmeans-mojo-core')
 
 const BACKEND = process.env.CKMEANS_MOJO_DISABLE_NATIVE === '1' ? 'fallback' : 'native'
 

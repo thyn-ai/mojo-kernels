@@ -30,8 +30,8 @@ fi
 version="$(node -p "require('$here/packages/core/package.json').version")"
 
 case "$(uname -s)-$(uname -m)" in
-  Darwin-arm64) platform_pkg="minisearch-mojo-darwin-arm64-${version}.tgz" ;;
-  Linux-x86_64) platform_pkg="minisearch-mojo-linux-x64-${version}.tgz" ;;
+  Darwin-arm64) platform_pkg="thyn-ai-minisearch-mojo-darwin-arm64-${version}.tgz" ;;
+  Linux-x86_64) platform_pkg="thyn-ai-minisearch-mojo-linux-x64-${version}.tgz" ;;
   *) echo "error: no platform package for $(uname -s)-$(uname -m); run the core-only fallback path manually" >&2; exit 1 ;;
 esac
 
@@ -44,7 +44,7 @@ ls "$dist"
 echo "== native smoke (fresh project, core + platform tarballs) =="
 rm -rf /tmp/ms-mojo-smoke-native
 mkdir -p /tmp/ms-mojo-smoke-native/vendor
-cp "$dist/minisearch-mojo-core-${version}.tgz" "$dist/$platform_pkg" /tmp/ms-mojo-smoke-native/vendor/
+cp "$dist/thyn-ai-minisearch-mojo-core-${version}.tgz" "$dist/$platform_pkg" /tmp/ms-mojo-smoke-native/vendor/
 cd /tmp/ms-mojo-smoke-native
 node "$here/../scripts/consumer-lockfile.cjs" "$here/package-lock.json" vendor/*.tgz
 npm ci --no-audit --no-fund --loglevel=error
@@ -55,7 +55,7 @@ head -5 native.json
 echo "== simulated-Windows smoke (core tarball only; fallback engages) =="
 rm -rf /tmp/ms-mojo-smoke-win
 mkdir -p /tmp/ms-mojo-smoke-win/vendor
-cp "$dist/minisearch-mojo-core-${version}.tgz" /tmp/ms-mojo-smoke-win/vendor/
+cp "$dist/thyn-ai-minisearch-mojo-core-${version}.tgz" /tmp/ms-mojo-smoke-win/vendor/
 cd /tmp/ms-mojo-smoke-win
 node "$here/../scripts/consumer-lockfile.cjs" "$here/package-lock.json" vendor/*.tgz
 npm ci --no-audit --no-fund --loglevel=error

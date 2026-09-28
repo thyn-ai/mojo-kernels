@@ -1,7 +1,7 @@
 'use strict'
 
 /**
- * Option handling for @fuse-mojo/core: defaults, validation, key store,
+ * Option handling for @thyn-ai/fuse-mojo-core: defaults, validation, key store,
  * property-path getter, and the field-length norm.
  *
  * These functions replicate the *observable* behavior of the corresponding

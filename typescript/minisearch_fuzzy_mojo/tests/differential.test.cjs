@@ -1,7 +1,7 @@
 'use strict'
 
 /**
- * Differential suite: @minisearch-mojo/core (native backend, or forced
+ * Differential suite: @thyn-ai/minisearch-mojo-core (native backend, or forced
  * fallback when MINISEARCH_MOJO_DISABLE_NATIVE=1) vs the published
  * MiniSearch 7.2.0 package, on deterministic seeded corpora and ~200
  * generated queries per cell.
@@ -13,7 +13,7 @@
 
 const test = require('node:test')
 const assert = require('node:assert/strict')
-const MiniSearchMojo = require('@minisearch-mojo/core')
+const MiniSearchMojo = require('@thyn-ai/minisearch-mojo-core')
 const MiniSearchRef = require('minisearch')
 const {
   generateVocab,

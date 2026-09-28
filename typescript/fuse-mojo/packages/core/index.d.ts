@@ -1,4 +1,4 @@
-// Type definitions for the supported drop-in surface of @fuse-mojo/core.
+// Type definitions for the supported drop-in surface of @thyn-ai/fuse-mojo-core.
 // Mirrors the Fuse.js v7 API shape for the supported option subset.
 
 declare namespace FuseMojo {

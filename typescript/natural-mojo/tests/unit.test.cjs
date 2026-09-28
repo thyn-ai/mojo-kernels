@@ -7,7 +7,7 @@
 
 const test = require('node:test')
 const assert = require('node:assert/strict')
-const naturalMojo = require('@natural-mojo/core')
+const naturalMojo = require('@thyn-ai/natural-mojo-core')
 
 const NATIVE_EXPECTED = process.env.NATURAL_MOJO_DISABLE_NATIVE !== '1'
 
@@ -85,7 +85,7 @@ test('isNaN cost coercion matches the reference (null → 0, true → 1)', () =>
 })
 
 test('ESM and CJS surfaces agree', async () => {
-  const esm = await import('@natural-mojo/core')
+  const esm = await import('@thyn-ai/natural-mojo-core')
   assert.equal(esm.LevenshteinDistance, naturalMojo.LevenshteinDistance)
   assert.equal(esm.DamerauLevenshteinDistance, naturalMojo.DamerauLevenshteinDistance)
   assert.equal(esm.version, naturalMojo.version)
@@ -131,7 +131,7 @@ test('a bogus NATURAL_MOJO_NATIVE_LIB path does not break resolution', { skip: !
   // then the repo dev build) is used.
   const { spawnSync } = require('node:child_process')
   const script = `
-    const nm = require('@natural-mojo/core')
+    const nm = require('@thyn-ai/natural-mojo-core')
     if (nm.nativeAvailable() !== true) { console.error('native should resolve via the next candidate'); process.exit(1) }
     if (nm.LevenshteinDistance('kitten', 'sitting') !== 3) { console.error('wrong distance'); process.exit(1) }
     console.log('child done')
@@ -148,7 +148,7 @@ test('a bogus NATURAL_MOJO_NATIVE_LIB path does not break resolution', { skip: !
 test('NATURAL_MOJO_DISABLE_NATIVE=1 forces the fallback in a child process', { skip: !NATIVE_EXPECTED }, () => {
   const { spawnSync } = require('node:child_process')
   const script = `
-    const nm = require('@natural-mojo/core')
+    const nm = require('@thyn-ai/natural-mojo-core')
     if (nm.nativeAvailable() !== false) { console.error('native should be disabled'); process.exit(1) }
     if (nm.DamerauLevenshteinDistance('ca', 'abc') !== 2) { console.error('wrong fallback distance'); process.exit(1) }
     console.log('child done')

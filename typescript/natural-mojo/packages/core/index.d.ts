@@ -1,4 +1,4 @@
-// Type definitions for @natural-mojo/core.
+// Type definitions for @thyn-ai/natural-mojo-core.
 // Mirrors natural v8.1.1's LevenshteinDistance / DamerauLevenshteinDistance
 // option surface (the substring-search variants are out of scope and throw
 // UnsupportedOptionError at runtime).

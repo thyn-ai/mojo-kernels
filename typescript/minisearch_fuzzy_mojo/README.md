@@ -9,8 +9,8 @@ fallback on platforms without a native build (e.g. Windows — tested there in C
 toolchain required at install time.
 
 ```js
-// npm install @minisearch-mojo/core   →   then use it exactly like MiniSearch
-import MiniSearch from '@minisearch-mojo/core'
+// npm install @thyn-ai/minisearch-mojo-core   →   then use it exactly like MiniSearch
+import MiniSearch from '@thyn-ai/minisearch-mojo-core'
 
 const documents = [
   { id: 1, title: 'Moby Dick', text: 'Call me Ishmael. Some years ago...' },
@@ -32,7 +32,7 @@ miniSearch.autoSuggest('neromancer', { fuzzy: 0.2 })
 // → [ { suggestion: 'neuromancer', terms: ['neuromancer'], score: 1.03... } ]
 ```
 
-CommonJS works too: `const MiniSearch = require('@minisearch-mojo/core')`.
+CommonJS works too: `const MiniSearch = require('@thyn-ai/minisearch-mojo-core')`.
 
 ## Benchmark
 
@@ -130,9 +130,9 @@ Correctness gate: max |Δscore| = max |Δscore| = 1.71e-13 (at 50000/search fuzz
 
 ## How it works
 
-- `npm install @minisearch-mojo/core` installs the JS wrapper plus the
-  matching optional platform package (`@minisearch-mojo/darwin-arm64` or
-  `@minisearch-mojo/linux-x64`), which carries a prebuilt shared library with
+- `npm install @thyn-ai/minisearch-mojo-core` installs the JS wrapper plus the
+  matching optional platform package (`@thyn-ai/minisearch-mojo-darwin-arm64` or
+  `@thyn-ai/minisearch-mojo-linux-x64`), which carries a prebuilt shared library with
   its Mojo runtime vendored inside (self-contained: `delocate`/`patchelf`
   repaired, loads on a machine with no Mojo toolchain).
 - The wrapper resolves the native kernel at first use, verifies an ABI
@@ -223,7 +223,7 @@ kernels/minisearch_fuzzy/
   build.sh                 # mojo build --emit shared-lib
   src/msmojo.mojo          # clean-room kernel (scans + BM25 accumulator)
 typescript/minisearch_fuzzy_mojo/
-  packages/core/           # @minisearch-mojo/core (wrapper + vendored fallback)
+  packages/core/           # @thyn-ai/minisearch-mojo-core (wrapper + vendored fallback)
   packages/darwin-arm64/   # prebuilt macOS arm64 kernel package
   packages/linux-x64/      # prebuilt Linux x64 kernel package
   tests/                   # differential + unit suites

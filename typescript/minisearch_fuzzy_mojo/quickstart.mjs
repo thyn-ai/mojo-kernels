@@ -1,10 +1,10 @@
 /**
- * End-user quickstart for @minisearch-mojo/core, mirroring the MiniSearch
+ * End-user quickstart for @thyn-ai/minisearch-mojo-core, mirroring the MiniSearch
  * README example: build a small index, run a fuzzy search and an
  * auto-suggestion, print the results as JSON with the active backend.
  * Used by scripts/smoke.sh for the fresh-install end-user test.
  */
-import MiniSearch from '@minisearch-mojo/core'
+import MiniSearch from '@thyn-ai/minisearch-mojo-core'
 
 const documents = [
   { id: 1, title: 'Moby Dick', text: 'Call me Ishmael. Some years ago...', category: 'fiction' },

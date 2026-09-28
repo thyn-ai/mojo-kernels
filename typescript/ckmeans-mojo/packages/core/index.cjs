@@ -1,7 +1,7 @@
 'use strict'
 
 /**
- * @ckmeans-mojo/core — drop-in faster ckmeans for simple-statistics.
+ * @thyn-ai/ckmeans-mojo-core — drop-in faster ckmeans for simple-statistics.
  *
  * The Ckmeans.1d.dp dynamic program runs on a native Mojo kernel when its
  * shared library is available (macOS arm64 / Linux x64 platform packages);

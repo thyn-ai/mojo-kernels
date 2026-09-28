@@ -1,7 +1,7 @@
 'use strict'
 
 /**
- * @natural-mojo/core — drop-in faster replacement for natural's
+ * @thyn-ai/natural-mojo-core — drop-in faster replacement for natural's
  * LevenshteinDistance and DamerauLevenshteinDistance.
  *
  * The dynamic program runs on a native Mojo kernel when its shared library

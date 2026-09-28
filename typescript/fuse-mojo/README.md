@@ -9,7 +9,7 @@ Mojo toolchain required at install time.
 
 ```js
 // install (see "Install" below)   →   then use it exactly like fuse.js
-import Fuse from '@fuse-mojo/core'
+import Fuse from '@thyn-ai/fuse-mojo-core'
 
 const books = [
   { title: "Old Man's War", author: { firstName: 'John', lastName: 'Scalzi' } },
@@ -21,11 +21,11 @@ fuse.search('lock')
 // → [{ item: {...}, refIndex: 1 }]
 ```
 
-CommonJS works too: `const Fuse = require('@fuse-mojo/core')`.
+CommonJS works too: `const Fuse = require('@thyn-ai/fuse-mojo-core')`.
 
 ## Install
 
-Node 18 or newer. The platform package and `@fuse-mojo/core` are signed
+Node 18 or newer. The platform package and `@thyn-ai/fuse-mojo-core` are signed
 assets of the matching [GitHub Release](https://github.com/thyn-ai/mojo-kernels/releases)
 (bash or zsh; npm distribution follows once the registry is enabled, see
 [RELEASING.md § Registries](../../RELEASING.md#registries)):
@@ -34,10 +34,10 @@ assets of the matching [GitHub Release](https://github.com/thyn-ai/mojo-kernels/
 V=0.1.5  # x-release-please-version
 URL="https://github.com/thyn-ai/mojo-kernels/releases/download/v$V"
 case "$(uname -sm)" in
-  "Darwin arm64") PLATFORM_PKG="fuse-mojo-darwin-arm64-$V.tgz" ;;
-  "Linux x86_64") PLATFORM_PKG="fuse-mojo-linux-x64-$V.tgz" ;;
+  "Darwin arm64") PLATFORM_PKG="thyn-ai-fuse-mojo-darwin-arm64-$V.tgz" ;;
+  "Linux x86_64") PLATFORM_PKG="thyn-ai-fuse-mojo-linux-x64-$V.tgz" ;;
 esac
-npm install "$URL/${PLATFORM_PKG:?no prebuilt package for this platform}" "$URL/fuse-mojo-core-$V.tgz"
+npm install "$URL/${PLATFORM_PKG:?no prebuilt package for this platform}" "$URL/thyn-ai-fuse-mojo-core-$V.tgz"
 ```
 
 Install both: core on its own installs cleanly but runs on the vendored
@@ -132,14 +132,14 @@ fixed costs dominate; length 8+ patterns gain ~30x.
 ## How it works
 
 ```
-npm install <platform package + @fuse-mojo/core from the GitHub Release>
+npm install <platform package + @thyn-ai/fuse-mojo-core from the GitHub Release>
         │
         ▼
-@fuse-mojo/core (thin JS wrapper)
+@thyn-ai/fuse-mojo-core (thin JS wrapper)
         │  index build: extract searchable strings, lowercase once,
         │  flatten to a UTF-16 buffer — per Fuse instance
         ▼
-@fuse-mojo/darwin-arm64 | @fuse-mojo/linux-x64   (optionalDependencies)
+@thyn-ai/fuse-mojo-darwin-arm64 | @thyn-ai/fuse-mojo-linux-x64   (optionalDependencies)
         │  libfusemojo.{dylib,so} (Mojo kernel) + libfusemojoshim (pthreads)
         │  loaded with koffi, ABI-version handshaked
         ▼
@@ -212,7 +212,7 @@ Fuse.js 7.1.0 basic build** (`vendor/fuse.basic.cjs`, Apache-2.0, see
 `NOTICE`):
 
 - Resolution order: `$FUSE_MOJO_NATIVE_LIB` → the platform package
-  (`@fuse-mojo/<platform>-<arch>` optionalDependency) → the repository
+  (`@thyn-ai/fuse-mojo-<platform>-<arch>` optionalDependency) → the repository
   development build output.
 - `FUSE_MOJO_DISABLE_NATIVE=1` forces the fallback (the test suite runs this
   way as its second pass).
@@ -232,7 +232,7 @@ npm run test:fallback  # FUSE_MOJO_DISABLE_NATIVE=1, vendored fallback
 # or from the repo root: pixi run test-fuse (both passes)
 ```
 
-`tests/` compares `@fuse-mojo/core` against the published `fuse.js` 7.1.0
+`tests/` compares `@thyn-ai/fuse-mojo-core` against the published `fuse.js` 7.1.0
 package on deterministic seeded corpora: ~200 generated patterns (exact
 tokens, typo'd tokens, substrings, multi-token spans, absent tokens, unicode,
 >32-code-unit chunked patterns) across 20 option cells (threshold
@@ -264,7 +264,7 @@ it (`FC_SEED` / `FC_PATH`). `npm test` runs 200 scenarios per property;
 kernels/fuse/src/fusemojo.mojo        # clean-room Bitap Mojo kernel, batch C ABI
 kernels/fuse/src/shim.c               # pthread fan-out shim (deterministic ranges)
 kernels/fuse/build.sh                 # mojo build --emit shared-lib + cc shim
-typescript/fuse-mojo/packages/core/   # @fuse-mojo/core: JS API, koffi loader,
+typescript/fuse-mojo/packages/core/   # @thyn-ai/fuse-mojo-core: JS API, koffi loader,
                                       #   vendored Fuse.js fallback, NOTICE
 typescript/fuse-mojo/packages/<platform>-<arch>/  # prebuilt native libs (packed +
                                       #   repaired by scripts/pack-platform.sh)

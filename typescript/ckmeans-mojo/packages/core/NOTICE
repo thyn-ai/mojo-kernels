@@ -1,7 +1,7 @@
 NOTICE
 ======
 
-@ckmeans-mojo/core includes vendored files from simple-statistics v7.12.0
+@thyn-ai/ckmeans-mojo-core includes vendored files from simple-statistics v7.12.0
 (vendor/ckmeans.cjs, vendor/make_matrix.cjs, vendor/numeric_sort.cjs,
 vendor/unique_count_sorted.cjs), used as the pure-JavaScript fallback
 backend on platforms without a prebuilt native kernel, and the published

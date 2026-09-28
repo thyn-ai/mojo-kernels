@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Reproducible benchmark: simple-statistics 7.12.0 ckmeans vs @ckmeans-mojo/core
+ * Reproducible benchmark: simple-statistics 7.12.0 ckmeans vs @thyn-ai/ckmeans-mojo-core
  * (native Mojo kernel).
  *
  * Datasets are generated locally from fixed seeds: mixture blobs (realistic
@@ -49,7 +49,7 @@ if (process.argv[2] === '--cold-child') {
   const n = Number(nStr)
   const k = Number(kStr)
   const x = makeDataset(SEED, n, kind)
-  const pkg = which === 'mojo' ? require('@ckmeans-mojo/core') : require('simple-statistics')
+  const pkg = which === 'mojo' ? require('@thyn-ai/ckmeans-mojo-core') : require('simple-statistics')
   const fn = which === 'mojo' ? pkg : pkg.ckmeans
   const t0 = performance.now()
   fn(x, k)
@@ -58,7 +58,7 @@ if (process.argv[2] === '--cold-child') {
 }
 
 const reference = require('simple-statistics')
-const ckmeans = require('@ckmeans-mojo/core')
+const ckmeans = require('@thyn-ai/ckmeans-mojo-core')
 
 console.log('# ckmeans-mojo vs simple-statistics benchmark')
 console.log(

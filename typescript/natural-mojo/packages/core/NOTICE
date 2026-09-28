@@ -1,7 +1,7 @@
 NOTICE
 ======
 
-@natural-mojo/core includes code vendored from natural v8.1.1
+@thyn-ai/natural-mojo-core includes code vendored from natural v8.1.1
 (vendor/natural_distance.cjs), used as the pure-JavaScript fallback backend
 on platforms without a prebuilt native kernel, and as the reference oracle
 in the differential test suite.

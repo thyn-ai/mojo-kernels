@@ -1,11 +1,11 @@
 /**
- * End-user smoke test for @fuse-mojo/core: the Fuse.js README quick-start,
+ * End-user smoke test for @thyn-ai/fuse-mojo-core: the Fuse.js README quick-start,
  * unmodified except for the import. Must produce identical results on the
  * native kernel and on the pure-JS fallback.
  *
  * Usage: node quickstart.mjs [--assert-native|--assert-fallback]
  */
-import Fuse, { backendInfo } from '@fuse-mojo/core'
+import Fuse, { backendInfo } from '@thyn-ai/fuse-mojo-core'
 
 // --- Fuse.js README quick-start (https://fusejs.io) -------------------------
 const books = [
