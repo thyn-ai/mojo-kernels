@@ -10,6 +10,18 @@ Entries after 0.1.0 are written by [release-please](https://github.com/googleapi
 from the Conventional Commits merged since the previous tag, in the release
 pull request that cuts the version ([RELEASING.md](RELEASING.md)).
 
+## [0.2.0](https://github.com/thyn-ai/mojo-kernels/compare/v0.1.7...v0.2.0) (2026-09-28)
+
+
+### Added
+
+* **ci:** regenerate TS package-locks on the release PR after the version bump ([#73](https://github.com/thyn-ai/mojo-kernels/issues/73)) ([bc617b8](https://github.com/thyn-ai/mojo-kernels/commit/bc617b8e1946a1af80f5580e89dee90f5130a889))
+
+
+### Fixed
+
+* **ci:** prefix the npm publish tarball path with ./ ([#72](https://github.com/thyn-ai/mojo-kernels/issues/72)) ([eec4b08](https://github.com/thyn-ai/mojo-kernels/commit/eec4b0825155cb5789a458b17a7aa5f031b7c512))
+
 ## [0.1.7](https://github.com/thyn-ai/mojo-kernels/compare/v0.1.6...v0.1.7) (2026-09-28)
 
 
