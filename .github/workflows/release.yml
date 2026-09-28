@@ -736,5 +736,10 @@ jobs:
               continue
             fi
             echo "Publishing ${name}@${VERSION} from ${tarball}"
-            npm publish "$tarball" --provenance --access public
+            # The ./ prefix is load-bearing: npm parses any argument containing a slash but
+            # not starting with ./ or / as a GitHub shorthand (org/repo) and tries to clone
+            # it -- `npm publish release-assets/x.tgz` failed with
+            # `git ls-remote ssh://git@github.com/release-assets/... Permission denied`
+            # on the v0.1.7 run.
+            npm publish "./${tarball}" --provenance --access public
           done

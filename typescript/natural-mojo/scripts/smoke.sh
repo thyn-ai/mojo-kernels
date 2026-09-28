@@ -57,7 +57,7 @@ rm -rf /tmp/thyn-ai-natural-mojo-smoke-win
 mkdir -p /tmp/thyn-ai-natural-mojo-smoke-win/vendor
 cp "$dist/thyn-ai-natural-mojo-core-${version}.tgz" /tmp/thyn-ai-natural-mojo-smoke-win/vendor/
 cd /tmp/thyn-ai-natural-mojo-smoke-win
-node "$here/../scripts/consumer-lockfile.cjs" "$here/package-lock.json" vendor/*.tgz
+CONSUMER_LOCKFILE_EXCLUDE="@thyn-ai/natural-mojo-linux-x64,@thyn-ai/natural-mojo-darwin-arm64" node "$here/../scripts/consumer-lockfile.cjs" "$here/package-lock.json" vendor/*.tgz
 npm ci --no-audit --no-fund --loglevel=error
 cp "$here/quickstart.mjs" .
 node quickstart.mjs --assert-fallback > fallback.json
