@@ -47,11 +47,14 @@ jobs:
       - name: Build + repair the platform wheel (delocate/auditwheel)
         shell: bash
         run: |
+          set -euo pipefail
           cd python/sacrebleu_mojo
           export MACOSX_DEPLOYMENT_TARGET="${MACOSX_DEPLOYMENT_TARGET:-14.0}"
           rm -rf dist dist-repaired
           pixi run python -m build --wheel --no-isolation --outdir dist .
-          raw="$(ls dist/*.whl)"
+          wheels=(dist/*.whl)
+          if [ "${#wheels[@]}" -ne 1 ] || [ ! -f "${wheels[0]}" ]; then echo "::error::expected exactly one wheel in dist/, found: ${wheels[*]}" >&2; exit 1; fi
+          raw="${wheels[0]}"
           case "$(uname -s)" in
             Darwin) pixi run delocate-wheel -v -w dist-repaired "$raw" ;;
             Linux)  pixi run auditwheel repair "$raw" -w dist-repaired ;;
