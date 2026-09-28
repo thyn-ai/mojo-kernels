@@ -10,6 +10,13 @@ Entries after 0.1.0 are written by [release-please](https://github.com/googleapi
 from the Conventional Commits merged since the previous tag, in the release
 pull request that cuts the version ([RELEASING.md](RELEASING.md)).
 
+## [0.1.6](https://github.com/thyn-ai/mojo-kernels/compare/v0.1.5...v0.1.6) (2026-09-28)
+
+
+### Fixed
+
+* **packaging:** publish TS kernel packages under the existing [@thyn-ai](https://github.com/thyn-ai) npm scope ([#66](https://github.com/thyn-ai/mojo-kernels/issues/66)) ([a032912](https://github.com/thyn-ai/mojo-kernels/commit/a032912c021319e74816f1a28854f6c2a26d07e3))
+
 ## [0.1.5](https://github.com/thyn-ai/mojo-kernels/compare/v0.1.4...v0.1.5) (2026-09-26)
 
 
