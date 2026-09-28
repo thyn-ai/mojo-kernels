@@ -9,7 +9,8 @@ description = "Batch registry-hive walking and pool-header constraint validation
 readme = "README.md"
 requires-python = ">=3.12"
 license = "Apache-2.0"
-authors = [{ name = "Algenta" }]
+authors = [{ name = "Thyn" }]
+maintainers = [{ name = "Thyn" }]
 keywords = ["volatility3", "registry-hive", "pool-header", "memory-forensics", "dfir", "mojo"]
 classifiers = [
   "Intended Audience :: Information Technology",
@@ -25,6 +26,7 @@ dependencies = []
 
 [project.urls]
 Repository = "https://github.com/thyn-ai/mojo-kernels"
+Company = "https://thyn.ai"
 
 # Wheels only: the shared library cannot rebuild from an sdist, so no sdist
 # target is offered. Per-platform wheels are produced by CI.

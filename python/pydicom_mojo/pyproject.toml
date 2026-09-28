@@ -9,7 +9,8 @@ description = "Mojo-accelerated DICOM RLE Lossless codec (decode + encode), byte
 readme = "README.md"
 requires-python = ">=3.12"
 license = "Apache-2.0"
-authors = [{ name = "Algenta" }]
+authors = [{ name = "Thyn" }]
+maintainers = [{ name = "Thyn" }]
 keywords = ["dicom", "pydicom", "rle", "packbits", "medical-imaging", "mojo", "codec"]
 classifiers = [
   "Intended Audience :: Developers",
@@ -25,6 +26,7 @@ dependencies = []
 
 [project.urls]
 Repository = "https://github.com/thyn-ai/mojo-kernels"
+Company = "https://thyn.ai"
 
 # Wheels only: the shared library cannot rebuild from an sdist, so no sdist
 # target is offered. Per-platform wheels are produced by CI.

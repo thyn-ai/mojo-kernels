@@ -3,7 +3,7 @@
   "version": "0.2.0",
   "description": "Prebuilt Mojo kernel for @thyn-ai/minisearch-mojo-core (Linux x64).",
   "license": "Apache-2.0",
-  "author": "Algenta",
+  "author": { "name": "Thyn", "url": "https://thyn.ai" },
   "os": [
     "linux"
   ],
