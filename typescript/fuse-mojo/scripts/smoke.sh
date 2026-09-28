@@ -59,7 +59,7 @@ rm -rf /tmp/fuse-mojo-smoke-win
 mkdir -p /tmp/fuse-mojo-smoke-win/vendor
 cp "$dist/thyn-ai-fuse-mojo-core-${version}.tgz" /tmp/fuse-mojo-smoke-win/vendor/
 cd /tmp/fuse-mojo-smoke-win
-node "$here/../scripts/consumer-lockfile.cjs" "$here/package-lock.json" vendor/*.tgz
+CONSUMER_LOCKFILE_EXCLUDE="@thyn-ai/fuse-mojo-linux-x64,@thyn-ai/fuse-mojo-darwin-arm64" node "$here/../scripts/consumer-lockfile.cjs" "$here/package-lock.json" vendor/*.tgz
 npm ci --no-audit --no-fund --loglevel=error
 cp "$here/quickstart.mjs" .
 node quickstart.mjs --assert-fallback > fallback.json
