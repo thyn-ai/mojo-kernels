@@ -9,7 +9,8 @@ description = "Mojo-accelerated PNG-predictor and LZW decoders for PDF streams, 
 readme = "README.md"
 requires-python = ">=3.12"
 license = "Apache-2.0"
-authors = [{ name = "Algenta" }]
+authors = [{ name = "Thyn" }]
+maintainers = [{ name = "Thyn" }]
 keywords = ["pypdf", "pdf", "png-predictor", "lzw", "mojo", "flate", "decode"]
 classifiers = [
   "Intended Audience :: Developers",
@@ -23,6 +24,7 @@ dependencies = []
 
 [project.urls]
 Repository = "https://github.com/thyn-ai/mojo-kernels"
+Company = "https://thyn.ai"
 
 # Wheels only: the shared library cannot rebuild from an sdist, so no sdist
 # target is offered. Per-platform wheels are produced by CI.

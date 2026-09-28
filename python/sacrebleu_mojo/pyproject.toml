@@ -9,7 +9,8 @@ description = "Drop-in faster replacement for sacrebleu's BLEU and chrF corpus m
 readme = "README.md"
 requires-python = ">=3.12"
 license = "Apache-2.0"
-authors = [{ name = "Algenta" }]
+authors = [{ name = "Thyn" }]
+maintainers = [{ name = "Thyn" }]
 keywords = ["bleu", "chrf", "sacrebleu", "mt", "evaluation", "metrics", "mojo"]
 classifiers = [
   "Intended Audience :: Developers",
@@ -22,6 +23,7 @@ dependencies = ["numpy>=1.21"]
 
 [project.urls]
 Repository = "https://github.com/thyn-ai/mojo-kernels"
+Company = "https://thyn.ai"
 
 # Wheels only: the shared library cannot rebuild from an sdist, so no sdist
 # target is offered. Per-platform wheels are produced by CI.

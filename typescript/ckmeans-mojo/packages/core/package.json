@@ -3,7 +3,7 @@
   "version": "0.2.0",
   "description": "Drop-in faster ckmeans for simple-statistics, powered by a Mojo kernel (pure-JS fallback included).",
   "license": "Apache-2.0",
-  "author": "Algenta",
+  "author": { "name": "Thyn", "url": "https://thyn.ai" },
   "keywords": [
     "ckmeans",
     "k-means",

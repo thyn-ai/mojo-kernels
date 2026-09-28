@@ -9,7 +9,8 @@ description = "Fast MetPy-compatible parcel CAPE/CIN for standard atmospheric so
 readme = "README.md"
 requires-python = ">=3.12"
 license = "Apache-2.0"
-authors = [{ name = "Algenta" }]
+authors = [{ name = "Thyn" }]
+maintainers = [{ name = "Thyn" }]
 keywords = ["metpy", "meteorology", "cape", "cin", "sounding", "atmospheric-science", "mojo", "weather"]
 classifiers = [
   "Intended Audience :: Science/Research",
@@ -23,6 +24,7 @@ dependencies = ["numpy>=1.21"]
 
 [project.urls]
 Repository = "https://github.com/thyn-ai/mojo-kernels"
+Company = "https://thyn.ai"
 
 # Wheels only: the shared library cannot rebuild from an sdist, so no sdist
 # target is offered. Per-platform wheels are produced by CI.

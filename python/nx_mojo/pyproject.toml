@@ -9,7 +9,8 @@ description = "Mojo-accelerated networkx: betweenness_centrality and single_sour
 readme = "README.md"
 requires-python = ">=3.12"
 license = "Apache-2.0"
-authors = [{ name = "Algenta" }]
+authors = [{ name = "Thyn" }]
+maintainers = [{ name = "Thyn" }]
 keywords = ["networkx", "graph", "betweenness-centrality", "dijkstra", "shortest-path", "mojo"]
 classifiers = [
   "Intended Audience :: Developers",
@@ -25,6 +26,7 @@ dependencies = ["numpy>=1.21", "networkx>=3.3"]
 
 [project.urls]
 Repository = "https://github.com/thyn-ai/mojo-kernels"
+Company = "https://thyn.ai"
 
 # Official out-of-tree networkx backend registration. Inert metadata unless
 # networkx looks it up (explicit backend="nx_mojo" or NETWORKX_BACKEND_PRIORITY);
