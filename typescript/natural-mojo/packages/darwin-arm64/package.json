@@ -1,6 +1,6 @@
 {
   "name": "@thyn-ai/natural-mojo-darwin-arm64",
-  "version": "0.1.7",
+  "version": "0.2.0",
   "description": "Prebuilt naturalmojo Mojo kernel for macOS Apple Silicon (used by @thyn-ai/natural-mojo-core).",
   "license": "Apache-2.0",
   "author": "Algenta",
