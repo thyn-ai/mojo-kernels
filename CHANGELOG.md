@@ -10,6 +10,13 @@ Entries after 0.1.0 are written by [release-please](https://github.com/googleapi
 from the Conventional Commits merged since the previous tag, in the release
 pull request that cuts the version ([RELEASING.md](RELEASING.md)).
 
+## [0.2.3](https://github.com/thyn-ai/mojo-kernels/compare/v0.2.2...v0.2.3) (2026-09-28)
+
+
+### Fixed
+
+* **kernels:** build croniter, jsonpath, jsonschema and sacrebleu for the x86-64-v3 baseline ([#80](https://github.com/thyn-ai/mojo-kernels/issues/80)) ([58f1019](https://github.com/thyn-ai/mojo-kernels/commit/58f1019ba018688ff0b899738389118b80983e63))
+
 ## [0.2.2](https://github.com/thyn-ai/mojo-kernels/compare/v0.2.1...v0.2.2) (2026-09-28)
 
 
