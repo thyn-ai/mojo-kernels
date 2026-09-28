@@ -102,13 +102,24 @@ function main(argv) {
     for (const name of Object.keys(manifest.optionalDependencies || {})) queue.push({ from, name, optional: true })
   }
   for (const manifest of local.values()) enqueue(manifest.name, manifest)
+  // CONSUMER_LOCKFILE_EXCLUDE (comma-separated package names): never resolve these from the
+  // workspace lock. The simulated-Windows smoke legs use it for the kernel's own platform
+  // packages: the kernel's artifacts in a consumer smoke come from the vendored tarballs or
+  // not at all -- resolving them from the registry would install the previously published
+  // version instead of the just-built one, which is exactly what happened once the platform
+  // packages were published (the "simulated Windows" consumer got a native backend from the
+  // registry and the fallback assertion failed). An excluded optional dep is skipped exactly
+  // like an unresolvable one; an excluded required dep still fails.
+  const exclude = new Set(
+    (process.env.CONSUMER_LOCKFILE_EXCLUDE || '').split(',').map((name) => name.trim()).filter(Boolean),
+  )
   let copied = 0
   while (queue.length > 0) {
     const { from, name, optional } = queue.shift()
     const key = `node_modules/${name}`
     if (local.has(name) || packages[key]) continue
     const entry = pinned[key]
-    if (!entry || !entry.resolved || !entry.integrity) {
+    if (exclude.has(name) || !entry || !entry.resolved || !entry.integrity) {
       if (optional) continue
       fail(`${from} depends on ${name}, which has no pinned entry in ${workspaceLockfile}`)
     }
