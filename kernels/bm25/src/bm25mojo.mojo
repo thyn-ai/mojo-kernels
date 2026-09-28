@@ -387,13 +387,29 @@ def bm25mojo_index_create(
             var w = full - SIMD[DType.float64, 1](floor_t)
             weights[unsafe_offset=j] = w[0]
             j += 1
-    freqs.unsafe_free()
     if variant == VARIANT_PLUS:
         # bound[t] = |floor_t| + max_j |excess_j|; any non-finite piece
         # poisons the bound (+inf here, NaN via abs(NaN) + m for a NaN floor),
         # and a non-finite bound never passes the query-time SAFE_BOUND check.
+        #
+        # Conditioning guard (issue #58): a posting whose length normaliser
+        # (1 - b) + (b * dl) / avgdl or outer denominator k1 * norm + qf
+        # cancels with amplification >= 1e13 (the fuzz harness's own
+        # KnownIssue threshold, 1 / SCORE_RTOL) carries rounding residue in
+        # place of a score, and the decomposed floor + (full - floor) order
+        # rounds that residue differently from the reference's single
+        # evaluation idf * (delta + frac). Poison the bound for such terms so
+        # every query containing them takes the precise (reference-order)
+        # path: kernel and harness then agree by construction, since the
+        # decomposed order only ever runs where parity is checkable.
+        # In-domain parameters never fire (every summand shares a sign, so
+        # the amplification is at most 1).
+        var AMP_LIMIT = Float64(1.0e13)
+        var TINY = Float64(2.2250738585072014e-308)
+        var one_minus_b = 1.0 - b
         for t in range(Int(n_terms)):
             var m = Float64(0.0)
+            var ill = False
             var j = Int(offsets[unsafe_offset=t])
             var end = Int(offsets[unsafe_offset=t + 1])
             while j < end:
@@ -402,8 +418,33 @@ def bm25mojo_index_create(
                     m = inf[DType.float64]()
                 elif aw > m:
                     m = aw
+                if not ill:
+                    var dl_j = doc_len[unsafe_offset=Int(docs[unsafe_offset=j])]
+                    var length_term = b * dl_j / avgdl
+                    var norm_j = one_minus_b + length_term
+                    var norm_big = abs(one_minus_b)
+                    if abs(length_term) > norm_big:
+                        norm_big = abs(length_term)
+                    var norm_small = abs(norm_j)
+                    if norm_small < TINY:
+                        norm_small = TINY
+                    var k1_norm = k1 * norm_j
+                    var qf_j = freqs[unsafe_offset=j]
+                    var den_p = k1_norm + qf_j
+                    var den_big = abs(k1_norm)
+                    if abs(qf_j) > den_big:
+                        den_big = abs(qf_j)
+                    var den_small = abs(den_p)
+                    if den_small < TINY:
+                        den_small = TINY
+                    if norm_big / norm_small >= AMP_LIMIT or den_big / den_small >= AMP_LIMIT:
+                        ill = True
                 j += 1
-            bound[unsafe_offset=t] = abs(floor0[unsafe_offset=t]) + m
+            if ill:
+                bound[unsafe_offset=t] = inf[DType.float64]()
+            else:
+                bound[unsafe_offset=t] = abs(floor0[unsafe_offset=t]) + m
+    freqs.unsafe_free()
 
     var idx = unsafe_alloc[BM25Index](1)
     idx[] = BM25Index(
