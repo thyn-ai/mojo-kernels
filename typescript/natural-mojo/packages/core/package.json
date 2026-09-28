@@ -41,10 +41,6 @@
   "dependencies": {
     "koffi": "^3.3.1"
   },
-  "optionalDependencies": {
-    "@thyn-ai/natural-mojo-darwin-arm64": "0.2.1",
-    "@thyn-ai/natural-mojo-linux-x64": "0.2.1"
-  },
   "repository": {
     "type": "git",
     "url": "https://github.com/thyn-ai/mojo-kernels"

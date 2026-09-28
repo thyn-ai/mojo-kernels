@@ -45,19 +45,21 @@ echo "== npm pack =="
 for pkg in darwin-arm64 linux-x64; do
   (cd "$here/packages/$pkg" && npm pack --silent --pack-destination "$dist" >/dev/null)
 done
-core_stage="$(mktemp -d /tmp/fuse-mojo-core-pack.XXXXXX)"
+core_name="$(node -p "require('$here/packages/core/package.json').name")"
+core_tarball="$(printf '%s' "$core_name" | sed -e 's/^@//' -e 's#/#-#')-${version}.tgz"
+core_stage="$(mktemp -d /tmp/mojo-core-pack.XXXXXX)"
 cp -R "$here/packages/core/." "$core_stage/"
 node -e '
-  const fs = require("fs"); const [file, version] = process.argv.slice(1)
+  const fs = require("fs"); const [file, version, darwin, linux] = process.argv.slice(1)
   const m = JSON.parse(fs.readFileSync(file, "utf8"))
-  m.optionalDependencies = { "@thyn-ai/fuse-mojo-darwin-arm64": version, "@thyn-ai/fuse-mojo-linux-x64": version }
+  m.optionalDependencies = { [darwin]: version, [linux]: version }
   fs.writeFileSync(file, JSON.stringify(m, null, 2) + "\n")
-' "$core_stage/package.json" "$version"
+' "$core_stage/package.json" "$version" "$(node -p "require('$here/packages/darwin-arm64/package.json').name")" "$(node -p "require('$here/packages/linux-x64/package.json').name")"
 (cd "$core_stage" && npm pack --silent --pack-destination "$dist" >/dev/null)
 rm -rf "$core_stage"
-packed_pins="$(tar -xOzf "$dist/thyn-ai-fuse-mojo-core-${version}.tgz" package/package.json | node -e '
+packed_pins="$(tar -xOzf "$dist/$core_tarball" package/package.json | node -e '
   const m = JSON.parse(require("fs").readFileSync(0, "utf8")); const d = m.optionalDependencies || {}
-  process.stdout.write([d["@thyn-ai/fuse-mojo-darwin-arm64"], d["@thyn-ai/fuse-mojo-linux-x64"]].join(" "))')"
+  process.stdout.write(Object.values(d).join(" "))')"
 [ "$packed_pins" = "$version $version" ] || { echo "error: packed core manifest pins '$packed_pins', expected '$version $version'" >&2; exit 1; }
 ls "$dist"
 
