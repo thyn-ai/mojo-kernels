@@ -18,7 +18,11 @@ from __future__ import annotations
 import numpy as np
 
 from cclib_mojo import _reference
-from cclib_mojo._basis import BOHR2ANG, BasisError, flatten_gbasis
+from cclib_mojo._basis import (
+    BOHR2ANG,
+    COORDINATE_SANE_MAX,
+    flatten_gbasis,
+)
 from cclib_mojo._native import (
     MODE_DENSITY,
     MODE_WAVEFUNCTION,
@@ -49,6 +53,20 @@ def _validate_shape(shape: object) -> tuple[int, int, int]:
             raise GridError(f"shape entries must be positive integers, got {shape!r}")
         out.append(int(dim))
     return out[0], out[1], out[2]
+
+
+def _validate_grid_coordinates(
+    origin: np.ndarray, step: np.ndarray, shape: tuple[int, int, int]
+) -> None:
+    """Every grid corner must stay inside the documented coordinate domain."""
+    for i, (o, st, n) in enumerate(zip(origin, step, shape)):
+        end = o + (n - 1) * st
+        if abs(o) > COORDINATE_SANE_MAX or abs(end) > COORDINATE_SANE_MAX:
+            raise GridError(
+                f"grid axis {i} spans [{o!r}, {end!r}] Angstrom; every grid "
+                f"coordinate must be inside "
+                f"[-{COORDINATE_SANE_MAX!r}, {COORDINATE_SANE_MAX!r}] Angstrom"
+            )
 
 
 def _grid_axes(
@@ -101,6 +119,7 @@ def _eval(
     if not np.all(step3 > 0.0):
         raise GridError(f"step entries must be positive, got {tuple(step3)}")
     shape3 = _validate_shape(shape)
+    _validate_grid_coordinates(origin3, step3, shape3)
 
     if mo_index is not None:
         if isinstance(mo_index, bool) or int(mo_index) != mo_index:
