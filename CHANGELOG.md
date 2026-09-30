@@ -10,6 +10,13 @@ Entries after 0.1.0 are written by [release-please](https://github.com/googleapi
 from the Conventional Commits merged since the previous tag, in the release
 pull request that cuts the version ([RELEASING.md](RELEASING.md)).
 
+## [0.2.4](https://github.com/thyn-ai/mojo-kernels/compare/v0.2.3...v0.2.4) (2026-09-28)
+
+
+### Fixed
+
+* **bm25:** route BM25Plus terms with cancelling summations to the precise path ([#58](https://github.com/thyn-ai/mojo-kernels/issues/58)) ([#82](https://github.com/thyn-ai/mojo-kernels/issues/82)) ([8f2dd74](https://github.com/thyn-ai/mojo-kernels/commit/8f2dd741136d80439949fa7253a364cb509e577d))
+
 ## [0.2.3](https://github.com/thyn-ai/mojo-kernels/compare/v0.2.2...v0.2.3) (2026-09-28)
 
 

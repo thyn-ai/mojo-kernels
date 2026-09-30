@@ -24,7 +24,7 @@ from slugify_mojo.core import (
     smart_truncate,
 )
 
-__version__ = "0.2.3"  # x-release-please-version
+__version__ = "0.2.4"  # x-release-please-version
 __all__ = [
     "slugify",
     "slugify_column",
