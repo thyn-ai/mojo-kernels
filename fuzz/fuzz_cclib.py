@@ -255,111 +255,7 @@ def encode(case: Case) -> bytes:
 # Known divergences (each tied to an open issue and a known-issue-*.bin seed)
 # ---------------------------------------------------------------------------
 
-# Magnitudes inside these windows never overflow or underflow the THO
-# normalisation arithmetic for any supported shell. Exponents: the F-shell
-# bound is alpha^4.5 < 1.8e308, i.e. alpha < ~1e68, and the tiny-alpha bound
-# comes from (pi/(2 alpha))^1.5 and (4 alpha)^3 in the self-overlap.
-# Coordinates: for D/F shells the product centre P = (a1 A + a2 B)/(a1 + a2)
-# can round one ulp away from a centre of magnitude ~1e170 or more, and
-# (P - A)^2 in the binomial prefactor then overflows. Anything outside is
-# physically meaningless (basis sets span ~1e-3..1e6 bohr^-2; the observable
-# universe is ~1e37 Angstrom across).
-EXPONENT_SANE_MIN = 1e-100
-EXPONENT_SANE_MAX = 1e60
-COORDINATE_SANE_MAX = 1e100  # Angstrom
-
-
-def _extreme_magnitude(case: Case) -> bool:
-    exponents = (
-        alpha
-        for shells in case.gbasis
-        for _, prims in shells
-        for alpha, _ in prims
-        if math.isfinite(alpha) and alpha > 0.0
-    )
-    atoms = (c for atom in case.atomcoords for c in atom)
-    corners = (o + (n - 1) * st for o, st, n in zip(case.origin, case.step, case.shape))
-    coordinates = (c for c in (*atoms, *case.origin, *corners) if math.isfinite(c))
-    return any(not (EXPONENT_SANE_MIN <= alpha <= EXPONENT_SANE_MAX) for alpha in exponents) or any(
-        abs(c) > COORDINATE_SANE_MAX for c in coordinates
-    )
-
-
-# Any intermediate within eight orders of magnitude of the double range: at
-# that scale the product order and the summation order decide between a
-# finite value, inf and NaN, and no physical amplitude comes anywhere near
-# (Gaussian basis amplitudes are O(1e2) in atomic units).
-IEEE_EXTREME = 1e300
-
-
-def _ieee_extreme_intermediate(basis, axes, coeff2d: np.ndarray) -> bool:
-    """True when either backend meets an intermediate that is non-finite or
-    beyond ``IEEE_EXTREME`` at some grid point.
-
-    Replicates both evaluation chains stage by stage, in their own
-    association order (IEEE multiplication is deterministic, so this is
-    exact for the kernel's scalar and SIMD paths alike):
-
-    * kernel: ``pre = ((c N) x^l) y^m``; ``s = ((pre w_p) EX) EY``;
-      ``GEZ = EZ z^n``; ``term = s GEZ``;
-    * fallback: ``poly = x^l y^m z^n``; ``contraction = sum_p w_p exp(-a r^2)``;
-      ``poly * contraction``; ``(c N) (poly * contraction)``.
-
-    Where the two orders overflow at different stages, one side evaluates
-    inf * 0 = NaN (or inf) while the other stays finite -- the third symptom
-    of the missing magnitude validation tracked in the issue above.
-    """
-    ax, ay, az = axes
-
-    def extreme(x) -> bool:
-        return not np.all(np.abs(x) < IEEE_EXTREME)
-
-    with np.errstate(all="ignore"):
-        for b in range(basis.n_bf):
-            coeffs = [c for c in coeff2d[:, b] if c != 0.0]  # both backends skip exact zeros
-            if not coeffs:
-                continue
-            o0, o1 = int(basis.offsets[b]), int(basis.offsets[b + 1])
-            dx, dy, dz = ax - basis.center_x[b], ay - basis.center_y[b], az - basis.center_z[b]
-            dxl, dym, dzn = dx ** basis.powers_l[b], dy ** basis.powers_m[b], dz ** basis.powers_n[b]
-            # fallback order
-            poly = dxl[:, None, None] * dym[None, :, None] * dzn[None, None, :]
-            r2 = dx[:, None, None] ** 2 + dy[None, :, None] ** 2 + dz[None, None, :] ** 2
-            contraction = np.zeros_like(poly)
-            for p in range(o0, o1):
-                contraction += basis.prim_w[p] * np.exp(-basis.prim_alpha[p] * r2)
-            if extreme(poly) or extreme(contraction) or extreme(poly * contraction):
-                return True
-            for c in coeffs:
-                if extreme((c * basis.bf_norm[b]) * (poly * contraction)):
-                    return True
-                # kernel order
-                pre = ((c * basis.bf_norm[b]) * dxl[:, None]) * dym[None, :]
-                if extreme(pre):
-                    return True
-                for p in range(o0, o1):
-                    a = basis.prim_alpha[p]
-                    ex, ey, ez = np.exp(-a * dx * dx), np.exp(-a * dy * dy), np.exp(-a * dz * dz)
-                    s_ = ((pre * basis.prim_w[p]) * ex[:, None]) * ey[None, :]
-                    gez = ez * dzn
-                    if extreme(s_) or extreme(gez) or extreme(s_[:, :, None] * gez[None, None, :]):
-                        return True
-    return False
-
-
-ISSUE_EXTREME_MAGNITUDE = KnownIssue(
-    key="extreme-magnitude",
-    url="https://github.com/thyn-ai/mojo-kernels/issues/16",
-    title=(
-        "cclib-mojo: extreme magnitudes are not validated: exponents beyond ~1e68 or "
-        "below ~1e-100 and coordinates beyond ~1e170 Angstrom raise OverflowError/"
-        "ZeroDivisionError instead of BasisError, and intermediates at the edge of the double "
-        "range make the two evaluation orders disagree (inf*0 = NaN on one side, 0 on the other)"
-    ),
-    applies=_extreme_magnitude,
-)
-
-KNOWN_ISSUES: tuple[KnownIssue, ...] = (ISSUE_EXTREME_MAGNITUDE,)
+KNOWN_ISSUES: tuple[KnownIssue, ...] = ()
 
 
 # ---------------------------------------------------------------------------
@@ -471,12 +367,6 @@ def evaluate(case: Case) -> str | None:
         out, wf = _public_api(args)
     except (BasisError, GridError):
         return None  # documented, structured rejection
-    except (OverflowError, ZeroDivisionError) as exc:
-        if ISSUE_EXTREME_MAGNITUDE.applies(case):
-            return ISSUE_EXTREME_MAGNITUDE.key
-        raise Divergence(
-            f"undocumented {type(exc).__name__} from the public API: {exc}\n  case: {case.describe()}"
-        ) from exc
     if defect is not None:
         raise Divergence(
             f"malformed input ({defect}) was accepted instead of raising\n  case: {case.describe()}"
@@ -519,14 +409,7 @@ def evaluate(case: Case) -> str | None:
         native = _native.eval_grid(basis, *axes, coeff2d, mode)
         ok = _close_mask(native, fallback, scale)
         if not np.all(ok):
-            # Known shape: every disagreement has a non-finite value on at
-            # least one side, and one backend really does meet an intermediate
-            # at the edge of the double range here.
-            non_finite = ~np.isfinite(native) | ~np.isfinite(fallback)
-            if np.all(ok | non_finite) and _ieee_extreme_intermediate(basis, axes, coeff2d):
-                outcome = ISSUE_EXTREME_MAGNITUDE.key
-            else:
-                _assert_close("native kernel vs fallback", native, fallback, scale, case)
+            _assert_close("native kernel vs fallback", native, fallback, scale, case)
         if not np.array_equal(flat, native, equal_nan=True):
             raise Divergence(
                 "public API result is not the native kernel's output bit-for-bit\n  case: "

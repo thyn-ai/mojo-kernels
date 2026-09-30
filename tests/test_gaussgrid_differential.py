@@ -26,7 +26,8 @@ import gaussgrid_fixtures as fx
 import pyquante1_oracle as oracle
 
 import cclib_mojo
-from cclib_mojo import density_on_grid, wavefunction_on_grid
+from cclib_mojo import BasisError, GridError, density_on_grid, wavefunction_on_grid
+from cclib_mojo._basis import flatten_gbasis
 
 RTOL = 1e-10  # documented tolerance (task contract)
 ATOL = 1e-12  # absolute floor for far-field points whose values are ~0
@@ -305,3 +306,74 @@ def test_validation_errors():
         bad = atomcoords.copy()
         bad[0, 0] = np.nan
         wavefunction_on_grid(gbasis, bad, coeff, origin, step, shape)
+
+
+# ---------------------------------------------------------------------------
+# Issue #16 regression: extreme magnitudes raise structured errors
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "gbasis,atomcoords,match",
+    [
+        ([[("F", [(1e70, 1.0)])]], [[0.0, 0.0, 0.0]], "exponent.*outside"),
+        ([[("S", [(1e210, 1.0)])]], [[0.0, 0.0, 0.0]], "exponent.*outside"),
+        ([[("S", [(1e-210, 1.0)])]], [[0.0, 0.0, 0.0]], "exponent.*outside"),
+        ([[("F", [(1e-120, 1.0)])]], [[0.0, 0.0, 0.0]], "exponent.*outside"),
+        (
+            [[("D", [(2.6571366763582966e-22, -9.448916619255603e-159)])]],
+            [[
+                -4.669765235062083e187,
+                2.6571366763582966e-22,
+                -1.941414049957967e292,
+            ]],
+            "atomcoords.*outside",
+        ),
+    ],
+)
+def test_extreme_exponents_and_coordinates_raise_basis_error(gbasis, atomcoords, match):
+    """Bare OverflowError/ZeroDivisionError from #16 must now be BasisError."""
+    with pytest.raises(BasisError, match=match):
+        flatten_gbasis(gbasis, atomcoords)
+
+
+def test_density_on_grid_rejects_extreme_exponent():
+    with pytest.raises(BasisError, match="exponent.*outside"):
+        density_on_grid(
+            [[("F", [(1e70, 1.0)])]],
+            [[0.0, 0.0, 0.0]],
+            [[1.0] * 10],
+            origin=(-1, -1, -1),
+            step=(1, 1, 1),
+            shape=(2, 2, 2),
+        )
+
+
+@pytest.mark.parametrize(
+    "args,kwargs,match",
+    [
+        (
+            ([[("P", [(1.0, 1.0)])]], [[0.0, 0.0, 0.0]], [[1e150, 0.0, 0.0]]),
+            dict(origin=(1e170, 0.0, 0.0), step=(1.0, 1.0, 1.0), shape=(1, 1, 1)),
+            "grid axis",
+        ),
+        (
+            ([[("S", [(1e6, 1.0)])]], [[0.0, 0.0, 0.0]], [[1e305]]),
+            dict(origin=(1e170, 0.0, 0.0), step=(1.0, 1.0, 1.0), shape=(1, 1, 1)),
+            "grid axis",
+        ),
+        (
+            (
+                [[("D", [(1.0, 1.0)])]],
+                [[0.0, 0.0, 0.0]],
+                [[0.0, 0.0, 0.0, 1e-200, 0.0, 0.0]],
+            ),
+            dict(origin=(1e160, 1e160, 0.0), step=(1.0, 1.0, 1.0), shape=(1, 1, 1)),
+            "grid axis",
+        ),
+    ],
+)
+def test_extreme_grid_coordinates_raise_grid_error(args, kwargs, match):
+    """Kernel NaN vs fallback 0 parity cases must now raise GridError on both backends."""
+    with pytest.raises(GridError, match=match):
+        density_on_grid(*args, **kwargs)

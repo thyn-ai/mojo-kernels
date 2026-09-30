@@ -240,6 +240,22 @@ backend. Basis-set provenance is documented in
 basis library). 19 tests pass per backend (38 per full run), and the
 benchmark asserts the same 1e-10 gate before every timing run.
 
+## Input validation
+
+`cclib_mojo` validates inputs fail-fast and raises structured errors:
+
+- `BasisError` for malformed basis-set or geometry input.
+- `GridError` for malformed grid or MO-coefficient input.
+
+Both are `ValueError` subclasses and carry a descriptive message naming the
+offending value. Gaussian exponents must lie inside
+`[1e-100, 1e60] bohr^-2`; atom coordinates and grid coordinates must satisfy
+`|x| <= 1e100` Angstrom. These bounds are tens of orders of magnitude beyond
+anything a quantum-chemistry logfile can contain (real basis sets span roughly
+`1e-3..1e6` bohr^-2), but they prevent the THO normalization arithmetic from
+overflowing or underflowing and guarantee that the native kernel and the NumPy
+fallback cannot disagree due to IEEE-754 evaluation-order effects.
+
 ## Scope and limitations
 
 - Shells S/P/D/F (Cartesian), exactly matching cclib's `sym2powerlist`.

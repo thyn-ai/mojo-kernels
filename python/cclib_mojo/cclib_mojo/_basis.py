@@ -61,6 +61,14 @@ ANG2BOHR = 1.8897261245
 # divides Angstrom grid coordinates by this value).
 BOHR2ANG = 0.5291772109
 
+# Physical input domain enforced by the fail-fast validation contract.
+# Anything outside these windows has no quantum-chemistry meaning and overflows
+# the THO normalization arithmetic for the supported shells (S/P/D/F).
+# Exponents are in bohr^-2; coordinates are in Angstrom.
+EXPONENT_SANE_MIN = 1e-100
+EXPONENT_SANE_MAX = 1e60
+COORDINATE_SANE_MAX = 1e100
+
 
 class BasisError(ValueError):
     """Malformed basis-set or geometry input (structured, fail-fast)."""
@@ -98,7 +106,7 @@ def _fact2(n: int) -> int:
     return val
 
 
-def primitive_norm(alpha: float, l: int, m: int, n: int) -> float:
+def primitive_norm(alpha: float, l: int, m: int, n: int) -> float:  # noqa: E741
     """Normalization of a primitive Cartesian Gaussian, THO eq. 2.2.
 
     Same expression (and operation order) as PyQuante 1.6.5
@@ -216,6 +224,12 @@ def _validate_shell(atom_index: int, shell: object) -> tuple[str, list[tuple[flo
                 f"gbasis[{atom_index}] shell {sym!r}: exponent must be finite "
                 f"and > 0, got {alpha!r}"
             )
+        if alpha < EXPONENT_SANE_MIN or alpha > EXPONENT_SANE_MAX:
+            raise BasisError(
+                f"gbasis[{atom_index}] shell {sym!r}: exponent {alpha!r} is "
+                f"outside the supported physical domain "
+                f"[{EXPONENT_SANE_MIN!r}, {EXPONENT_SANE_MAX!r}] bohr^-2"
+            )
         if not math.isfinite(coef):
             raise BasisError(
                 f"gbasis[{atom_index}] shell {sym!r}: coefficient must be "
@@ -239,6 +253,13 @@ def flatten_gbasis(gbasis: object, atomcoords: object) -> BasisArrays:
         )
     if not np.all(np.isfinite(coords)):
         raise BasisError("atomcoords contains non-finite values")
+    if np.any(np.abs(coords) > COORDINATE_SANE_MAX):
+        bad = np.unravel_index(int(np.argmax(np.abs(coords))), coords.shape)
+        raise BasisError(
+            f"atomcoords[{bad[0]}, {bad[1]}] = {coords[bad]!r} is outside the "
+            f"supported physical domain [-{COORDINATE_SANE_MAX!r}, "
+            f"{COORDINATE_SANE_MAX!r}] Angstrom"
+        )
     if not isinstance(gbasis, (list, tuple)) or len(gbasis) == 0:
         raise BasisError("gbasis must be a non-empty per-atom list of shells")
     if len(gbasis) != coords.shape[0]:
@@ -269,7 +290,7 @@ def flatten_gbasis(gbasis: object, atomcoords: object) -> BasisArrays:
         for shell in atom_shells:
             sym, prims = _validate_shell(atom_index, shell)
             for powers in SYM2POWERS[sym]:
-                l, m, n = powers
+                l, m, n = powers  # noqa: E741
                 pnorms = [primitive_norm(alpha, l, m, n) for alpha, _ in prims]
                 cnorm = _contracted_norm(prims, pnorms, powers, center)
                 powers_l.append(l)
