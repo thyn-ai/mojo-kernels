@@ -253,8 +253,19 @@ offending value. Gaussian exponents must lie inside
 `|x| <= 1e100` Angstrom. These bounds are tens of orders of magnitude beyond
 anything a quantum-chemistry logfile can contain (real basis sets span roughly
 `1e-3..1e6` bohr^-2), but they prevent the THO normalization arithmetic from
-overflowing or underflowing and guarantee that the native kernel and the NumPy
-fallback cannot disagree due to IEEE-754 evaluation-order effects.
+overflowing or underflowing.
+
+The grid terms themselves are bounded too. For every basis function with a
+non-zero MO coefficient,
+`max(1, |c| N_c) * max(1, |x-cx|)^l * max(1, |y-cy|)^m * max(1, |z-cz|)^n * max(1, sum_p |w_p|)`
+(largest coefficient over the evaluated MO rows, contracted norm `N_c`,
+farthest grid point, normalized primitive weights `w_p`) must not exceed
+`1e140`; otherwise `GridError` is raised. The bound is evaluated in log10
+space, so the check itself cannot overflow. Below it no intermediate product
+can overflow in either backend's evaluation order and densities (`psi^2`)
+stay finite, so the native kernel and the NumPy fallback cannot disagree due
+to IEEE-754 evaluation-order effects. Realistic basis sets and grids stay
+below roughly `1e10`.
 
 ## Scope and limitations
 

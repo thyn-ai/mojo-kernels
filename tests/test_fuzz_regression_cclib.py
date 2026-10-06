@@ -81,3 +81,54 @@ def test_in_domain_raw_seeds_do_not_overflow():
         shape=(3, 3, 3),
     )
     assert harness.test_one_input(harness.encode(case)) is None
+
+
+# The unit the nightly fuzz run 37260359272 (job "atheris differential
+# fuzzing (cclib)") stopped on, verbatim from its log: exponents and
+# coordinates inside the #16 windows, but |c| N_c reaches ~1e350 (py) and
+# ~1e333 (pz), so the two evaluation orders overflow at different stages
+# (kernel -inf, fallback -inf x 0 = NaN). It must be a documented rejection.
+NIGHTLY_INTERMEDIATE_OVERFLOW = harness.Case(
+    raw_numbers=True,
+    defect=0,
+    gbasis=(
+        (
+            (
+                "P",
+                (
+                    (2.21420213728226e-52, 2.21420213728226e-52),
+                    (2.2299208288013415e-52, 2.21420213728226e-52),
+                ),
+            ),
+            (
+                "P",
+                (
+                    (1.398043286095683e-76, 1.398043286095289e-76),
+                    (1.398043286095289e-76, 1.398043286095289e-76),
+                ),
+            ),
+        ),
+    ),
+    atomcoords=((4.0133397585694736e-57, 2.215018708925204e-52, 2.09414631903e-311),),
+    coeff=(
+        (
+            1.3980433366019128e-76,
+            4.0133397585694736e-57,
+            2.215018708925204e-52,
+            2.09414631903e-311,
+            1.2677189948137588e275,
+            -3.1594776358597076e257,
+        ),
+    ),
+    mo_index=0,
+    origin=(-6.48769282486076e-62, 1.2989442504e-314, 5.627320053137508e-249),
+    step=(4.24329425326203e-274, 2.524356568153254e-29, 1.444878500878187e-309),
+    shape=(1, 2, 2),
+)
+
+
+def test_nightly_intermediate_overflow_unit_is_rejected():
+    args = harness._call_args(NIGHTLY_INTERMEDIATE_OVERFLOW)
+    with pytest.raises(cclib_mojo.GridError, match=r"basis function 4 .* up to ~1e350"):
+        harness._public_api(args)
+    assert harness.test_one_input(harness.encode(NIGHTLY_INTERMEDIATE_OVERFLOW)) is None
