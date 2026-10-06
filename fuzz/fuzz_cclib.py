@@ -384,7 +384,10 @@ def backend_inputs(args: dict) -> tuple[BasisArrays, tuple[np.ndarray, np.ndarra
 # a group's terms get bit-identical exp factors and an exactly opposite
 # primitive pair cancels its exp error too.
 # test_exp_group_members_share_one_exp_value (tests/test_fuzz_regression_cclib.py)
-# pins this on both backends. Summing the two backends' bounds, with
+# checks this on both backends; it catches a changed argument association or
+# a different exp per function, but not a kernel change whose exp-argument
+# rounding depends on the function's angular power (see that test's comment).
+# Summing the two backends' bounds, with
 # eps = 2u = 2.2e-16:
 #
 #     |psi_A - psi_B| <= (K + M) eps S  +  sum_g |sum_{t in g} t| (e_A(x_g) + e_B(x_g))
@@ -409,19 +412,23 @@ def backend_inputs(args: dict) -> tuple[BasisArrays, tuple[np.ndarray, np.ndarra
 # that keeps the pair's cancellation -- one acting on the whole function or
 # MO row: a shifted centre, a wrong contracted norm, a wrong MO-coefficient
 # magnitude -- passes while its effect stays below it. Defects that break the
-# cancellation (one primitive's weight or exponent) move psi by a share of S
-# and are flagged. Measured, with the defect in the kernel's arrays:
+# cancellation (one primitive's weight or exponent) move psi by a share of S,
+# so they are flagged once that share exceeds the allowance; below it (about
+# 1e-12 to 1e-9 relative on these inputs) they pass too. Measured, with the
+# defect in the kernel's arrays:
 #   - one atom with D [(0.0877204086, -5.135e8), (0.0877204104, +5.135e8),
 #     (64.12, 0.53)] and P shells, 3 grid points: S/|psi| 5.5e8 to 4.6e9,
 #     bound 4e-4 to 4.1e-3 of the result (rounding term alone 4.5e-6 to
 #     7.5e-5). Shifting a D function's centre (along y) by 5.6e-4 to 1e-3
 #     bohr, or its norm or MO coefficient by 1.8e-4 to 1e-3 relative, passes
-#     while moving the result by up to 3.1e-3 of it; one weight of the pair
-#     off by 2e-11 is flagged.
+#     while moving the result by up to 3.1e-3 of it. One weight of the pair
+#     off by up to 1.1e-11 relative, or one exponent by up to 8.9e-12, also
+#     passes (moving the result by up to 3.8e-3); 2e-11 is flagged.
 #   - regression-cancelling-contraction-3 (exponents 1.2e-6 apart, S/|psi| up
 #     to 1.8e8): bound up to 7.7e-5 of the result (rounding term alone up
-#     to 1.1e-6); centre shifts up to 5.6e-7 bohr and norm or MO-coefficient
-#     errors up to 1.8e-6 relative pass.
+#     to 1.1e-6); centre shifts along y up to 5.6e-7 bohr, norm or
+#     MO-coefficient errors up to 1.8e-6 relative, and pair weight or exponent
+#     errors up to 9.4e-13 / 5.0e-13 relative pass.
 # Accepted because the comparator's job is native-vs-fallback agreement on
 # the evaluation contract and only such inputs (S/|psi| >> 1 from near-equal
 # exponents) widen it; identical exponents share one group and cancel their

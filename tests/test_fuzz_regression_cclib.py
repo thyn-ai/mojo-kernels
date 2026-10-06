@@ -445,7 +445,7 @@ def test_inputs_just_below_the_intermediate_bound_pass_the_comparator(mo_index: 
 # of terms (exp_group_key: one centre, one exponent). That is sound only if,
 # within one backend, every term of a group gets a bit-identical
 # exp(-alpha |r - c|^2) at every grid point, although neither backend
-# evaluates it once per group. This pins it through the backends' outputs:
+# evaluates it once per group. This checks it through the backends' outputs:
 # each (function, primitive) term is evaluated alone, with unit norm, weight
 # and MO coefficient. Where every axis on which the function has a non-zero
 # power lies a power of two (or 0) from the centre, the angular factor is a
@@ -455,6 +455,12 @@ def test_inputs_just_below_the_intermediate_bound_pass_the_comparator(mo_index: 
 # other axes carry inexact cclib grid coordinates, so the exp arguments are
 # rounded. Members with the same powers (two coincident atoms) are compared
 # on psi itself, on any grid.
+#
+# Limit: a kernel change whose exp-argument rounding depends on the angular
+# power (e.g. exp(-(a*(d*d))) only where l > 0) passes. On the dyadic axes
+# every association of a*d*d is exact, and on inexact axes only same-power
+# members are compared, which carry the same change. Catching it would need
+# exp factors of different-power members compared at inexact coordinates.
 
 # A carbon STO-3G atom (its second S and its P shell share three exponents)
 # with d and f polarisation, and a second atom at the same place whose P and
