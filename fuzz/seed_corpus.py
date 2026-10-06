@@ -267,6 +267,44 @@ def _cclib_regressions(harness) -> dict[str, bytes]:
             step=(4.24329425326203e-274, 2.524356568153254e-29, 1.444878500878187e-309),
             shape=(1, 2, 2),
         ),
+        # Opposite-sign primitives in one contraction (found by targeted
+        # campaigns after the intermediate-overflow fix). Both backends are
+        # right; their rounding residues differ by up to ~6e-9 of the value
+        # that survives the cancellation, which the comparator's former
+        # result-relative 1e-10 tolerance flagged. The condition-aware bound
+        # (fuzz_cclib.py, "Comparison") accepts them.
+        # An exactly opposite pair on one exponent; one MO amplitude.
+        "regression-cancelling-contraction-1.bin": Case(
+            raw_numbers=True, defect=0,
+            gbasis=((("S", ((1.0, 1e8), (1.0, -1e8), (0.5, 1.0))),),),
+            atomcoords=((0.0, 0.0, 0.0),),
+            coeff=((1.0,),),
+            mo_index=0,
+            origin=(-1.0, -1.0, -1.0), step=(0.7, 0.7, 0.7), shape=(3, 3, 3),
+        ),
+        # A P shell with an exactly opposite pair and a small third primitive;
+        # density of two MO rows.
+        "regression-cancelling-contraction-2.bin": Case(
+            raw_numbers=True, defect=0,
+            gbasis=((("P", ((2.33345181240185, -750028.6011753161),
+                            (2.809412537209788, -0.10762251409454304),
+                            (2.33345181240185, 750028.6011753161))),),),
+            atomcoords=((0.0, 0.0, 0.0),),
+            coeff=((0.5, -0.25, 0.75), (-0.3, 0.6, 0.1)),
+            mo_index=None,
+            origin=(-0.6, -0.6, -0.6), step=(0.4, 0.4, 0.4), shape=(4, 4, 4),
+        ),
+        # A D shell whose two exponents differ by 1.2e-6 relative: the whole
+        # function is the small difference of two large Gaussians.
+        "regression-cancelling-contraction-3.bin": Case(
+            raw_numbers=True, defect=0,
+            gbasis=((("D", ((0.33696453920423824, 1713.7313480723808),
+                            (0.33696412988649593, -1713.7313480723808))),),),
+            atomcoords=((0.0, 0.0, 0.0),),
+            coeff=((1.0, 0.0, 0.0, 0.5, 0.0, 0.0),),
+            mo_index=None,
+            origin=(-1.5, -1.0, 0.0), step=(0.75, 0.5, 0.5), shape=(4, 4, 2),
+        ),
     }
     return {name: harness.encode(c) for name, c in cases.items()}
 

@@ -12,14 +12,17 @@ then evaluated through the public API (``density_on_grid`` /
 * the PyQuante 1.6.5 amplitude path transcribed in ``tests/pyquante1_oracle.py``,
   for in-domain inputs.
 
-Parity is asserted at the documented tolerance (1e-10 relative, 1e-12
-absolute; ``tests/test_gaussgrid_differential.py``). The relative term is
-taken against the *conditioning* of the sum -- the sum of the absolute
-values of the contributions -- rather than against the result alone, so an
-input whose coefficients cancel by twenty orders of magnitude is held to the
-same ulp-level standard as a physical one instead of failing on the
-amplified rounding noise both backends legitimately produce there. For
-well-conditioned inputs the two scales coincide.
+Parity is asserted against a condition-aware forward-error bound (see
+"Comparison" below): every grid value is a sum of terms, and two backends
+that evaluate the same sum in different orders can only differ by a small
+multiple of machine epsilon times the *sum of the absolute values* of those
+terms. The bound therefore scales with that magnitude rather than with the
+result, so an input whose primitives or MO coefficients cancel by many
+orders of magnitude is held to the same ulp-level standard as a physical
+one instead of failing on the rounding residue both backends legitimately
+leave there. For well-conditioned inputs the two scales coincide, and the
+bound is far tighter than the documented 1e-10 relative tolerance of
+``tests/test_gaussgrid_differential.py``.
 
 Two flavours of numbers are generated: in-domain (exponents 0.03..100
 bohr^-2, coefficients and geometry of order one, steps 0.05..1.5 Angstrom)
@@ -73,7 +76,7 @@ else:
     import cclib_mojo
 
 from cclib_mojo import BasisError, GridError, _native, _reference, core
-from cclib_mojo._basis import SYM2POWERS, flatten_gbasis
+from cclib_mojo._basis import INTERMEDIATE_MAGNITUDE_MAX, SYM2POWERS, BasisArrays, flatten_gbasis
 
 # The PyQuante 1.6.5 transcription used by the differential suite (a test
 # oracle, not part of any package). Optional: the differential between the
@@ -86,10 +89,6 @@ except ImportError:
 
 NAME = "cclib"
 CORPUS_DIR = FUZZ_DIR / "corpus" / NAME
-
-# Documented tolerance (tests/test_gaussgrid_differential.py RTOL / ATOL).
-RTOL = 1e-10
-ATOL = 1e-12
 
 SHELLS = ("S", "P", "D", "F")
 MAX_ATOMS = 2
@@ -321,27 +320,229 @@ def _public_api(args: dict) -> tuple[np.ndarray, np.ndarray | None]:
     return out, wf
 
 
-def _conditioning(basis, axes, coeff2d: np.ndarray, mode: int) -> np.ndarray:
-    """Per grid point: the sum of |contribution| that the result was built
-    from -- the scale on which rounding differences between two summation
-    orders live. Wavefunction: sum_b |c_b bf_b(r)|; density: sum_mo of that
-    squared (>= the value itself, so this only relaxes under cancellation)."""
-    n_bf = basis.n_bf
-    magnitudes = np.zeros((n_bf, int(np.prod([a.shape[0] for a in axes]))))
-    for b in range(n_bf):
-        one_hot = np.zeros((1, n_bf))
-        one_hot[0, b] = 1.0
-        magnitudes[b] = np.abs(_reference.eval_grid(basis, *axes, one_hot, _reference.MODE_WAVEFUNCTION))
-    scale = np.zeros(magnitudes.shape[1])
-    for row in coeff2d:
-        t = np.abs(row) @ magnitudes
-        scale += t * t if mode == _reference.MODE_DENSITY else t
-    return scale
+def backend_inputs(args: dict) -> tuple[BasisArrays, tuple[np.ndarray, np.ndarray, np.ndarray], np.ndarray, int]:
+    """What the public API hands either backend for ``args`` (an accepted
+    input): the flattened basis, the grid axes in bohr, the evaluated MO
+    rows and the mode."""
+    basis = flatten_gbasis(args["gbasis"], args["atomcoords"])
+    coeff2d = np.asarray(args["coeff"], dtype=np.float64)
+    if args["mo_index"] is not None:
+        coeff2d = coeff2d[args["mo_index"] : args["mo_index"] + 1]
+        mode = _reference.MODE_WAVEFUNCTION
+    else:
+        mode = _reference.MODE_DENSITY
+    axes = core._grid_axes(  # the same axes the public API builds
+        np.asarray(args["origin"], dtype=np.float64),
+        np.asarray(args["step"], dtype=np.float64),
+        tuple(args["shape"]),
+    )
+    return basis, axes, coeff2d, mode
 
 
-def _close_mask(actual: np.ndarray, expected: np.ndarray, scale: np.ndarray) -> np.ndarray:
+# --- The bound: condition-aware forward error -------------------------------
+#
+# Every grid value is built from terms, one per (MO row, basis function b
+# with a non-zero coefficient c_b, primitive p of b):
+#
+#     t = c_b N_b (x-cx)^l (y-cy)^m (z-cz)^n w_p exp(-x_t),   x_t = alpha_p |r - c|^2
+#
+# An MO amplitude is psi = sum_t t; the density is sum over MO rows of psi^2.
+# The backends evaluate the same exact sum in different orders: the kernel
+# accumulates every term of a row in one fused multiply-add chain and splits
+# exp(-x_t) into three per-axis factors; the fallback sums each contraction
+# before scaling it and evaluates exp(-x_t) once. Their rounding errors
+# therefore scale with S = sum_t |t|, not with |psi|. When opposite-sign
+# primitives or MO coefficients cancel, |psi| is orders of magnitude below S
+# and the rounding residue of the large terms legitimately differs between
+# the two orders. Example: one S shell [(1.0, 1e8), (1.0, -1e8), (0.5, 1.0)].
+# The fallback's two rounded products of the opposite pair cancel to exactly
+# 0; the kernel's fused multiply-add keeps the rounding error of the first
+# product (below u times the pair's magnitude), up to ~6e-9 of the value the
+# third primitive leaves.
+#
+# First-order forward-error analysis (Higham, "Accuracy and Stability of
+# Numerical Algorithms", 2nd ed., sec. 3.1 and 4.2) bounds each backend's
+# error in psi by
+#
+#     (K - 1 + M) u S  +  sum_g |sum_{t in g} t| e(x_g)  +  K * (underflow loss per term)
+#
+# with u = 2^-53 the unit roundoff, K the number of terms summed for the row,
+# M = PRODUCT_ROUNDINGS the roundings in one term's product chain and e(x)
+# the relative error of that backend's exp(-x), including the rounding of its
+# argument. The exp error enters per group g of terms that share a centre
+# and an exponent: each backend computes their exp factor once, from the same
+# operands, so the group's terms carry the same exp error and it scales with
+# the group's net sum (an exactly opposite primitive pair cancels its exp
+# error too). Summing the two backends' bounds, with eps = 2u = 2.2e-16:
+#
+#     |psi_A - psi_B| <= (K + M) eps S  +  sum_g |sum_{t in g} t| (e_A(x_g) + e_B(x_g))
+#                        +  K * UNDERFLOW_PER_TERM
+#
+# The (K + M) eps term is the summation and product rounding: a small
+# multiple of machine epsilon times the number of terms. Each side's exp
+# error is modelled as e(x) <= floor + slope * x (ExpError below). In density
+# mode psi_A^2 - psi_B^2 = (psi_A - psi_B)(psi_A + psi_B) with
+# |psi_A| + |psi_B| <= 2 S + D_psi, plus the rounding of the squares and of the
+# sum over MO rows. term_scales computes S, the group sums and K by repeating
+# the fallback's evaluation term by term.
+#
+# Apart from the factor 2 on the kernel's measured exp slope and the 3-ulp
+# allowance for NumPy's exp (KERNEL_EXP, LIBM_EXP), every constant below is a
+# rounding count or a measurement. A defect as small as a 1e-6 relative
+# error in one primitive coefficient exceeds the bound by orders of
+# magnitude on well-conditioned inputs (tests/test_fuzz_regression_cclib.py
+# checks that).
+
+UNIT_ROUNDOFF = np.finfo(np.float64).eps / 2  # u = 2^-53
+# Roundings in one term's product chain on either backend, counted for
+# L = l + m + n <= 3. Kernel: c*N_c, *x^l, *y^m, *w_p, *exp_x, *exp_y,
+# exp_z*z^n, the product inside the accumulating FMA, plus at most 2 inside
+# the powers = 10. Fallback: c*N_c, *(poly*contraction), poly*contraction,
+# two products in poly, w_p*exp, at most 2 in the powers = 8. The PyQuante
+# oracle: norm*coef, three products with the powers, *exp, *N_c, *c, at most
+# 2 in the powers = 9.
+PRODUCT_ROUNDINGS = 10
+
+
+@dataclass(frozen=True)
+class ExpError:
+    """One side's relative error in exp(-x), x = alpha_p |r - c|^2 >= 0,
+    including the rounding of x itself: e(x) <= floor + slope * x."""
+
+    floor: float
+    slope: float
+
+
+# Python's math.exp (the platform libm) is faithful, <= 1 ulp = 2u; NumPy
+# may dispatch float64 exp to its own AVX-512 implementation, which is
+# accurate to a few ulp rather than faithful, so the floor allows 3 ulp. The
+# argument alpha * (dx^2 + dy^2 + dz^2) carries <= 5u relative rounding (a
+# square taken with pow is itself only faithful), i.e. <= 5u x absolute.
+LIBM_EXP = ExpError(floor=6 * UNIT_ROUNDOFF, slope=5 * UNIT_ROUNDOFF)
+# The kernel's std.math.exp is not correctly rounded. Measured through the
+# kernel on the pinned toolchain (Mojo 1.1.0, macOS arm64) over 2.5M
+# arguments in [0, 708.3]: relative error <= 2.83e-13 * round(x / ln 2) + 4u
+# (the 4u includes the measurement's own roundings), the signature of a range
+# reduction whose ln 2 is 2.8e-13 off. Since round(x / ln 2) is 0 below
+# ln 2 / 2 and at most 2 x / ln 2 above it, one factor's error is
+# <= 8.2e-13 x + 4u; the kernel multiplies three per-axis factors whose
+# arguments sum to x (and rounds those arguments, 2u x): <= 8.2e-13 x + 12u.
+# The slope used is 1.6e-12, twice that worst case (the large-x slope
+# actually measured is 4.08e-13), because the Linux x86_64 build the nightly
+# fuzzes could not be measured the same way. Below x = ln 2 / 2 the kernel's
+# error is a few u, so near the centres the bound stays at the summation term.
+KERNEL_EXP = ExpError(floor=16 * UNIT_ROUNDOFF, slope=1.6e-12)
+# Underflow. The kernel's exp flushes results below ~1.6e-308 to 0 (from
+# x ~ 708.76 on; NumPy returns subnormals down to x ~ 745), and a product
+# chain that passes through the subnormal range loses up to 2^-1075 per
+# rounding. Either loss is multiplied by at most the term's other factors,
+# which validation caps at INTERMEDIATE_MAGNITUDE_MAX (cclib_mojo.core), so
+# one term on one side loses less than DBL_MIN * 1e140 ~ 2.2e-168; two sides.
+UNDERFLOW_PER_TERM = 2 * np.finfo(np.float64).tiny * INTERMEDIATE_MAGNITUDE_MAX
+# Density mode: the squares and the sum over MO rows lose up to 2^-1075 per
+# rounding when they fall into the subnormal range.
+SUBNORMAL_QUANTUM = np.finfo(np.float64).smallest_subnormal
+
+
+@dataclass(frozen=True)
+class TermScales:
+    """What each MO row's rounding error scales with, per grid point."""
+
+    magnitude: np.ndarray  # (n_mo, n_points): S = sum_t |t|
+    exp_group: np.ndarray  # (n_mo, n_points): sum_g |sum_{t in g} t|
+    exp_group_weighted: np.ndarray  # (n_mo, n_points): sum_g |sum_{t in g} t| x_g
+    n_terms: np.ndarray  # (n_mo,): K, the (function, primitive) terms summed for the row
+
+
+def term_scales(basis: BasisArrays, axes, coeff2d: np.ndarray) -> TermScales:
+    """The inputs of the bound, from the fallback's evaluation term by term.
+
+    Each term is formed in the fallback's order, ``(c N_c) (poly (w_p
+    exp(-x)))``, and only for inputs the public API accepted, so every
+    partial product stays under ``INTERMEDIATE_MAGNITUDE_MAX``. Terms are
+    grouped by (centre, exponent): their exp factor is the same float in
+    either backend.
+    """
+    ax, ay, az = axes
+    grid_shape = (ax.shape[0], ay.shape[0], az.shape[0])
+    n_mo = coeff2d.shape[0]
+    magnitude = np.zeros((n_mo, *grid_shape), dtype=np.float64)
+    n_terms = np.zeros(n_mo, dtype=np.int64)
+    # Per MO row: (centre, exponent) -> [signed sum of the group's terms, x_g].
+    groups: list[dict[tuple[float, float, float, float], list[np.ndarray]]] = [{} for _ in range(n_mo)]
+    for b in range(basis.n_bf):
+        rows = np.flatnonzero(coeff2d[:, b] != 0.0)  # both backends skip exact zeros
+        if rows.size == 0:
+            continue
+        centre = (float(basis.center_x[b]), float(basis.center_y[b]), float(basis.center_z[b]))
+        dx3 = (ax - centre[0])[:, None, None]
+        dy3 = (ay - centre[1])[None, :, None]
+        dz3 = (az - centre[2])[None, None, :]
+        r2 = dx3 * dx3 + dy3 * dy3 + dz3 * dz3
+        poly = (
+            np.power(dx3, basis.powers_l[b])
+            * np.power(dy3, basis.powers_m[b])
+            * np.power(dz3, basis.powers_n[b])
+        )
+        o0, o1 = int(basis.offsets[b]), int(basis.offsets[b + 1])
+        for p in range(o0, o1):
+            alpha = float(basis.prim_alpha[p])
+            x = alpha * r2
+            weighted_poly = poly * (basis.prim_w[p] * np.exp(-x))
+            for mo in rows:
+                term = (coeff2d[mo, b] * basis.bf_norm[b]) * weighted_poly
+                magnitude[mo] += np.abs(term)
+                group = groups[mo].setdefault((*centre, alpha), [np.zeros(grid_shape), x])
+                group[0] += term
+            n_terms[rows] += 1
+    exp_group = np.zeros_like(magnitude)
+    exp_group_weighted = np.zeros_like(magnitude)
+    for mo in range(n_mo):
+        for net, x in groups[mo].values():
+            # net is the group sum as rounded here; the difference from the
+            # exact sum (< K u S) times e(x) < 3e-9 is far inside the
+            # (K + M) eps S term. net != 0 only where exp(-x) != 0, so x < 746.
+            exp_group[mo] += np.abs(net)
+            exp_group_weighted[mo] += np.abs(net) * x
+    n_points = int(np.prod(grid_shape))
+    return TermScales(
+        magnitude=magnitude.reshape(n_mo, n_points),
+        exp_group=exp_group.reshape(n_mo, n_points),
+        exp_group_weighted=exp_group_weighted.reshape(n_mo, n_points),
+        n_terms=n_terms,
+    )
+
+
+def amplitude_tolerance(scales: TermScales, exp_a: ExpError, exp_b: ExpError) -> np.ndarray:
+    """(n_mo, n_points): the bound on |psi_A - psi_B| for each MO row."""
+    eps = np.finfo(np.float64).eps
+    k = scales.n_terms[:, None].astype(np.float64)
+    return (
+        (k + PRODUCT_ROUNDINGS) * eps * scales.magnitude
+        + (exp_a.floor + exp_b.floor) * scales.exp_group
+        + (exp_a.slope + exp_b.slope) * scales.exp_group_weighted
+        + k * UNDERFLOW_PER_TERM
+    )
+
+
+def tolerance(scales: TermScales, mode: int, exp_a: ExpError, exp_b: ExpError) -> np.ndarray:
+    """(n_points,): the bound on |A - B| for the evaluated quantity, A and B
+    evaluating exp(-x) with the errors ``exp_a`` and ``exp_b``."""
+    psi_tol = amplitude_tolerance(scales, exp_a, exp_b)
+    if mode == _reference.MODE_WAVEFUNCTION:
+        return psi_tol[0]
+    eps = np.finfo(np.float64).eps
+    s = scales.magnitude
+    n_mo = s.shape[0]
+    return (
+        np.sum(psi_tol * (2.0 * s + psi_tol), axis=0)
+        + (n_mo + 1) * eps * np.sum((s + psi_tol) ** 2, axis=0)
+        + 2 * (n_mo + 1) * SUBNORMAL_QUANTUM
+    )
+
+
+def _close_mask(actual: np.ndarray, expected: np.ndarray, tol: np.ndarray) -> np.ndarray:
     with np.errstate(all="ignore"):
-        tol = ATOL + RTOL * np.maximum(np.abs(expected), scale)
         return (
             (np.abs(actual - expected) <= tol)
             | (actual == expected)
@@ -349,13 +550,16 @@ def _close_mask(actual: np.ndarray, expected: np.ndarray, scale: np.ndarray) -> 
         )
 
 
-def _assert_close(what: str, actual: np.ndarray, expected: np.ndarray, scale: np.ndarray, case: Case) -> None:
-    ok = _close_mask(actual, expected, scale)
+def assert_close(what: str, actual: np.ndarray, expected: np.ndarray, tol: np.ndarray, case: Case | None) -> None:
+    """Raise ``Divergence`` naming every grid point outside ``tol``."""
+    ok = _close_mask(actual, expected, tol)
     if not np.all(ok):
         bad = np.flatnonzero(~ok)
+        described = case.describe() if case is not None else "(direct comparison)"
         raise Divergence(
-            f"{what} differ at grid points {bad.tolist()}: actual={actual[bad]} expected={expected[bad]}"
-            f"\n  case: {case.describe()}"
+            f"{what} differ at grid points {bad.tolist()}: actual={actual[bad]} expected={expected[bad]} "
+            f"|diff|={np.abs(actual[bad] - expected[bad])} bound={tol[bad]}"
+            f"\n  case: {described}"
         )
 
 
@@ -390,26 +594,21 @@ def evaluate(case: Case) -> str | None:
         )
 
     # Both backends on the identical flattened basis and axes.
-    basis = flatten_gbasis(args["gbasis"], args["atomcoords"])
-    coeff2d = np.asarray(args["coeff"], dtype=np.float64)
-    if args["mo_index"] is not None:
-        coeff2d = coeff2d[args["mo_index"] : args["mo_index"] + 1]
-        mode = _reference.MODE_WAVEFUNCTION
-    else:
-        mode = _reference.MODE_DENSITY
-    axes = core._grid_axes(  # the same axes the public API builds
-        np.asarray(args["origin"], dtype=np.float64), np.asarray(args["step"], dtype=np.float64), shape
-    )
+    basis, axes, coeff2d, mode = backend_inputs(args)
     fallback = _reference.eval_grid(basis, *axes, coeff2d, mode)
-    scale = _conditioning(basis, axes, coeff2d, mode)
+    scales = term_scales(basis, axes, coeff2d)
     flat = out.reshape(-1)
     outcome: str | None = None
 
     if cclib_mojo.native_available():
         native = _native.eval_grid(basis, *axes, coeff2d, mode)
-        ok = _close_mask(native, fallback, scale)
-        if not np.all(ok):
-            _assert_close("native kernel vs fallback", native, fallback, scale, case)
+        assert_close(
+            "native kernel vs fallback",
+            native,
+            fallback,
+            tolerance(scales, mode, KERNEL_EXP, LIBM_EXP),
+            case,
+        )
         if not np.array_equal(flat, native, equal_nan=True):
             raise Divergence(
                 "public API result is not the native kernel's output bit-for-bit\n  case: "
@@ -433,7 +632,13 @@ def evaluate(case: Case) -> str | None:
                 args["gbasis"], args["atomcoords"], coeff2d,
                 tuple(args["origin"]), tuple(args["step"]), shape,
             )
-        _assert_close("fallback vs PyQuante oracle", fallback, ref.reshape(-1), scale, case)
+        assert_close(
+            "fallback vs PyQuante oracle",
+            fallback,
+            ref.reshape(-1),
+            tolerance(scales, mode, LIBM_EXP, LIBM_EXP),
+            case,
+        )
     return outcome
 
 
