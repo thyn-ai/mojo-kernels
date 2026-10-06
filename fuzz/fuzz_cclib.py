@@ -13,16 +13,18 @@ then evaluated through the public API (``density_on_grid`` /
   for in-domain inputs.
 
 Parity is asserted against a condition-aware forward-error bound (see
-"Comparison" below): every grid value is a sum of terms, and two backends
+"Comparison" below): every MO amplitude is a sum of terms, and two backends
 that evaluate the same sum in different orders can only differ by a small
 multiple of machine epsilon times the *sum of the absolute values* of those
-terms. The bound therefore scales with that magnitude rather than with the
-result, so an input whose primitives or MO coefficients cancel by many
-orders of magnitude is held to the same ulp-level standard as a physical
-one instead of failing on the rounding residue both backends legitimately
-leave there. For well-conditioned inputs the two scales coincide, and the
-bound is far tighter than the documented 1e-10 relative tolerance of
-``tests/test_gaussgrid_differential.py``.
+terms. The amplitude bound therefore scales with that magnitude rather than
+with the result, so an input whose primitives or MO coefficients cancel by
+many orders of magnitude is held to the same ulp-level standard as a
+physical one instead of failing on the rounding residue both backends
+legitimately leave there. A density is held to that amplitude bound carried
+through psi^2 around the fallback's own amplitudes: about 2 |psi| times the
+amplitude bound per MO row. For well-conditioned inputs the two scales
+coincide, and the bound is far tighter than the documented 1e-10 relative
+tolerance of ``tests/test_gaussgrid_differential.py``.
 
 Two flavours of numbers are generated: in-domain (exponents 0.03..100
 bohr^-2, coefficients and geometry of order one, steps 0.05..1.5 Angstrom)
@@ -380,18 +382,43 @@ def backend_inputs(args: dict) -> tuple[BasisArrays, tuple[np.ndarray, np.ndarra
 #
 # The (K + M) eps term is the summation and product rounding: a small
 # multiple of machine epsilon times the number of terms. Each side's exp
-# error is modelled as e(x) <= floor + slope * x (ExpError below). In density
-# mode psi_A^2 - psi_B^2 = (psi_A - psi_B)(psi_A + psi_B) with
-# |psi_A| + |psi_B| <= 2 S + D_psi, plus the rounding of the squares and of the
-# sum over MO rows. term_scales computes S, the group sums and K by repeating
-# the fallback's evaluation term by term.
+# error is modelled as e(x) <= floor + slope * x (ExpError below). This is
+# the amplitude bound delta_mo of one MO row (amplitude_tolerance); the
+# density bound is derived from it in ``tolerance``. term_scales computes S,
+# the group sums and K by repeating the fallback's evaluation term by term,
+# and the fallback's own amplitude of every MO row for the density bound.
+#
+# Known slack in the exp term (sound, kept on purpose). Groups are keyed by
+# the exact exponent, so two primitives on one centre whose exponents differ
+# only slightly are two groups, each with the allowance
+# |sum_{t in g} t| (e_A + e_B)(x_g). The kernel's exp error is dominated by a
+# deterministic range-reduction term that is nearly the same for both
+# arguments, so where such terms cancel the true exp contribution to
+# |psi_A - psi_B| is close to that of one merged group, |t_1 + t_2| e(x).
+# Since sum_g |sum_{t in g} t| <= S and K + M >= 12 for any pair, the bound is
+# then at most 1 + (e_A + e_B)(x) / (12 eps) ~ 2 + 600 x times the bound with
+# such groups merged, x being the largest exp argument at the point (<= 4.5e5,
+# reached at x ~ 746, past which exp(-x) is 0). Measured over 12,202 accepted
+# random cases whose shells each carry an opposite-sign primitive pair and
+# that have two distinct exponents on one centre within a relative 1e-3: up
+# to 2.1e5, median 32, 99th percentile 4.1e4. On
+# regression-cancelling-contraction-3 (exponents 1.2e-6 apart, x <= 4.2) it
+# is up to 2.2e3, and native vs fallback uses 4.8e-4 of the bound. In
+# absolute terms the slack is at most (|t_1| + |t_2|) (e_A + e_B)(x)
+# <= 2.4e-9 |t| for a cancelling pair with |t_1| ~ |t_2| ~ |t|, so a 1e-6
+# relative error in either coefficient still exceeds it about 400-fold.
+# Merging the groups soundly would need a bound on e_K(x_1) - e_K(x_2) for the
+# kernel's exp on every platform; its error was measured on macOS arm64 only
+# (KERNEL_EXP), so the comparator keeps the per-exponent allowance.
 #
 # Apart from the factor 2 on the kernel's measured exp slope and the 3-ulp
 # allowance for NumPy's exp (KERNEL_EXP, LIBM_EXP), every constant below is a
 # rounding count or a measurement. A defect as small as a 1e-6 relative
 # error in one primitive coefficient exceeds the bound by orders of
-# magnitude on well-conditioned inputs (tests/test_fuzz_regression_cclib.py
-# checks that).
+# magnitude on well-conditioned inputs, and gross defects (a flipped sign,
+# a wrong norm, a wrong angular power, a lost primitive) and the 1e-6 error
+# are flagged on the cancelling regression seeds in both modes
+# (tests/test_fuzz_regression_cclib.py checks both).
 
 UNIT_ROUNDOFF = np.finfo(np.float64).eps / 2  # u = 2^-53
 # Roundings in one term's product chain on either backend, counted for
@@ -439,8 +466,8 @@ KERNEL_EXP = ExpError(floor=16 * UNIT_ROUNDOFF, slope=1.6e-12)
 # which validation caps at INTERMEDIATE_MAGNITUDE_MAX (cclib_mojo.core), so
 # one term on one side loses less than DBL_MIN * 1e140 ~ 2.2e-168; two sides.
 UNDERFLOW_PER_TERM = 2 * np.finfo(np.float64).tiny * INTERMEDIATE_MAGNITUDE_MAX
-# Density mode: the squares and the sum over MO rows lose up to 2^-1075 per
-# rounding when they fall into the subnormal range.
+# The smallest subnormal, 2^-1074: a rounding in the subnormal range is off by
+# at most half of it in absolute terms (density mode, ``tolerance``).
 SUBNORMAL_QUANTUM = np.finfo(np.float64).smallest_subnormal
 
 
@@ -452,6 +479,7 @@ class TermScales:
     exp_group: np.ndarray  # (n_mo, n_points): sum_g |sum_{t in g} t|
     exp_group_weighted: np.ndarray  # (n_mo, n_points): sum_g |sum_{t in g} t| x_g
     n_terms: np.ndarray  # (n_mo,): K, the (function, primitive) terms summed for the row
+    amplitude: np.ndarray  # (n_mo, n_points): psi_ref, the fallback's own amplitude of the row
 
 
 def term_scales(basis: BasisArrays, axes, coeff2d: np.ndarray) -> TermScales:
@@ -461,7 +489,9 @@ def term_scales(basis: BasisArrays, axes, coeff2d: np.ndarray) -> TermScales:
     exp(-x)))``, and only for inputs the public API accepted, so every
     partial product stays under ``INTERMEDIATE_MAGNITUDE_MAX``. Terms are
     grouped by (centre, exponent): their exp factor is the same float in
-    either backend.
+    either backend. ``amplitude`` is ``fallback_amplitudes``: exactly the
+    psi of every row that the fallback squares, on which the density bound
+    is centred.
     """
     ax, ay, az = axes
     grid_shape = (ax.shape[0], ay.shape[0], az.shape[0])
@@ -510,6 +540,21 @@ def term_scales(basis: BasisArrays, axes, coeff2d: np.ndarray) -> TermScales:
         exp_group=exp_group.reshape(n_mo, n_points),
         exp_group_weighted=exp_group_weighted.reshape(n_mo, n_points),
         n_terms=n_terms,
+        amplitude=fallback_amplitudes(basis, axes, coeff2d),
+    )
+
+
+def fallback_amplitudes(basis: BasisArrays, axes, coeff2d: np.ndarray) -> np.ndarray:
+    """(n_mo, n_points): every MO row's amplitude as the fallback computes it.
+
+    ``_reference.eval_grid`` runs the same per-row code in wavefunction and
+    density mode, so these are exactly the values its density mode squares.
+    """
+    return np.stack(
+        [
+            _reference.eval_grid(basis, *axes, coeff2d[mo : mo + 1], _reference.MODE_WAVEFUNCTION)
+            for mo in range(coeff2d.shape[0])
+        ]
     )
 
 
@@ -525,18 +570,50 @@ def amplitude_tolerance(scales: TermScales, exp_a: ExpError, exp_b: ExpError) ->
     )
 
 
+# --- Density mode -----------------------------------------------------------
+#
+# Each backend squares its own amplitude of every MO row and sums the squares
+# over the n_mo rows: rho_X = fl(sum_mo fl(psi_X,mo^2)) (the kernel may fuse
+# the square into the add; that only removes a rounding). One side of every
+# comparison is the fallback, whose amplitude of row mo is psi_ref,mo
+# (TermScales.amplitude), and the amplitude bound gives
+# |psi_A,mo - psi_B,mo| <= delta_mo for the other side. In exact arithmetic
+#
+#     |sum_mo (psi_A,mo^2 - psi_B,mo^2)| = |sum_mo (psi_A,mo - psi_B,mo) (psi_A,mo + psi_B,mo)|
+#                                         <= sum_mo delta_mo (2 |psi_ref,mo| + delta_mo),
+#
+# because psi_A,mo + psi_B,mo = 2 psi_ref,mo +- (psi_A,mo - psi_B,mo). The
+# bound is centred on the amplitude, not on S: where the primitives cancel,
+# |psi| is far below S and so is the density's error. (Bounding
+# |psi_A + psi_B| by 2 S instead lets a bound of order eps S^2 swallow gross
+# defects when S >> |psi|: on regression-cancelling-contraction-2 that bound
+# was 1.9 at a peak density of 1.0.)
+#
+# Then the rounding of the density accumulation itself. Squaring n_mo values
+# and summing them recursively from 0 is off by at most
+# gamma_{n_mo} sum_mo psi_X,mo^2 (Higham sec. 3.1 and 4.2;
+# gamma_n = n u / (1 - n u)), and sum_mo psi_X,mo^2 <= sum_mo (|psi_ref,mo| + delta_mo)^2
+# on either side. Both sides together: 2 gamma_{n_mo} <= (n_mo + 1) eps times
+# that sum, a few ulps of the density. In the subnormal range each of a side's
+# at most 2 n_mo roundings loses up to half a SUBNORMAL_QUANTUM instead, at
+# most 2 n_mo quanta for both sides; the bound allows 2 (n_mo + 1). Below
+# INTERMEDIATE_MAGNITUDE_MAX the squares of the harness's inputs (at most 120
+# terms per row) stay below ~1e284, so no step overflows.
+
+
 def tolerance(scales: TermScales, mode: int, exp_a: ExpError, exp_b: ExpError) -> np.ndarray:
     """(n_points,): the bound on |A - B| for the evaluated quantity, A and B
-    evaluating exp(-x) with the errors ``exp_a`` and ``exp_b``."""
-    psi_tol = amplitude_tolerance(scales, exp_a, exp_b)
+    evaluating exp(-x) with the errors ``exp_a`` and ``exp_b``; one of them
+    is the fallback, whose amplitudes ``scales.amplitude`` holds."""
+    delta = amplitude_tolerance(scales, exp_a, exp_b)
     if mode == _reference.MODE_WAVEFUNCTION:
-        return psi_tol[0]
+        return delta[0]
     eps = np.finfo(np.float64).eps
-    s = scales.magnitude
-    n_mo = s.shape[0]
+    psi_ref = np.abs(scales.amplitude)
+    n_mo = psi_ref.shape[0]
     return (
-        np.sum(psi_tol * (2.0 * s + psi_tol), axis=0)
-        + (n_mo + 1) * eps * np.sum((s + psi_tol) ** 2, axis=0)
+        np.sum(delta * (2.0 * psi_ref + delta), axis=0)
+        + (n_mo + 1) * eps * np.sum((psi_ref + delta) ** 2, axis=0)
         + 2 * (n_mo + 1) * SUBNORMAL_QUANTUM
     )
 

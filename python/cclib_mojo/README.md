@@ -275,10 +275,12 @@ terms with fused multiply-adds, factors each Gaussian per axis and uses
 Mojo's `exp`, whose relative error is about 4e-13 times its argument; the
 NumPy fallback sums each contraction first and evaluates one `exp` per
 primitive. The backends therefore agree within a condition-aware rounding
-bound, which scales with the sum of the absolute values of the terms rather
-than with the result. On physical inputs that sum is close to the result,
-and the agreement is what the differential suite asserts (1e-10 relative,
-1e-12 absolute). Where opposite-sign primitive or MO coefficients cancel
+bound. For an MO amplitude it scales with the sum of the absolute values of
+the terms rather than with the result; for a density it is each MO's
+amplitude bound times about twice that MO's amplitude, plus a few ulps of
+the density. On physical inputs that sum is close to the result, and the
+agreement is what the differential suite asserts (1e-10 relative, 1e-12
+absolute). Where opposite-sign primitive or MO coefficients cancel
 (for example a contraction with coefficients `+1e8` and `-1e8` on the same
 exponent), the result can be many orders of magnitude smaller than its
 terms; the backends can then differ by more than 1e-10 of the result while

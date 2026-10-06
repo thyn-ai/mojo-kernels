@@ -13,6 +13,7 @@ without the kernel).
 from __future__ import annotations
 
 import dataclasses
+import math
 from pathlib import Path
 
 import numpy as np
@@ -23,7 +24,7 @@ import fuzz_cclib as harness  # fuzz/ is on sys.path via tests/conftest.py
 import gaussgrid_fixtures as fx
 from _harness import Divergence, expected_issue_key
 from cclib_mojo import _native, _reference
-from cclib_mojo._basis import flatten_gbasis
+from cclib_mojo._basis import INTERMEDIATE_MAGNITUDE_MAX, flatten_gbasis
 
 SEEDS = sorted(harness.CORPUS_DIR.glob("*.bin"))
 CANCELLING_SEEDS = sorted(harness.CORPUS_DIR.glob("regression-cancelling-contraction-*.bin"))
@@ -254,3 +255,182 @@ def test_cancelling_contraction_defects_are_flagged_despite_the_wider_bound():
         defective = _reference.eval_grid(_with_weight(basis, p, weight), *axes, coeff2d, mode)
         with pytest.raises(Divergence):
             harness.assert_close("defective fallback", fallback, defective, tol, None)
+
+
+# ---------------------------------------------------------------------------
+# Defects on cancelling inputs, in density and amplitude mode
+# ---------------------------------------------------------------------------
+
+# Each cancelling seed in both modes: (seed number, mo_index), where None is
+# the density of every MO row and an index is that row's amplitude.
+CANCELLING_VARIANTS = {
+    "1-density": (1, None),
+    "1-amplitude": (1, 0),
+    "2-density": (2, None),
+    "2-amplitude-mo0": (2, 0),
+    "2-amplitude-mo1": (2, 1),
+    "3-density": (3, None),
+    "3-amplitude": (3, 0),
+}
+
+CANCELLING_DEFECTS = (
+    "primitive-sign-flipped",
+    "norm-times-sqrt3",
+    "angular-power-plus-1",
+    "angular-power-minus-1",
+    "primitive-dropped",
+    "coefficient-off-by-1e-6",
+)
+
+
+def _cancelling_case(variant: str) -> harness.Case:
+    number, mo_index = CANCELLING_VARIANTS[variant]
+    seed = harness.CORPUS_DIR / f"regression-cancelling-contraction-{number}.bin"
+    return dataclasses.replace(harness.decode(seed.read_bytes()), mo_index=mo_index)
+
+
+def _with_norm(basis, function: int, norm: float):
+    n = basis.bf_norm.copy()
+    n[function] = norm
+    return dataclasses.replace(basis, bf_norm=n)
+
+
+def _with_power_step(basis, function: int, axis: int, step: int):
+    powers = [basis.powers_l.copy(), basis.powers_m.copy(), basis.powers_n.copy()]
+    powers[axis][function] += step
+    return dataclasses.replace(basis, powers_l=powers[0], powers_m=powers[1], powers_n=powers[2])
+
+
+def _mutants(basis, coeff2d: np.ndarray, defect: str) -> list[tuple[str, object]]:
+    """Every placement of ``defect`` on a function with a non-zero coefficient."""
+    out = []
+    for b in (int(b) for b in np.flatnonzero(np.any(coeff2d != 0.0, axis=0))):
+        prims = range(int(basis.offsets[b]), int(basis.offsets[b + 1]))
+        powers = (basis.powers_l[b], basis.powers_m[b], basis.powers_n[b])
+        if defect == "primitive-sign-flipped":
+            out += [(f"primitive {p}", _with_weight(basis, p, -basis.prim_w[p])) for p in prims]
+        elif defect == "primitive-dropped":
+            out += [(f"primitive {p}", _with_weight(basis, p, 0.0)) for p in prims]
+        elif defect == "coefficient-off-by-1e-6":
+            out += [(f"primitive {p}", _with_weight(basis, p, basis.prim_w[p] * (1.0 + 1e-6))) for p in prims]
+        elif defect == "norm-times-sqrt3":
+            out.append((f"function {b}", _with_norm(basis, b, basis.bf_norm[b] * math.sqrt(3.0))))
+        elif defect in ("angular-power-plus-1", "angular-power-minus-1"):
+            step = 1 if defect == "angular-power-plus-1" else -1
+            out += [
+                (f"function {b} axis {axis}", _with_power_step(basis, b, axis, step))
+                for axis in range(3)
+                if powers[axis] + step >= 0
+            ]
+        else:
+            raise ValueError(f"unknown defect {defect!r}")
+    return out
+
+
+def _flagged(actual: np.ndarray, expected: np.ndarray, tol: np.ndarray) -> bool:
+    try:
+        harness.assert_close("defect", actual, expected, tol, None)
+    except Divergence:
+        return True
+    return False
+
+
+def _cancelling_defect_params():
+    for variant, (number, _) in CANCELLING_VARIANTS.items():
+        for defect in CANCELLING_DEFECTS:
+            if number == 1 and defect == "angular-power-minus-1":
+                continue  # seed 1 is one S shell: there is no power to lower
+            yield pytest.param(variant, defect, id=f"{variant}-{defect}")
+
+
+@pytest.mark.parametrize("variant,defect", list(_cancelling_defect_params()))
+def test_comparator_flags_defects_on_cancelling_inputs(variant: str, defect: str):
+    """Harness self-test on inputs whose primitives cancel (S >> |psi|).
+
+    Every placement of the defect that changes the fallback's result at all
+    must fail the comparison the harness applies to native vs fallback, both
+    when the defect sits in the kernel's arrays and when it sits in the
+    fallback (whose amplitudes then also centre the density bound). The
+    former density bound, which bounded |psi_A + psi_B| by 2 S, let 10 of the
+    17 density-mode cases here pass."""
+    basis, axes, coeff2d, mode = harness.backend_inputs(harness._call_args(_cancelling_case(variant)))
+    backend = _native if cclib_mojo.native_available() else _reference
+    fallback = _reference.eval_grid(basis, *axes, coeff2d, mode)
+    actual = backend.eval_grid(basis, *axes, coeff2d, mode)
+    scales = harness.term_scales(basis, axes, coeff2d)
+    tol = harness.tolerance(scales, mode, *EXP_PAIR)
+    harness.assert_close("unmodified backends", actual, fallback, tol, None)
+
+    checked, missed = 0, []
+    for site, mutant in _mutants(basis, coeff2d, defect):
+        defective_fallback = _reference.eval_grid(mutant, *axes, coeff2d, mode)
+        if np.array_equal(defective_fallback, fallback):
+            # Invisible in the result itself: flipping the sign of the only
+            # surviving primitive of seed 1 flips psi, and a one-row density
+            # is psi^2. No comparator can see it; it is not a defect there.
+            continue
+        checked += 1
+        defective_backend = backend.eval_grid(mutant, *axes, coeff2d, mode)
+        if not _flagged(defective_backend, fallback, tol):
+            missed.append(f"{site} (kernel side)")
+        defective_scales = dataclasses.replace(
+            scales, amplitude=harness.fallback_amplitudes(mutant, axes, coeff2d)
+        )
+        defective_tol = harness.tolerance(defective_scales, mode, *EXP_PAIR)
+        if not _flagged(actual, defective_fallback, defective_tol):
+            missed.append(f"{site} (fallback side)")
+    assert checked, f"{defect} changes nothing on {variant}"
+    assert not missed, f"{defect} on {variant} passed the comparator at {missed}"
+
+
+@pytest.mark.parametrize("number", [1, 2, 3])
+def test_density_bound_is_centred_on_the_fallbacks_amplitudes(number: int):
+    """The density bound is sum_mo delta_mo (2 |psi_mo| + delta_mo) plus a
+    few ulps of the density, with psi_mo the amplitudes the fallback squares:
+
+    - those amplitudes reproduce the fallback's density bit for bit;
+    - the bound stays a small fraction of the density even where S >> |psi|
+      (the former 2 S-based bound was 1.9 on seed 2, at a peak density of 1.0).
+    """
+    case = _cancelling_case(f"{number}-density")
+    basis, axes, coeff2d, mode = harness.backend_inputs(harness._call_args(case))
+    assert mode == _reference.MODE_DENSITY
+    fallback = _reference.eval_grid(basis, *axes, coeff2d, mode)
+    scales = harness.term_scales(basis, axes, coeff2d)
+    squared = np.zeros_like(fallback)
+    for psi in scales.amplitude:
+        squared += psi * psi
+    assert np.array_equal(squared, fallback)
+    tol = harness.tolerance(scales, mode, *EXP_PAIR)
+    assert np.max(scales.magnitude) > 1e5 * np.max(np.abs(scales.amplitude))  # S >> |psi|: it cancels
+    assert np.max(tol) < 1e-5 * np.max(fallback)
+
+
+@pytest.mark.parametrize("variant", sorted(CANCELLING_VARIANTS))
+def test_cancelling_seeds_replay_clean_in_both_modes(variant: str):
+    assert harness.test_one_input(harness.encode(_cancelling_case(variant))) is None
+
+
+@pytest.mark.parametrize("mo_index", [None, 0], ids=["density", "amplitude"])
+def test_inputs_just_below_the_intermediate_bound_pass_the_comparator(mo_index: int | None):
+    """psi ~ 7e139 and a density ~ 5e279, just below INTERMEDIATE_MAGNITUDE_MAX:
+    the bound itself stays finite and native vs fallback stays inside it."""
+    gbasis = ((("S", ((1.0, 1.0),)),),)
+    norm = flatten_gbasis([[("S", [(1.0, 1.0)])]], [[0.0, 0.0, 0.0]]).bf_norm[0]
+    case = harness.Case(
+        raw_numbers=True,
+        defect=0,
+        gbasis=gbasis,
+        atomcoords=((0.0, 0.0, 0.0),),
+        coeff=((INTERMEDIATE_MAGNITUDE_MAX / norm * (1.0 - 1e-6),),),
+        mo_index=mo_index,
+        origin=(-1.0, -1.0, -1.0),
+        step=(1.0, 1.0, 1.0),
+        shape=(3, 3, 3),
+    )
+    basis, axes, coeff2d, mode = harness.backend_inputs(harness._call_args(case))
+    fallback = _reference.eval_grid(basis, *axes, coeff2d, mode)
+    assert np.max(np.abs(fallback)) > (1e279 if mo_index is None else 1e139)
+    tol = harness.tolerance(harness.term_scales(basis, axes, coeff2d), mode, *EXP_PAIR)
+    assert np.all(np.isfinite(tol))
+    assert harness.test_one_input(harness.encode(case)) is None
