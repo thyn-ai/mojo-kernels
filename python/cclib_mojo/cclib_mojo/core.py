@@ -15,12 +15,16 @@ backends share basis flattening and normalization in ``cclib_mojo._basis``.
 
 from __future__ import annotations
 
+import math
+
 import numpy as np
 
 from cclib_mojo import _reference
 from cclib_mojo._basis import (
     BOHR2ANG,
     COORDINATE_SANE_MAX,
+    INTERMEDIATE_MAGNITUDE_MAX,
+    BasisArrays,
     flatten_gbasis,
 )
 from cclib_mojo._native import (
@@ -29,6 +33,8 @@ from cclib_mojo._native import (
     NativeUnavailable,
     _load,
 )
+
+_INTERMEDIATE_LOG10_MAX = math.log10(INTERMEDIATE_MAGNITUDE_MAX)
 
 
 class GridError(ValueError):
@@ -103,6 +109,87 @@ def _validate_coeff(coeff: object, n_bf: int) -> np.ndarray:
     return arr
 
 
+def _intermediate_log10_magnitudes(
+    basis: BasisArrays,
+    axes: tuple[np.ndarray, np.ndarray, np.ndarray],
+    coeff2d: np.ndarray,
+) -> np.ndarray:
+    """Per basis function: log10 of a bound on every intermediate product.
+
+    Each grid term ``c N_c (x-cx)^l (y-cy)^m (z-cz)^n w_p exp(-alpha_p r^2)``
+    is a chain of float64 products that the two backends associate
+    differently (the kernel forms ``((c N_c) x^l) y^m`` first, the fallback
+    the polynomial times the contraction ``sum_p w_p exp(...)``). Since
+    ``exp(...) <= 1``, every partial product in either order is at most
+
+        max(1, |c| N_c) * max(1, |x-cx|)^l * max(1, |y-cy|)^m
+            * max(1, |z-cz|)^n * max(1, sum_p |w_p|)
+
+    with ``|c|`` the largest coefficient over the evaluated MO rows and each
+    distance the farthest grid coordinate. The bound is returned as a sum of
+    log10 terms so that computing it cannot overflow. Functions whose
+    coefficient is exactly zero in every row are skipped by both backends
+    (cclib's rule) and build no product: their bound is 0 (= log10 1).
+    """
+    coeff_peak = np.max(np.abs(coeff2d), axis=0)
+    active = coeff_peak > 0.0
+    # The placeholder 1.0 keeps log10 away from the skipped zeros.
+    log10_coeff_norm = np.maximum(
+        0.0, np.log10(np.where(active, coeff_peak, 1.0)) + np.log10(basis.bf_norm)
+    )
+
+    log10_polynomial = np.zeros(basis.n_bf, dtype=np.float64)
+    centers = (basis.center_x, basis.center_y, basis.center_z)
+    powers = (basis.powers_l, basis.powers_m, basis.powers_n)
+    for axis, center, power in zip(axes, centers, powers):
+        # The farthest grid coordinate from a center is one of the axis ends.
+        reach = np.maximum(np.abs(axis.min() - center), np.abs(axis.max() - center))
+        log10_polynomial += power * np.log10(np.maximum(reach, 1.0))
+
+    # log10(max(1, sum_p |w_p|)), summed relative to max(1, max_p |w_p|) so
+    # that every ratio is <= 1 and the per-function sum cannot overflow.
+    abs_w = np.abs(basis.prim_w)
+    starts = basis.offsets[:-1]
+    w_unit = np.maximum(np.maximum.reduceat(abs_w, starts), 1.0)
+    prims_per_function = np.diff(basis.offsets)
+    w_rel_sum = np.add.reduceat(abs_w / np.repeat(w_unit, prims_per_function), starts)
+    log10_weights = np.maximum(
+        0.0,
+        np.log10(w_unit) + np.log10(np.maximum(w_rel_sum, np.finfo(np.float64).tiny)),
+    )
+
+    return np.where(active, log10_coeff_norm + log10_polynomial + log10_weights, 0.0)
+
+
+def _validate_intermediate_magnitudes(
+    basis: BasisArrays,
+    axes: tuple[np.ndarray, np.ndarray, np.ndarray],
+    coeff2d: np.ndarray,
+) -> None:
+    """No grid term may build a product above ``INTERMEDIATE_MAGNITUDE_MAX``.
+
+    Past the double range the backends' product orders overflow at different
+    stages (inf on one side, inf * 0 = NaN on the other), so such inputs have
+    no well-defined result and are rejected before evaluation.
+    """
+    log10_bound = _intermediate_log10_magnitudes(basis, axes, coeff2d)
+    worst = int(np.argmax(log10_bound))
+    if log10_bound[worst] > _INTERMEDIATE_LOG10_MAX:
+        powers = (
+            int(basis.powers_l[worst]),
+            int(basis.powers_m[worst]),
+            int(basis.powers_n[worst]),
+        )
+        raise GridError(
+            f"basis function {worst} (Cartesian powers {powers}) builds "
+            f"intermediate products up to ~1e{log10_bound[worst]:.1f} on this "
+            f"grid (|MO coefficient| x contracted norm x polynomial x "
+            f"primitive weights); every term must stay at or below "
+            f"{INTERMEDIATE_MAGNITUDE_MAX!r} so that no evaluation order "
+            f"overflows"
+        )
+
+
 def _eval(
     gbasis: object,
     atomcoords: object,
@@ -136,6 +223,7 @@ def _eval(
         mode = MODE_DENSITY
 
     axes = _grid_axes(origin3, step3, shape3)
+    _validate_intermediate_magnitudes(basis, axes, coeff2d)
     try:
         flat = _native_eval(basis, axes, coeff2d, mode)
     except NativeUnavailable:

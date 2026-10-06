@@ -68,6 +68,16 @@ BOHR2ANG = 0.5291772109
 EXPONENT_SANE_MIN = 1e-100
 EXPONENT_SANE_MAX = 1e60
 COORDINATE_SANE_MAX = 1e100
+# Ceiling on every intermediate product one grid term can build, bounded per
+# basis function with a non-zero MO coefficient as
+#   max(1, |c| N_c) * max(1, |x-cx|)^l (...)^m (...)^n * max(1, sum_p |w_p|)
+# with distances in bohr, the unit both backends evaluate in (enforced in
+# cclib_mojo.core, in log10 space). The two backends multiply
+# these factors in different orders; below this ceiling no order overflows,
+# and a term squared (density mode) stays below 1e280, which leaves 28 orders
+# of magnitude for the sums over primitives, basis functions and MOs.
+# Physical inputs stay below ~1e10.
+INTERMEDIATE_MAGNITUDE_MAX = 1e140
 
 
 class BasisError(ValueError):

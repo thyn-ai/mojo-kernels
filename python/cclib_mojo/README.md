@@ -253,8 +253,39 @@ offending value. Gaussian exponents must lie inside
 `|x| <= 1e100` Angstrom. These bounds are tens of orders of magnitude beyond
 anything a quantum-chemistry logfile can contain (real basis sets span roughly
 `1e-3..1e6` bohr^-2), but they prevent the THO normalization arithmetic from
-overflowing or underflowing and guarantee that the native kernel and the NumPy
-fallback cannot disagree due to IEEE-754 evaluation-order effects.
+overflowing or underflowing.
+
+The grid terms themselves are bounded too. For every basis function with a
+non-zero MO coefficient,
+`max(1, |c| N_c) * max(1, |x-cx|)^l * max(1, |y-cy|)^m * max(1, |z-cz|)^n * max(1, sum_p |w_p|)`
+must not exceed `1e140`; otherwise `GridError` is raised. Here `|c|` is the
+largest coefficient over the evaluated MO rows, `N_c` the contracted norm,
+`w_p` the normalized primitive weights, and `|x-cx|` (likewise `y`, `z`) the
+distance from the function's centre to the farthest grid point along that
+axis **in bohr**: the check runs on the converted coordinates the backends
+use (grid points divided by 0.5291772109 and centres multiplied by
+1.8897261245, cclib's constants), so an Angstrom distance `d` enters as
+roughly `1.89 d`. The bound is evaluated in log10 space, so the check itself
+cannot overflow. Realistic basis sets and grids stay below roughly `1e10`.
+
+The bound prevents overflow: below it no intermediate product overflows in
+either backend's evaluation order, and densities (`psi^2`) stay finite. It
+does not make the two backends bit-identical. The native kernel sums the
+terms with fused multiply-adds, factors each Gaussian per axis and uses
+Mojo's `exp`, whose relative error is about 4e-13 times its argument; the
+NumPy fallback sums each contraction first and evaluates one `exp` per
+primitive. The backends therefore agree within a condition-aware rounding
+bound. For an MO amplitude it scales with the sum of the absolute values of
+the terms rather than with the result; for a density it is each MO's
+amplitude bound times about twice that MO's amplitude, plus a few ulps of
+the density. On physical inputs that sum is close to the result, and the
+agreement is what the differential suite asserts (1e-10 relative, 1e-12
+absolute). Where opposite-sign primitive or MO coefficients cancel
+(for example a contraction with coefficients `+1e8` and `-1e8` on the same
+exponent), the result can be many orders of magnitude smaller than its
+terms; the backends can then differ by more than 1e-10 of the result while
+both stay within the bound. The differential fuzzing (`fuzz/fuzz_cclib.py`)
+enforces that bound and documents its derivation.
 
 ## Scope and limitations
 

@@ -162,7 +162,19 @@ def _bm25_regressions(harness) -> dict[str, bytes]:
 
 
 def _cclib_reproducers(harness) -> dict[str, bytes]:
-    """Minimal cases for KnownIssue 'extreme-magnitude' (one per exception path)."""
+    """Minimal cases for the open cclib KnownIssues: there are none.
+
+    Every entry added to ``fuzz_cclib.KNOWN_ISSUES`` needs its
+    ``known-issue-<key>-<n>.bin`` reproducer here; the assertion keeps the
+    generated corpus and the harness's KnownIssue set in step.
+    """
+    open_keys = sorted(issue.key for issue in harness.KNOWN_ISSUES)
+    assert not open_keys, f"add known-issue reproducers for {open_keys} to _cclib_reproducers"
+    return {}
+
+
+def _cclib_regressions(harness) -> dict[str, bytes]:
+    """Minimal reproducers of fixed cclib divergences; each must replay clean."""
     Case = harness.Case
 
     def case(sym: str, alpha: float, x: float = 0.0) -> "harness.Case":
@@ -176,19 +188,22 @@ def _cclib_reproducers(harness) -> dict[str, bytes]:
         )
 
     cases = {
-        "known-issue-extreme-magnitude-1.bin": case("F", 1e70),  # pow(alpha, 4.5) overflows
-        "known-issue-extreme-magnitude-2.bin": case("S", 1e210),  # pow(alpha, 1.5) overflows
-        "known-issue-extreme-magnitude-3.bin": case("S", 1e-210),  # (pi/gamma)^1.5 overflows
-        "known-issue-extreme-magnitude-4.bin": case("F", 1e-120),  # (2 gamma)^i underflows to 0 -> 0 division
+        # The former 'extreme-magnitude' known issue (#16), fixed by the
+        # exponent and coordinate windows of #84: every unit is now a
+        # documented BasisError/GridError rejection. One per exception path.
+        "regression-extreme-magnitude-1.bin": case("F", 1e70),  # pow(alpha, 4.5) overflowed
+        "regression-extreme-magnitude-2.bin": case("S", 1e210),  # pow(alpha, 1.5) overflowed
+        "regression-extreme-magnitude-3.bin": case("S", 1e-210),  # (pi/gamma)^1.5 overflowed
+        "regression-extreme-magnitude-4.bin": case("F", 1e-120),  # (2 gamma)^i underflowed to 0 -> 0 division
         # Found by the first coverage-guided run on Linux x86_64: a D shell
         # centred at |x| ~ 1e292 Angstrom with a small exponent; the product
         # centre rounds away from the atom and (P - A)^2 overflows.
-        "known-issue-extreme-magnitude-5.bin": case("D", 2.6571366763582966e-22, -1.941414049957967e292),
+        "regression-extreme-magnitude-5.bin": case("D", 2.6571366763582966e-22, -1.941414049957967e292),
         # Found by the third coverage-guided run: coefficient 1e150 on a P
         # function evaluated 1e170 Angstrom away. |c N x| overflows to inf
         # while exp(-alpha r^2) underflows to 0; the kernel's product order
         # gives inf * 0 = NaN, the fallback's gives 0.
-        "known-issue-extreme-magnitude-6.bin": Case(
+        "regression-extreme-magnitude-6.bin": Case(
             raw_numbers=True, defect=0,
             gbasis=((("P", ((1.0, 1.0),)),),),
             atomcoords=((0.0, 0.0, 0.0),),
@@ -199,7 +214,7 @@ def _cclib_reproducers(harness) -> dict[str, bytes]:
         # Same mechanism through the primitive weight (found by the first
         # workflow run on the pull request): an S function (polynomial 1)
         # with an in-window exponent whose c * N * w product overflows.
-        "known-issue-extreme-magnitude-7.bin": Case(
+        "regression-extreme-magnitude-7.bin": Case(
             raw_numbers=True, defect=0,
             gbasis=((("S", ((1e6, 1.0),)),),),
             atomcoords=((0.0, 0.0, 0.0),),
@@ -210,7 +225,7 @@ def _cclib_reproducers(harness) -> dict[str, bytes]:
         # Order matters for IEEE overflow (found by the fifth Linux run): with
         # a tiny primitive weight (alpha ~ 1e-77) c * N * x overflows first,
         # so the kernel's ((c N) x) w is inf while (c N w) x would be finite.
-        "known-issue-extreme-magnitude-8.bin": Case(
+        "regression-extreme-magnitude-8.bin": Case(
             raw_numbers=True, defect=0,
             gbasis=((("P", ((1e-77, 1.0),)),),),
             atomcoords=((0.0, 0.0, 0.0),),
@@ -222,13 +237,73 @@ def _cclib_reproducers(harness) -> dict[str, bytes]:
         # coefficient on the D-shell xy function far from the centre. The
         # fallback's polynomial x * y overflows on its own (inf * 0 = NaN)
         # while the kernel's ((c N) x) y stays finite and yields 0.
-        "known-issue-extreme-magnitude-9.bin": Case(
+        "regression-extreme-magnitude-9.bin": Case(
             raw_numbers=True, defect=0,
             gbasis=((("D", ((1.0, 1.0),)),),),
             atomcoords=((0.0, 0.0, 0.0),),
             coeff=((0.0, 0.0, 0.0, 1e-200, 0.0, 0.0),),
             mo_index=None,
             origin=(1e160, 1e160, 0.0), step=(1.0, 1.0, 1.0), shape=(1, 1, 1),
+        ),
+        # The unit nightly run 37260359272 stopped on, verbatim: exponents and
+        # coordinates inside the #84 windows, but |c| N_c reaches ~1e350 (py)
+        # and ~1e333 (pz), so the kernel's product order gave -inf and the
+        # fallback's -inf * 0 = NaN. Now a GridError (intermediate magnitude).
+        "regression-intermediate-overflow-1.bin": Case(
+            raw_numbers=True, defect=0,
+            gbasis=(
+                (
+                    ("P", ((2.21420213728226e-52, 2.21420213728226e-52),
+                           (2.2299208288013415e-52, 2.21420213728226e-52))),
+                    ("P", ((1.398043286095683e-76, 1.398043286095289e-76),
+                           (1.398043286095289e-76, 1.398043286095289e-76))),
+                ),
+            ),
+            atomcoords=((4.0133397585694736e-57, 2.215018708925204e-52, 2.09414631903e-311),),
+            coeff=((1.3980433366019128e-76, 4.0133397585694736e-57, 2.215018708925204e-52,
+                    2.09414631903e-311, 1.2677189948137588e275, -3.1594776358597076e257),),
+            mo_index=0,
+            origin=(-6.48769282486076e-62, 1.2989442504e-314, 5.627320053137508e-249),
+            step=(4.24329425326203e-274, 2.524356568153254e-29, 1.444878500878187e-309),
+            shape=(1, 2, 2),
+        ),
+        # Opposite-sign primitives in one contraction (found by targeted
+        # campaigns after the intermediate-overflow fix). Both backends are
+        # right; their rounding residues differ by up to ~6e-9 of the value
+        # that survives the cancellation, which the comparator's former
+        # result-relative 1e-10 tolerance flagged. The condition-aware bound
+        # (fuzz_cclib.py, "Comparison") accepts them.
+        # An exactly opposite pair on one exponent; one MO amplitude.
+        "regression-cancelling-contraction-1.bin": Case(
+            raw_numbers=True, defect=0,
+            gbasis=((("S", ((1.0, 1e8), (1.0, -1e8), (0.5, 1.0))),),),
+            atomcoords=((0.0, 0.0, 0.0),),
+            coeff=((1.0,),),
+            mo_index=0,
+            origin=(-1.0, -1.0, -1.0), step=(0.7, 0.7, 0.7), shape=(3, 3, 3),
+        ),
+        # A P shell with an exactly opposite pair and a small third primitive;
+        # density of two MO rows.
+        "regression-cancelling-contraction-2.bin": Case(
+            raw_numbers=True, defect=0,
+            gbasis=((("P", ((2.33345181240185, -750028.6011753161),
+                            (2.809412537209788, -0.10762251409454304),
+                            (2.33345181240185, 750028.6011753161))),),),
+            atomcoords=((0.0, 0.0, 0.0),),
+            coeff=((0.5, -0.25, 0.75), (-0.3, 0.6, 0.1)),
+            mo_index=None,
+            origin=(-0.6, -0.6, -0.6), step=(0.4, 0.4, 0.4), shape=(4, 4, 4),
+        ),
+        # A D shell whose two exponents differ by 1.2e-6 relative: the whole
+        # function is the small difference of two large Gaussians.
+        "regression-cancelling-contraction-3.bin": Case(
+            raw_numbers=True, defect=0,
+            gbasis=((("D", ((0.33696453920423824, 1713.7313480723808),
+                            (0.33696412988649593, -1713.7313480723808))),),),
+            atomcoords=((0.0, 0.0, 0.0),),
+            coeff=((1.0, 0.0, 0.0, 0.5, 0.0, 0.0),),
+            mo_index=None,
+            origin=(-1.5, -1.0, 0.0), step=(0.75, 0.5, 0.5), shape=(4, 4, 2),
         ),
     }
     return {name: harness.encode(c) for name, c in cases.items()}
@@ -250,7 +325,7 @@ def build(name: str) -> None:
     seeds.update(reproducers)
 
     # Every regression reproducer must round-trip and replay without a divergence.
-    regressions = {"bm25": _bm25_regressions, "cclib": lambda _harness: {}}[name](harness)
+    regressions = {"bm25": _bm25_regressions, "cclib": _cclib_regressions}[name](harness)
     for filename, data in regressions.items():
         assert harness.encode(harness.decode(data)) == data, f"{filename}: encode/decode round trip"
         outcome = harness.test_one_input(data)

@@ -26,8 +26,15 @@ import gaussgrid_fixtures as fx
 import pyquante1_oracle as oracle
 
 import cclib_mojo
-from cclib_mojo import BasisError, GridError, density_on_grid, wavefunction_on_grid
-from cclib_mojo._basis import flatten_gbasis
+from cclib_mojo import (
+    BasisError,
+    GridError,
+    _reference,
+    core,
+    density_on_grid,
+    wavefunction_on_grid,
+)
+from cclib_mojo._basis import INTERMEDIATE_MAGNITUDE_MAX, flatten_gbasis
 
 RTOL = 1e-10  # documented tolerance (task contract)
 ATOL = 1e-12  # absolute floor for far-field points whose values are ~0
@@ -377,3 +384,118 @@ def test_extreme_grid_coordinates_raise_grid_error(args, kwargs, match):
     """Kernel NaN vs fallback 0 parity cases must now raise GridError on both backends."""
     with pytest.raises(GridError, match=match):
         density_on_grid(*args, **kwargs)
+
+
+# ---------------------------------------------------------------------------
+# Intermediate products past the double range raise GridError
+# ---------------------------------------------------------------------------
+
+# Minimised from the nightly fuzz unit of run 37260359272: in-window exponent
+# and coordinates, but |c| N_c ~ 2e333 on the pz function. The kernel's
+# ((c N_c) x^l) y^m ... stays -inf; the fallback's polynomial x contraction
+# (1e-248 x 3e-171) underflows to 0 first, and -inf x 0 = NaN.
+_OVERFLOWING_PZ = dict(
+    gbasis=[[("P", [(1.398043286095289e-76, 1.398043286095289e-76)])]],
+    atomcoords=[[0.0, 0.0, 0.0]],
+    coeff=[[0.0, 0.0, -3.1594776358597076e257]],
+    origin=(0.0, 0.0, 5.627320053137508e-249),
+    step=(1.0, 1.0, 1.0),
+    shape=(1, 1, 1),
+)
+
+
+def _log10_bound(gbasis, atomcoords, coeff, origin, step, shape) -> float:
+    basis = flatten_gbasis(gbasis, atomcoords)
+    axes = core._grid_axes(np.asarray(origin), np.asarray(step), shape)
+    coeff2d = np.atleast_2d(np.asarray(coeff, dtype=np.float64))
+    return float(core._intermediate_log10_magnitudes(basis, axes, coeff2d).max())
+
+
+def test_overflowing_intermediate_product_raises_grid_error():
+    case = _OVERFLOWING_PZ
+    match = r"basis function 2 .* intermediate products up to ~1e333"
+    with pytest.raises(GridError, match=match):
+        density_on_grid(**case)
+    with pytest.raises(GridError, match=match):
+        density_on_grid(**case, mo_index=0)
+    with pytest.raises(GridError, match=match):
+        wavefunction_on_grid(
+            case["gbasis"], case["atomcoords"], case["coeff"][0],
+            case["origin"], case["step"], case["shape"],
+        )
+
+
+def test_zero_coefficient_functions_build_no_intermediate_product():
+    """Both backends skip exact zeros, so a zero cannot trip the bound."""
+    case = dict(_OVERFLOWING_PZ, coeff=[[1.0, 0.0, -0.0]])
+    assert np.all(np.isfinite(density_on_grid(**case)))
+
+
+@pytest.mark.parametrize(
+    "fixture", ["h2o_sto3g", "h2o_sto3g_d", "carbon_sto3g_df", "benzene_6_31g_star"]
+)
+def test_realistic_basis_sets_stay_far_below_intermediate_bound(fixture):
+    """No false rejections: real basis sets on a +-50 Angstrom box stay < 1e10."""
+    gbasis, atomcoords = getattr(fx, fixture)()
+    n_bf = flatten_gbasis(gbasis, atomcoords).n_bf
+    coeff = fx.seeded_coeffs(seed=53, n_mo=3, n_bf=n_bf)
+    grid = dict(origin=(-50.0, -50.0, -50.0), step=(25.0, 25.0, 25.0), shape=(5, 5, 5))
+    assert _log10_bound(gbasis, atomcoords, coeff, **grid) < 10.0
+    assert np.all(np.isfinite(density_on_grid(gbasis, atomcoords, coeff, **grid)))
+
+
+def _s_function_at_bound(factor: float) -> dict:
+    """Unit S function whose |c| N_c is INTERMEDIATE_MAGNITUDE_MAX * factor
+    (its primitive weight 0.71 and polynomial 1 contribute no factor)."""
+    gbasis, atomcoords = [[("S", [(1.0, 1.0)])]], [[0.0, 0.0, 0.0]]
+    norm = flatten_gbasis(gbasis, atomcoords).bf_norm[0]
+    return dict(
+        gbasis=gbasis,
+        atomcoords=atomcoords,
+        coeff=[[INTERMEDIATE_MAGNITUDE_MAX / norm * factor]],
+        origin=(-1.0, -1.0, -1.0),
+        step=(1.0, 1.0, 1.0),
+        shape=(3, 3, 3),
+    )
+
+
+def test_intermediate_bound_just_below_is_accepted_with_backend_parity():
+    case = _s_function_at_bound(1.0 - 1e-6)
+    assert 139.999 < _log10_bound(**case) < 140.0
+    out = density_on_grid(**case)
+    # psi ~ 7e139 at the center, so psi^2 ~ 5e279: finite on every backend
+    # and equal to the fallback evaluated on the same arrays.
+    assert np.all(np.isfinite(out)) and out.max() > 1e279
+    basis = flatten_gbasis(case["gbasis"], case["atomcoords"])
+    axes = core._grid_axes(
+        np.asarray(case["origin"]), np.asarray(case["step"]), case["shape"]
+    )
+    fallback = _reference.eval_grid(
+        basis, *axes, np.asarray(case["coeff"]), _reference.MODE_DENSITY
+    )
+    assert_grid_close(out, fallback.reshape(case["shape"]))
+
+
+def test_intermediate_bound_just_above_is_rejected():
+    case = _s_function_at_bound(1.0 + 1e-6)
+    assert 140.0 < _log10_bound(**case) < 140.001
+    with pytest.raises(GridError, match=r"intermediate products up to ~1e140\.0"):
+        density_on_grid(**case)
+
+
+@pytest.mark.parametrize("x_angstrom,accepted", [(3.6e39, True), (4.7e39, False)])
+def test_intermediate_bound_multiplies_its_factors(x_angstrom, accepted):
+    """|c| N_c = 1e60, (x-cx)^2 ~ 1e79.7 / 1e79.9 and w_xx = 1.65 stay below
+    the bound one by one; their product straddles it (1e139.9 / 1e140.1)."""
+    gbasis, atomcoords = [[("D", [(1.0, 1.0)])]], [[0.0, 0.0, 0.0]]
+    coeff = [[1e60, 0.0, 0.0, 0.0, 0.0, 0.0]]  # the xx function only
+    grid = dict(origin=(x_angstrom, 0.0, 0.0), step=(1.0, 1.0, 1.0), shape=(1, 1, 1))
+    log10_bound = _log10_bound(gbasis, atomcoords, coeff, **grid)
+    if accepted:
+        assert 139.8 < log10_bound < 140.0
+        assert np.all(np.isfinite(density_on_grid(gbasis, atomcoords, coeff, **grid)))
+    else:
+        assert 140.0 < log10_bound < 140.2
+        match = r"basis function 0 \(Cartesian powers \(2, 0, 0\)\)"
+        with pytest.raises(GridError, match=match):
+            density_on_grid(gbasis, atomcoords, coeff, **grid)
