@@ -372,10 +372,20 @@ def backend_inputs(args: dict) -> tuple[BasisArrays, tuple[np.ndarray, np.ndarra
 # M = PRODUCT_ROUNDINGS the roundings in one term's product chain and e(x)
 # the relative error of that backend's exp(-x), including the rounding of its
 # argument. The exp error enters per group g of terms that share a centre
-# and an exponent: each backend computes their exp factor once, from the same
-# operands, so the group's terms carry the same exp error and it scales with
-# the group's net sum (an exactly opposite primitive pair cancels its exp
-# error too). Summing the two backends' bounds, with eps = 2u = 2.2e-16:
+# and an exponent (exp_group_key) and scales with the group's net sum,
+# because every term of a group carries the same exp error. Neither backend
+# evaluates exp once per group: the fallback calls np.exp for every (basis
+# function, primitive) and the kernel fills its axis factors EX/EY/GEZ for
+# every one. But each of those evaluations builds its argument from the same
+# operands (centre, exponent, grid coordinate) with the same operations, and
+# both exps are elementwise functions of the argument alone (NumPy's float64
+# exp: libm per element, or AVX-512/SVML lanes with masked tails; the kernel's
+# std.math.exp: clamp, fma range reduction and a polynomial per SIMD lane), so
+# a group's terms get bit-identical exp factors and an exactly opposite
+# primitive pair cancels its exp error too.
+# test_exp_group_members_share_one_exp_value (tests/test_fuzz_regression_cclib.py)
+# pins this on both backends. Summing the two backends' bounds, with
+# eps = 2u = 2.2e-16:
 #
 #     |psi_A - psi_B| <= (K + M) eps S  +  sum_g |sum_{t in g} t| (e_A(x_g) + e_B(x_g))
 #                        +  K * UNDERFLOW_PER_TERM
@@ -482,16 +492,26 @@ class TermScales:
     amplitude: np.ndarray  # (n_mo, n_points): psi_ref, the fallback's own amplitude of the row
 
 
+def exp_group_key(basis: BasisArrays, b: int, p: int) -> tuple[float, float, float, float]:
+    """The exp group of the term of basis function ``b``, primitive ``p``:
+    its centre and exponent. Compared as floats, so a -0.0 and a 0.0 centre
+    coordinate share a group; their exp arguments are identical too (the
+    coordinate differences can only disagree in the sign of a zero, which
+    the products forming the argument remove)."""
+    centre = (float(basis.center_x[b]), float(basis.center_y[b]), float(basis.center_z[b]))
+    return (*centre, float(basis.prim_alpha[p]))
+
+
 def term_scales(basis: BasisArrays, axes, coeff2d: np.ndarray) -> TermScales:
     """The inputs of the bound, from the fallback's evaluation term by term.
 
     Each term is formed in the fallback's order, ``(c N_c) (poly (w_p
     exp(-x)))``, and only for inputs the public API accepted, so every
     partial product stays under ``INTERMEDIATE_MAGNITUDE_MAX``. Terms are
-    grouped by (centre, exponent): their exp factor is the same float in
-    either backend. ``amplitude`` is ``fallback_amplitudes``: exactly the
-    psi of every row that the fallback squares, on which the density bound
-    is centred.
+    grouped by ``exp_group_key``: within either backend the terms of a group
+    get bit-identical exp factors (see "The bound" above). ``amplitude`` is
+    ``fallback_amplitudes``: exactly the psi of every row that the fallback
+    squares, on which the density bound is centred.
     """
     ax, ay, az = axes
     grid_shape = (ax.shape[0], ay.shape[0], az.shape[0])
@@ -522,7 +542,7 @@ def term_scales(basis: BasisArrays, axes, coeff2d: np.ndarray) -> TermScales:
             for mo in rows:
                 term = (coeff2d[mo, b] * basis.bf_norm[b]) * weighted_poly
                 magnitude[mo] += np.abs(term)
-                group = groups[mo].setdefault((*centre, alpha), [np.zeros(grid_shape), x])
+                group = groups[mo].setdefault(exp_group_key(basis, b, p), [np.zeros(grid_shape), x])
                 group[0] += term
             n_terms[rows] += 1
     exp_group = np.zeros_like(magnitude)

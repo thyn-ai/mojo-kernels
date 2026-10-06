@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import dataclasses
 import math
+from collections import defaultdict
 from pathlib import Path
 
 import numpy as np
@@ -23,7 +24,7 @@ import cclib_mojo
 import fuzz_cclib as harness  # fuzz/ is on sys.path via tests/conftest.py
 import gaussgrid_fixtures as fx
 from _harness import Divergence, expected_issue_key
-from cclib_mojo import _native, _reference
+from cclib_mojo import _native, _reference, core
 from cclib_mojo._basis import INTERMEDIATE_MAGNITUDE_MAX, flatten_gbasis
 
 SEEDS = sorted(harness.CORPUS_DIR.glob("*.bin"))
@@ -434,3 +435,132 @@ def test_inputs_just_below_the_intermediate_bound_pass_the_comparator(mo_index: 
     tol = harness.tolerance(harness.term_scales(basis, axes, coeff2d), mode, *EXP_PAIR)
     assert np.all(np.isfinite(tol))
     assert harness.test_one_input(harness.encode(case)) is None
+
+
+# ---------------------------------------------------------------------------
+# The exp-group invariant behind the bound's exp term
+# ---------------------------------------------------------------------------
+#
+# fuzz_cclib scales each backend's exp allowance with the net sum of a group
+# of terms (exp_group_key: one centre, one exponent). That is sound only if,
+# within one backend, every term of a group gets a bit-identical
+# exp(-alpha |r - c|^2) at every grid point, although neither backend
+# evaluates it once per group. This pins it through the backends' outputs:
+# each (function, primitive) term is evaluated alone, with unit norm, weight
+# and MO coefficient. Where every axis on which the function has a non-zero
+# power lies a power of two (or 0) from the centre, the angular factor is a
+# power of two and psi / angular factor is the term's exp factor bit for bit
+# (the kernel's EX * EY * EZ, NumPy's np.exp), so members with different
+# powers (S, px, py, pz of an SP shell, d and f components) are compared;
+# other axes carry inexact cclib grid coordinates, so the exp arguments are
+# rounded. Members with the same powers (two coincident atoms) are compared
+# on psi itself, on any grid.
+
+# A carbon STO-3G atom (its second S and its P shell share three exponents)
+# with d and f polarisation, and a second atom at the same place whose P and
+# D shells reuse those three exponents.
+EXP_GROUP_GBASIS = [
+    fx.STO3G_C + [fx.D_POLARIZATION_C, fx.F_POLARIZATION_C],
+    [fx.STO3G_C[2], ("D", fx.STO3G_C[2][1])],
+]
+DYADIC_CENTRE = (0.75, -1.25, 0.5)  # bohr
+DYADIC_OFFSETS = (  # bohr, per axis; three lengths for different SIMD tails
+    (-2.0, -1.0, -0.5, 0.0, 0.5, 1.0, 2.0),
+    (-1.0, -0.5, 0.0, 0.25, 2.0),
+    (-4.0, -1.0, -0.25, 0.0, 1.0, 2.0),
+)
+# geometry -> (axes whose offsets are powers of two, groups mixing powers)
+EXP_GROUP_GEOMETRIES = {
+    # atoms at (0, 0, 0) and (-0, 0, -0): one group per exponent across both
+    "signed-zero-centres": ((True, True, True), 5),
+    "dyadic-centre": ((True, True, True), 5),
+    "x-dyadic": ((True, False, False), 3),  # S, px, dxx share the SP exponents
+    "y-dyadic": ((False, True, False), 3),
+    "z-dyadic": ((False, False, True), 3),
+    "cclib-grid": ((False, False, False), 0),
+}
+EXP_GROUP_BACKENDS = [
+    pytest.param(_native, marks=requires_native, id="native"),
+    pytest.param(_reference, id="fallback"),
+]
+
+
+def _exp_group_input(geometry: str):
+    """(basis with unit norms, axes in bohr) for one test geometry."""
+    dyadic, _ = EXP_GROUP_GEOMETRIES[geometry]
+    if geometry == "signed-zero-centres":
+        basis = flatten_gbasis(EXP_GROUP_GBASIS, np.array([[0.0, 0.0, 0.0], [-0.0, 0.0, -0.0]]))
+        centre = (0.0, 0.0, 0.0)
+    else:
+        basis = flatten_gbasis(EXP_GROUP_GBASIS, np.array([[0.31, -0.17, 0.42], [0.31, -0.17, 0.42]]))
+        centre = DYADIC_CENTRE
+        if any(dyadic):  # offsets that are powers of two need a dyadic centre
+            names = ("center_x", "center_y", "center_z")
+            basis = dataclasses.replace(basis, **{name: np.full(basis.n_bf, c) for name, c in zip(names, centre)})
+    inexact = core._grid_axes(np.array([-1.3, -1.1, -0.9]), np.array([0.37, 0.41, 0.29]), (9, 7, 5))
+    axes = tuple(
+        c + np.array(offsets) if exact else grid
+        for c, offsets, exact, grid in zip(centre, DYADIC_OFFSETS, dyadic, inexact)
+    )
+    return dataclasses.replace(basis, bf_norm=np.ones(basis.n_bf)), axes
+
+
+def _term_alone(backend, basis, axes, b: int, p: int) -> np.ndarray:
+    coeff = np.zeros((1, basis.n_bf))
+    coeff[0, b] = 1.0
+    weights = np.where(np.arange(basis.n_prims) == p, 1.0, 0.0)
+    alone = dataclasses.replace(basis, prim_w=weights)
+    return backend.eval_grid(alone, *axes, coeff, _reference.MODE_WAVEFUNCTION)
+
+
+def _powers(basis, b: int) -> tuple[int, int, int]:
+    return int(basis.powers_l[b]), int(basis.powers_m[b]), int(basis.powers_n[b])
+
+
+def _angular_factor(basis, axes, b: int) -> np.ndarray:
+    l, m, n = _powers(basis, b)  # noqa: E741
+    dx = axes[0] - basis.center_x[b]
+    dy = axes[1] - basis.center_y[b]
+    dz = axes[2] - basis.center_z[b]
+    return (dx[:, None, None] ** l * dy[None, :, None] ** m * dz[None, None, :] ** n).reshape(-1)
+
+
+@pytest.mark.parametrize("backend", EXP_GROUP_BACKENDS)
+@pytest.mark.parametrize("geometry", sorted(EXP_GROUP_GEOMETRIES))
+def test_exp_group_members_share_one_exp_value(backend, geometry: str):
+    dyadic, expected_mixed = EXP_GROUP_GEOMETRIES[geometry]
+    basis, axes = _exp_group_input(geometry)
+    groups = defaultdict(list)
+    for b in range(basis.n_bf):
+        for p in range(int(basis.offsets[b]), int(basis.offsets[b + 1])):
+            groups[harness.exp_group_key(basis, b, p)].append((b, p))
+    tiny = np.finfo(np.float64).tiny
+    compared = 0
+    mixed = 0
+    for key, members in groups.items():
+        # Values that must be bit-identical, by kind: the exp factor itself,
+        # or psi of members with the same powers.
+        by_kind = defaultdict(list)
+        for b, p in members:
+            psi = _term_alone(backend, basis, axes, b, p)
+            powers = _powers(basis, b)
+            if all(exact or power == 0 for exact, power in zip(dyadic, powers)):
+                angular = _angular_factor(basis, axes, b)
+                exact = (angular != 0.0) & (np.abs(psi) >= tiny)  # psi / angular is exact here
+                factor = np.where(exact, psi / np.where(exact, angular, 1.0), np.nan)
+                by_kind["exp factor"].append(((b, p), powers, factor))
+            else:
+                by_kind[powers].append(((b, p), powers, psi))
+        for kind, values in by_kind.items():
+            mixed += kind == "exp factor" and len({powers for _, powers, _ in values}) > 1
+            first_term, _, first = values[0]
+            for term, _, value in values[1:]:
+                both = ~np.isnan(first) & ~np.isnan(value)
+                compared += int(np.count_nonzero(both & (first != 0.0)))
+                assert np.array_equal(first[both].view(np.uint64), value[both].view(np.uint64)), (
+                    f"{kind} differs within exp group {key}: terms {first_term} and {term}"
+                )
+    assert compared > 500, "the comparison must cover non-zero exp factors"
+    assert mixed == expected_mixed
+    if geometry == "signed-zero-centres":  # the group spans both signs of zero
+        assert np.signbit(basis.center_x).any() and not np.signbit(basis.center_x).all()
