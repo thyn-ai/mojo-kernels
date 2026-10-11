@@ -1,7 +1,5 @@
 # mojo-kernels
 
-> ⭐ If mojo-kernels saved you time, a [star on GitHub](https://github.com/thyn-ai/mojo-kernels) helps others find it.
-
 [![ci](https://github.com/thyn-ai/mojo-kernels/actions/workflows/ci.yml/badge.svg)](https://github.com/thyn-ai/mojo-kernels/actions/workflows/ci.yml) [![All Contributors](https://img.shields.io/github/all-contributors/thyn-ai/mojo-kernels?color=ee8449)](#contributors)
 [![ci-cclib](https://github.com/thyn-ai/mojo-kernels/actions/workflows/ci-cclib.yml/badge.svg)](https://github.com/thyn-ai/mojo-kernels/actions/workflows/ci-cclib.yml)
 [![ci-fuse](https://github.com/thyn-ai/mojo-kernels/actions/workflows/ci-fuse.yml/badge.svg)](https://github.com/thyn-ai/mojo-kernels/actions/workflows/ci-fuse.yml)
