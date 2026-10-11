@@ -1,7 +1,5 @@
 # cclib-mojo
 
-> ⭐ If cclib-mojo saved you time, a [star on GitHub](https://github.com/thyn-ai/mojo-kernels) helps others find it.
-
 **Fast electron-density and wavefunction-on-grid evaluation for
 [cclib](https://cclib.github.io/)** — the computational-chemistry parsing
 library — powered by a Mojo kernel, with a vendored NumPy fallback. It

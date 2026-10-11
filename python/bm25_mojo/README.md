@@ -4,8 +4,6 @@ A drop-in faster replacement for the [`rank_bm25`](https://pypi.org/project/rank
 package, powered by a clean-room Mojo kernel — with a vendored pure-Python
 fallback for platforms without a native build (including Windows — tested there in CI: [`windows-fallback`](https://github.com/thyn-ai/mojo-kernels/actions/workflows/windows-fallback.yml)).
 
-> ⭐ If bm25-mojo saved you time, a [star on GitHub](https://github.com/thyn-ai/mojo-kernels) helps others find it.
-
 ```python
 from bm25_mojo import BM25Okapi  # same API as rank_bm25.BM25Okapi
 
