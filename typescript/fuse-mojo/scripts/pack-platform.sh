@@ -38,6 +38,13 @@ case "$(uname -s)" in
     # (the Mojo runtime from the pixi env) into it, and rewrites load paths
     # to @loader_path-relative ones.
     delocate-path -v "$pkg_dir/lib"
+    # delocate may rewrite load commands; ensure the shipped IDs are redistributable
+    # @rpath names and that any install_name_tool change is followed by a fresh
+    # ad-hoc signature so dyld accepts the binaries.
+    install_name_tool -id "@rpath/${lib}" "$pkg_dir/lib/${lib}"
+    install_name_tool -id "@rpath/${shim}" "$pkg_dir/lib/${shim}"
+    codesign -s - -f "$pkg_dir/lib/${lib}"
+    codesign -s - -f "$pkg_dir/lib/${shim}"
     ;;
   Linux)
     # Vendor every non-system shared library the kernel needs and point its

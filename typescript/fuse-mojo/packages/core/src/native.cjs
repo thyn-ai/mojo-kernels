@@ -22,6 +22,10 @@
  * differential test suite and on platforms without a prebuilt library).
  * `FUSE_MOJO_THREADS=N` caps the native thread count (1 = sequential).
  *
+ * Diagnostics (`backendInfo()`): `shim_loaded` is true when the pthread shim
+ * was found and bound; `shim_error` is non-null when the shim file existed but
+ * could not be loaded (queries then run sequentially).
+ *
  * Stable C ABI (v1)::
  *
  *   int32_t  fusemojo_abi_version(void)
@@ -127,6 +131,7 @@ function bindAbi(lib) {
 let _koffi = null
 let _lib = null
 let _shim = null // null = not tried; false = unavailable; function = parallel runner
+let _shimError = null // null = none; string = why the shim file existed but could not be used
 let _libSource = null
 let _loadError = null
 
@@ -191,6 +196,7 @@ function load() {
         }
         // The pthread shim is optional; without it queries run sequentially.
         _shim = false
+        _shimError = null
         const shimPath = path.join(path.dirname(candidate), shimBasename())
         try {
           if (fs.existsSync(shimPath)) {
@@ -199,8 +205,9 @@ function load() {
               'int32_t fusemojo_search_parallel(void* ctx, int32_t n_texts, int32_t max_threads, int32_t min_chunk)'
             )
           }
-        } catch {
+        } catch (err) {
           _shim = false
+          _shimError = `pthread shim failed to load from ${shimPath}: ${err.message}`
         }
         _lib = bound
         _libSource = `${label} (${candidate})${_shim ? ' +pthread shim' : ''}`
@@ -237,6 +244,8 @@ function backendInfo() {
     abi_version_native: null,
     disabled_by_env: process.env[ENV_DISABLE] === '1',
     threads: 0,
+    shim_loaded: false,
+    shim_error: null,
     platform: process.platform,
     arch: process.arch,
     error: null,
@@ -247,6 +256,8 @@ function backendInfo() {
     info.native_source = _libSource
     info.abi_version_native = lib.abi_version()
     info.threads = threadCap()
+    info.shim_loaded = _shim !== null && _shim !== false
+    info.shim_error = _shimError
   } catch (err) {
     info.error = err.message
   }

@@ -21,6 +21,14 @@ test('backend selection follows the environment', () => {
   assert.equal(fuse.backend, NATIVE_EXPECTED ? 'native' : 'fallback')
 })
 
+test('native backend reports parallel shim state explicitly', { skip: !NATIVE_EXPECTED }, () => {
+  const info = Fuse.backendInfo()
+  assert.equal(info.native_available, true)
+  assert.equal(info.shim_loaded, true, 'pthread shim must be loaded for parallel search')
+  assert.equal(info.shim_error, null, 'no shim error when the shim loaded')
+  assert.match(info.native_source, /\+pthread shim$/, 'native_source must indicate shim usage')
+})
+
 test('unsupported options throw a clear error listing supported options', () => {
   const cases = [
     [{ useExtendedSearch: true }, 'useExtendedSearch'],
