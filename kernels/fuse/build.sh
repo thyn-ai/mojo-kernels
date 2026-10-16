@@ -48,5 +48,12 @@ if [ "$(uname -s)" = "Darwin" ]; then
   # The link records the kernel library by its relative build path; both
   # libraries always ship in the same directory, so anchor it there.
   install_name_tool -change "build/${lib}" "@loader_path/${lib}" "build/${shim}"
+  # Redistributable dylib IDs must not contain the build directory.
+  install_name_tool -id "@rpath/${lib}" "build/${lib}"
+  install_name_tool -id "@rpath/${shim}" "build/${shim}"
+  # install_name_tool invalidates ad-hoc signatures; re-sign so dyld accepts
+  # the libraries on hardened / gatekeepered systems.
+  codesign -s - -f "build/${lib}"
+  codesign -s - -f "build/${shim}"
 fi
 echo "built kernels/fuse/build/${lib} and ${shim}"
