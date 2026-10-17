@@ -1,6 +1,6 @@
 {
   "name": "@thyn-ai/fuse-mojo-core",
-  "version": "0.2.4",
+  "version": "0.2.5",
   "description": "Drop-in faster replacement for Fuse.js, powered by a Mojo kernel (pure-JS fallback included).",
   "license": "Apache-2.0",
   "author": {

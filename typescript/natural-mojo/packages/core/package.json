@@ -1,6 +1,6 @@
 {
   "name": "@thyn-ai/natural-mojo-core",
-  "version": "0.2.4",
+  "version": "0.2.5",
   "description": "Drop-in faster replacement for natural's Levenshtein/Damerau-Levenshtein distance, powered by a Mojo kernel (pure-JS fallback included).",
   "license": "Apache-2.0",
   "author": {

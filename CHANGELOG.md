@@ -10,6 +10,15 @@ Entries after 0.1.0 are written by [release-please](https://github.com/googleapi
 from the Conventional Commits merged since the previous tag, in the release
 pull request that cuts the version ([RELEASING.md](RELEASING.md)).
 
+## [0.2.5](https://github.com/thyn-ai/mojo-kernels/compare/v0.2.4...v0.2.5) (2026-10-17)
+
+
+### Fixed
+
+* **cclib:** reject overflowing intermediate products; condition-aware fuzz comparator ([#87](https://github.com/thyn-ai/mojo-kernels/issues/87)) ([9f0769c](https://github.com/thyn-ai/mojo-kernels/commit/9f0769c5fb9b8872b72c3cf7279528473ce59e09))
+* **cclib:** validate extreme Gaussian exponents and grid coordinates ([#84](https://github.com/thyn-ai/mojo-kernels/issues/84)) ([6c274f0](https://github.com/thyn-ai/mojo-kernels/commit/6c274f02cace9007df36aa8988160cfc13d28bd8)), closes [#16](https://github.com/thyn-ai/mojo-kernels/issues/16)
+* **fuse-mojo:** surface shim state + repair dylib install names ([#91](https://github.com/thyn-ai/mojo-kernels/issues/91)) ([4ab2229](https://github.com/thyn-ai/mojo-kernels/commit/4ab22295f500f822db1b17d6477095eceee716b8))
+
 ## [0.2.4](https://github.com/thyn-ai/mojo-kernels/compare/v0.2.3...v0.2.4) (2026-09-28)
 
 
