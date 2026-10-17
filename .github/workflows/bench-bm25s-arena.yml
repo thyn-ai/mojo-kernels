@@ -67,7 +67,7 @@ jobs:
           persist-credentials: false
 
       - name: Install pixi
-        uses: prefix-dev/setup-pixi@d3f436a425481402e6a95a1d1fc10331c708cd9e # v0.10.2
+        uses: prefix-dev/setup-pixi@9dabb60412d3d2d967a8d682f7ce01317af40514 # v0.11.0
         with:
           run-install: false
 
@@ -79,7 +79,7 @@ jobs:
           ls -la python/bm25_mojo/dist/
 
       - name: Upload the branch wheel (shippable artifact)
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: bm25-mojo-wheel-branch
           path: python/bm25_mojo/dist/*.whl
@@ -185,7 +185,7 @@ jobs:
           run_cell M layers-before-M.log
 
       - if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: bench-bm25s-arena-native
           path: "*.log"
@@ -201,7 +201,7 @@ jobs:
           persist-credentials: false
 
       - name: Install pixi
-        uses: prefix-dev/setup-pixi@d3f436a425481402e6a95a1d1fc10331c708cd9e # v0.10.2
+        uses: prefix-dev/setup-pixi@9dabb60412d3d2d967a8d682f7ce01317af40514 # v0.11.0
         with:
           run-install: false
 
@@ -286,7 +286,7 @@ jobs:
           run_img "taskset -c 0 /opt/venv-before/bin/python /bench/bench_bm25s_arena.py --layers --cell M" docker-layers-before-M.log
 
       - if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: bench-bm25s-arena-docker-2cpu
           path: "docker-*.log"
@@ -302,7 +302,7 @@ jobs:
           persist-credentials: false
 
       - name: Install pixi
-        uses: prefix-dev/setup-pixi@d3f436a425481402e6a95a1d1fc10331c708cd9e # v0.10.2
+        uses: prefix-dev/setup-pixi@9dabb60412d3d2d967a8d682f7ce01317af40514 # v0.11.0
         with:
           run-install: false
 
@@ -313,7 +313,7 @@ jobs:
           pixi run wheel-bm25
 
       - name: Upload the branch wheel (shippable artifact)
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: bm25-mojo-wheel-branch-r2
           path: python/bm25_mojo/dist/*.whl
@@ -381,7 +381,7 @@ jobs:
           run_hog "taskset -c 0 /opt/venv-before/bin/python /bench/bench_bm25s_arena.py --layers --cell M" contended-layers-before-M.log
 
       - if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: bench-bm25s-arena-contended
           path: "contended-*.log"
