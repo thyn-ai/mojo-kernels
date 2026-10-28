@@ -121,6 +121,10 @@ comptime VARIANT_PLUS: Int32 = 2
 # Native SIMD width for float64 on the build target (2 on NEON, 4 on AVX2).
 comptime WIDTH = simd_width_of[DType.float64]()
 
+# Int64 bounds as literals (Mojo has no Int64.MAX constant in scope here).
+comptime I64_MAX: Int64 = 9223372036854775807
+comptime I64_POW2_MAX: Int64 = 1 << 62  # 2^62, largest power of two in Int64
+
 # C-side pointer spellings (untracked origin: the caller owns the lifetime
 # of anything passed in; the library owns what it allocates).
 comptime F64Ptr = Pointer[Float64, MutUntrackedOrigin]
@@ -136,9 +140,17 @@ comptime Handle = Optional[Pointer[UInt8, MutUntrackedOrigin]]
 
 
 struct BuildResult(Copyable, Movable):
-    """Output of bm25mojo_build_index_corpus; caller copies then frees."""
+    """Output of bm25mojo_build_index_corpus; caller copies then frees.
+
+    The explicit ``_pad`` field keeps the C/ctypes layout bit-identical to
+    ``bm25_mojo._native._BuildResultC``: ``status`` is a 32-bit status code,
+    the next 32 bits are unused padding to 64-bit-align ``n_docs``, and every
+    subsequent field is 64-bit aligned. Relying on implicit compiler padding
+    would be fragile across Mojo versions.
+    """
 
     var status: Int32
+    var _pad: Int32
     var n_docs: Int64
     var n_terms: Int64
     var nnz: Int64
@@ -167,6 +179,7 @@ struct BuildResult(Copyable, Movable):
         vocab_lens: I32Ptr,
     ):
         self.status = status
+        self._pad = 0
         self.n_docs = n_docs
         self.n_terms = n_terms
         self.nnz = nnz
@@ -183,6 +196,10 @@ struct BuildResult(Copyable, Movable):
 def _next_pow2(n: Int64) -> Int64:
     if n <= 1:
         return 1
+    # Guard against overflow: the next power of two past 2^62 does not fit
+    # in a signed Int64, so saturate at the largest representable power of two.
+    if n > I64_POW2_MAX:
+        return I64_POW2_MAX
     var p = Int64(1)
     while p < n:
         p <<= 1
@@ -327,6 +344,10 @@ def _build_index_corpus_impl(
     var max_tokens = total_bytes
     if max_tokens < 1:
         max_tokens = 1
+    # Guard the hash-table capacity calculation against signed Int64 overflow:
+    # an impossibly large corpus cannot be processed, so fail cleanly.
+    if max_tokens > I64_MAX // 2:
+        return None
     var cap = _next_pow2(max_tokens * 2)
     if cap < 16:
         cap = 16

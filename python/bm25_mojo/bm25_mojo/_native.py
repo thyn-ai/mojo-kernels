@@ -299,6 +299,7 @@ def _build_result_to_dict(result_ptr: int) -> dict:
     n_terms = int(result.n_terms)
     n_docs_out = int(result.n_docs)
     nnz = int(result.nnz)
+    avgdl = float(result.avgdl)
     try:
         doc_len = _array_from_ptr(result.doc_len, np.float64, (n_docs_out,)).copy()
         doc_offsets_out = _array_from_ptr(result.doc_offsets, np.int64, (n_docs_out + 1,)).copy()
@@ -314,7 +315,7 @@ def _build_result_to_dict(result_ptr: int) -> dict:
         "n_docs": n_docs_out,
         "n_terms": n_terms,
         "nnz": nnz,
-        "avgdl": float(result.avgdl),
+        "avgdl": avgdl,
         "doc_len": doc_len,
         "doc_offsets": doc_offsets_out,
         "doc_tids": doc_tids,
