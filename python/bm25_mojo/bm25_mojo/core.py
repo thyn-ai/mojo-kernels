@@ -27,6 +27,9 @@ from bm25_mojo._native import (
     NativeIndex,
     NativeUnavailable,
     UnsafeTokenError,
+    build_index_corpus,
+    build_index_tids,
+    native_build_available,
 )
 
 __all__ = ["BM25", "BM25Okapi", "BM25L", "BM25Plus"]
@@ -42,7 +45,8 @@ class BM25:
     def __init__(self, corpus, tokenizer=None):
         self.corpus_size = 0
         self.avgdl = 0
-        self.doc_freqs = []
+        self._doc_freqs = None
+        self._doc_freqs_native_arrays = None
         self.idf = {}
         self.doc_len = []
         self.tokenizer = tokenizer
@@ -50,15 +54,194 @@ class BM25:
         if tokenizer:
             corpus = self._tokenize_corpus(corpus)
 
+        if native_build_available():
+            try:
+                arrays = self._build_native(corpus)
+                if arrays is not None:
+                    terms = self._load_from_native_arrays(arrays)
+                    nd = {term: int(arrays["df"][tid]) for tid, term in enumerate(terms)}
+                    self._calc_idf(nd)
+                    self._backend = self._build_native_index(arrays=arrays)
+                    return
+            except (NativeUnavailable, UnsafeTokenError):
+                pass
+
         nd = self._initialize(corpus)
         self._calc_idf(nd)
-        self._backend = self._build_native_index(nd)
+        self._backend = self._build_native_index(nd=nd)
+
+    @property
+    def doc_freqs(self):
+        """Per-document term frequencies; built lazily on first access."""
+        if self._doc_freqs is None:
+            self._doc_freqs = self._build_doc_freqs_from_arrays()
+        return self._doc_freqs
+
+    @doc_freqs.setter
+    def doc_freqs(self, value):
+        self._doc_freqs = value
+        self._doc_freqs_native_arrays = None
 
     def _tokenize_corpus(self, corpus):
         # rank_bm25 maps the tokenizer with multiprocessing.Pool; a sequential
         # map returns element-for-element identical results without spawning
         # processes (deterministic, and safe in test/CI sandboxes).
         return [self.tokenizer(document) for document in corpus]
+
+    def _build_doc_freqs_from_arrays(self):
+        """Reconstruct the rank_bm25-compatible doc_freqs list from native arrays."""
+        arrays = self._doc_freqs_native_arrays
+        if arrays is None:
+            return []
+        terms = self._vocab_terms
+        if terms is None:
+            return []
+        doc_offsets = arrays["doc_offsets"]
+        doc_tids = arrays["doc_tids"]
+        doc_freqs = arrays["doc_freqs"]
+        return [
+            {
+                terms[int(tid)]: float(freq)
+                for tid, freq in zip(
+                    doc_tids[int(doc_offsets[d]) : int(doc_offsets[d + 1])],
+                    doc_freqs[int(doc_offsets[d]) : int(doc_offsets[d + 1])],
+                    strict=True,
+                )
+            }
+            for d in range(arrays["n_docs"])
+        ]
+
+    @staticmethod
+    def _pack_corpus(corpus):
+        """Flatten a tokenised corpus into a length-prefixed UTF-8 byte buffer.
+
+        Returns ``(tokens_bytes, doc_offsets)`` where ``doc_offsets`` are byte
+        offsets. Each token is encoded as a 4-byte little-endian length followed
+        by its UTF-8 bytes, so empty tokens and arbitrary UTF-8 content are
+        preserved without ambiguity. Raises ``UnsafeTokenError`` for non-``str``
+        tokens, signalling that the caller should fall back to the pure-Python
+        build path (which supports arbitrary hashable tokens).
+        """
+        buf = bytearray()
+        doc_offsets = [0]
+        for doc in corpus:
+            if not doc:
+                doc_offsets.append(len(buf))
+                continue
+            for tok in doc:
+                if type(tok) is not str:
+                    raise UnsafeTokenError("native build requires str tokens")
+                b = tok.encode("utf-8")
+                buf.extend(len(b).to_bytes(4, "little"))
+                buf.extend(b)
+            doc_offsets.append(len(buf))
+        return bytes(buf), np.array(doc_offsets, dtype=np.int64)
+
+    @staticmethod
+    def _token_ids_for_corpus(corpus):
+        """Assign term ids in first-appearance order and return flat id streams.
+
+        Returns ``(token_tids, doc_offsets, terms, vocab)`` where ``terms`` is
+        the vocabulary in first-appearance order and ``vocab`` is the term ->
+        tid dict. Raises ``UnsafeTokenError`` for non-``str`` tokens.
+        """
+        vocab = {}
+        terms = []
+        flat_tids = []
+        add_tid = flat_tids.append
+        doc_offsets = [0]
+        for doc in corpus:
+            for tok in doc:
+                if type(tok) is not str:
+                    raise UnsafeTokenError("native build requires str tokens")
+                tid = vocab.get(tok)
+                if tid is None:
+                    tid = len(terms)
+                    vocab[tok] = tid
+                    terms.append(tok)
+                add_tid(tid)
+            doc_offsets.append(len(flat_tids))
+        return (
+            np.array(flat_tids, dtype=np.int32),
+            np.array(doc_offsets, dtype=np.int64),
+            terms,
+            vocab,
+        )
+
+    def _build_native(self, corpus):
+        """Try to build the index via the ABI v4 native corpus builder.
+
+        Prefers the term-id path (Python assigns ids, native counts) because it
+        avoids token encoding and byte parsing. Falls back to the UTF-8 corpus
+        path when the term-id builder is unavailable.
+        """
+        try:
+            token_tids, doc_offsets, terms, vocab = self._token_ids_for_corpus(corpus)
+        except UnsafeTokenError:
+            return self._build_native_corpus(corpus)
+        try:
+            arrays = build_index_tids(
+                n_docs=len(corpus),
+                token_tids=token_tids,
+                doc_offsets=doc_offsets,
+                variant=self._variant,
+                k1=float(self.k1),
+                b=float(self.b),
+                delta=float(self._delta),
+                epsilon=float(getattr(self, "epsilon", 0.0)),
+            )
+        except NativeUnavailable:
+            return self._build_native_corpus(corpus)
+        # Keep the Python-built vocabulary; the kernel returned a dummy vocab buffer.
+        arrays["terms"] = terms
+        arrays["vocab"] = vocab
+        return arrays
+
+    def _build_native_corpus(self, corpus):
+        """Try to build the index via the UTF-8 token-stream native builder."""
+        tokens, doc_offsets = self._pack_corpus(corpus)
+        return build_index_corpus(
+            n_docs=len(corpus),
+            tokens=tokens,
+            doc_offsets=doc_offsets,
+            variant=self._variant,
+            k1=float(self.k1),
+            b=float(self.b),
+            delta=float(self._delta),
+            epsilon=float(getattr(self, "epsilon", 0.0)),
+        )
+
+    def _load_from_native_arrays(self, arrays):
+        """Populate the rank_bm25-compatible index attributes from native outputs.
+
+        Returns the list of vocabulary terms in first-appearance (term-id) order
+        so the caller can build ``nd`` and evaluate idfs with Python's
+        ``math.log`` for bit-exact parity with rank_bm25.
+        """
+        self.corpus_size = arrays["n_docs"]
+        self.avgdl = arrays["avgdl"]
+        self.doc_len = [int(x) for x in arrays["doc_len"]]
+
+        terms = arrays.get("terms")
+        vocab = arrays.get("vocab")
+        if terms is None:
+            vocab_buf = arrays["vocab_buf"]
+            vocab_lens = arrays["vocab_lens"]
+            terms = []
+            off = 0
+            for length in vocab_lens:
+                length = int(length)
+                terms.append(vocab_buf[off : off + length].tobytes().decode("utf-8"))
+                off += length
+            vocab = {term: tid for tid, term in enumerate(terms)}
+        self._vocab = vocab
+        self._vocab_terms = terms
+
+        # Defer doc_freqs construction: it is only needed for the fallback
+        # reference scorer and for direct attribute inspection.
+        self._doc_freqs_native_arrays = arrays
+        self._doc_freqs = None
+        return terms
 
     def _initialize(self, corpus):
         nd = {}  # word -> number of documents containing the word
@@ -72,9 +255,11 @@ class BM25:
                 if word not in frequencies:
                     frequencies[word] = 0
                 frequencies[word] += 1
-            self.doc_freqs.append(frequencies)
+            if self._doc_freqs is None:
+                self._doc_freqs = []
+            self._doc_freqs.append(frequencies)
 
-            for word, freq in frequencies.items():
+            for word in frequencies:
                 try:
                     nd[word] += 1
                 except KeyError:
@@ -88,7 +273,7 @@ class BM25:
     def _calc_idf(self, nd):
         raise NotImplementedError()
 
-    def _build_native_index(self, nd) -> str:
+    def _build_native_index(self, nd=None, arrays=None) -> str:
         """Hand the numeric index to the native kernel; return the backend name.
 
         Falls back to the vendored reference scorer when the native library is
@@ -97,38 +282,65 @@ class BM25:
         contract we mirror.
 
         The kernel builds the CSR postings and bakes the idf-weighted scores
-        itself; this method only assembles doc-major term streams. The loops
-        below are deliberately pushed into C-level iteration (`map` over a
-        dict's `.get`, `list.extend` over `dict.values()`, one numpy
-        conversion per stream) because this is the build-time hot path.
+        itself; this method only assembles doc-major term streams.
         """
         if self.avgdl == 0:
             self._native_index = None
             return "fallback"
-        # Vocabulary in first-appearance order (same iteration order as `nd`).
-        self._vocab = {word: tid for tid, word in enumerate(nd)}
-        vocab_get = self._vocab.get
-        doc_offsets = [0]
-        tids: list[int] = []
-        freqs: list[float] = []
-        for frequencies in self.doc_freqs:
-            tids.extend(map(vocab_get, frequencies))
-            freqs.extend(frequencies.values())
-            doc_offsets.append(len(tids))
-        idf_values = np.array([self.idf[word] for word in self._vocab], dtype=np.float64)
-        # Vocabulary as fixed-width 'S' slots in id order (dict iteration
-        # order), for the kernel's native token->id map. The native map keys
-        # are byte strings, so it may only be used when every term is a `str`
-        # — numpy 'S' conversion would silently stringify non-str keys and
-        # could conflate distinct dict keys (e.g. int 1 with "1"). Non-ASCII
-        # terms cannot encode to 'S' either. Any refusal simply leaves the
-        # id-mapping path in charge (identical results, slower mapping).
-        vocab_terms = None
-        if all(map(str.__instancecheck__, self._vocab)):
-            try:
-                vocab_terms = np.asarray(list(self._vocab), dtype="S")
-            except (UnicodeEncodeError, TypeError, ValueError):
-                vocab_terms = None
+        if arrays is not None:
+            self._vocab = arrays.get("vocab")
+            if self._vocab is None:
+                # Reconstruct the vocabulary mapping from the byte buffer if the
+                # caller did not pre-build it.
+                vocab_buf = arrays["vocab_buf"]
+                vocab_lens = arrays["vocab_lens"]
+                terms = []
+                off = 0
+                for length in vocab_lens:
+                    length = int(length)
+                    terms.append(vocab_buf[off : off + length].tobytes().decode("utf-8"))
+                    off += length
+                self._vocab = {term: tid for tid, term in enumerate(terms)}
+            idf_values = arrays.get("idf")
+            if idf_values is None:
+                idf_values = np.array([self.idf[word] for word in self._vocab], dtype=np.float64)
+            doc_offsets = arrays["doc_offsets"]
+            doc_tids = arrays["doc_tids"]
+            doc_freqs = arrays["doc_freqs"]
+            vocab_terms = None
+            if all(type(t) is str for t in self._vocab):
+                try:
+                    vocab_terms = np.asarray(list(self._vocab), dtype="S")
+                except (UnicodeEncodeError, TypeError, ValueError):
+                    vocab_terms = None
+        else:
+            # Vocabulary in first-appearance order (same iteration order as `nd`).
+            self._vocab = {word: tid for tid, word in enumerate(nd)}
+            vocab_get = self._vocab.get
+            doc_offsets = [0]
+            tids: list[int] = []
+            freqs: list[float] = []
+            for frequencies in self.doc_freqs:
+                tids.extend(map(vocab_get, frequencies))
+                freqs.extend(frequencies.values())
+                doc_offsets.append(len(tids))
+            idf_values = np.array([self.idf[word] for word in self._vocab], dtype=np.float64)
+            doc_offsets = np.array(doc_offsets, dtype=np.int64)
+            doc_tids = np.array(tids, dtype=np.int32)
+            doc_freqs = np.array(freqs, dtype=np.float64)
+            # Vocabulary as fixed-width 'S' slots in id order (dict iteration
+            # order), for the kernel's native token->id map. The native map keys
+            # are byte strings, so it may only be used when every term is a `str`
+            # — numpy 'S' conversion would silently stringify non-str keys and
+            # could conflate distinct dict keys (e.g. int 1 with "1"). Non-ASCII
+            # terms cannot encode to 'S' either. Any refusal simply leaves the
+            # id-mapping path in charge (identical results, slower mapping).
+            vocab_terms = None
+            if all(map(str.__instancecheck__, self._vocab)):
+                try:
+                    vocab_terms = np.asarray(list(self._vocab), dtype="S")
+                except (UnicodeEncodeError, TypeError, ValueError):
+                    vocab_terms = None
         try:
             self._native_index = NativeIndex(
                 doc_len=np.array(self.doc_len, dtype=np.float64),
@@ -137,9 +349,9 @@ class BM25:
                 b=float(self.b),
                 delta=float(self._delta),
                 variant=self._variant,
-                doc_offsets=np.array(doc_offsets, dtype=np.int64),
-                doc_tids=np.array(tids, dtype=np.int32),
-                doc_freqs=np.array(freqs, dtype=np.float64),
+                doc_offsets=doc_offsets,
+                doc_tids=doc_tids,
+                doc_freqs=doc_freqs,
                 idf=idf_values,
                 vocab_terms=vocab_terms,
             )

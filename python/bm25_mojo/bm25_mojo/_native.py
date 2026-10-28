@@ -12,18 +12,17 @@ caller falls back to the vendored pure-Python reference implementation.
 Set ``BM25_MOJO_DISABLE_NATIVE=1`` to force that fallback (used by the
 differential test suite).
 
-Stable C ABI (v1)::
+Stable C ABI::
 
-    int32_t  bm25mojo_abi_version(void)
-    void*    bm25mojo_index_create(int64_t n_docs, const double* doc_len,
-                                   double avgdl, double k1, double b,
-                                   double delta, int32_t variant,
-                                   int64_t n_terms, const int64_t* offsets,
-                                   const int32_t* docs, const double* freqs,
-                                   const double* idf)
-    int32_t  bm25mojo_score(void* handle, const int32_t* qids,
-                            int64_t n_query, double* out_scores)
-    void     bm25mojo_index_destroy(void* handle)
+    int32_t  bm25mojo_abi_version(void)              -> 4
+    void*    bm25mojo_build_index_corpus(...)
+    void     bm25mojo_build_result_free(result)
+    void*    bm25mojo_index_create(...)
+    int32_t  bm25mojo_vocab_attach(handle, ...)
+    int32_t  bm25mojo_score(handle, ...)
+    int32_t  bm25mojo_score_batch(handle, ...)
+    int32_t  bm25mojo_score_batch_str(handle, ...)
+    void     bm25mojo_index_destroy(handle)
 """
 
 from __future__ import annotations
@@ -37,7 +36,10 @@ import numpy as np
 
 # Must equal ABI_VERSION in kernels/bm25/src/bm25mojo.mojo. A mismatch means
 # the installed wheel and the resolved shared library disagree; fall back.
-ABI_VERSION = 3
+ABI_VERSION = 4
+# Older libraries back to ABI v3 are still usable for scoring and for the
+# Python-side build path, so the handshake accepts [ABI_VERSION_MIN, ABI_VERSION].
+ABI_VERSION_MIN = 3
 
 # Score-formula variants, mirrored from the kernel.
 VARIANT_OKAPI = 0
@@ -89,7 +91,7 @@ def _candidate_paths() -> list[tuple[str, str]]:
     return out
 
 
-def _bind_abi(lib: ctypes.CDLL) -> None:
+def _bind_abi(lib: ctypes.CDLL, abi: int) -> None:
     # Every pointer argument is declared c_void_p and fed a plain integer
     # address (numpy's `arr.ctypes.data`) at call time: ctypes converts a
     # Python int to void* without constructing any per-call pointer object,
@@ -97,7 +99,7 @@ def _bind_abi(lib: ctypes.CDLL) -> None:
     vp = ctypes.c_void_p
     lib.bm25mojo_abi_version.argtypes = []
     lib.bm25mojo_abi_version.restype = ctypes.c_int32
-    # ABI v2: the kernel builds the CSR postings and bakes idf-weighted
+    # ABI v2+: the kernel builds the CSR postings and bakes idf-weighted
     # scores from doc-major term-frequency streams.
     lib.bm25mojo_index_create.argtypes = [
         ctypes.c_int64,  # n_docs
@@ -131,17 +133,43 @@ def _bind_abi(lib: ctypes.CDLL) -> None:
     lib.bm25mojo_score_batch_str.restype = ctypes.c_int32
     lib.bm25mojo_index_destroy.argtypes = [vp]
     lib.bm25mojo_index_destroy.restype = None
+    if abi >= 4:
+        lib.bm25mojo_build_index_corpus.argtypes = [
+            ctypes.c_int64,  # n_docs
+            vp,  # tokens[total_bytes]
+            vp,  # doc_offsets[n_docs + 1]
+            ctypes.c_int32,  # variant
+            ctypes.c_double,  # k1
+            ctypes.c_double,  # b
+            ctypes.c_double,  # delta
+            ctypes.c_double,  # epsilon
+        ]
+        lib.bm25mojo_build_index_corpus.restype = ctypes.c_void_p
+        lib.bm25mojo_build_index_tids.argtypes = [
+            ctypes.c_int64,  # n_docs
+            vp,  # token_tids[total_tokens]
+            vp,  # doc_offsets[n_docs + 1]
+            ctypes.c_int32,  # variant
+            ctypes.c_double,  # k1
+            ctypes.c_double,  # b
+            ctypes.c_double,  # delta
+            ctypes.c_double,  # epsilon
+        ]
+        lib.bm25mojo_build_index_tids.restype = ctypes.c_void_p
+        lib.bm25mojo_build_result_free.argtypes = [vp]
+        lib.bm25mojo_build_result_free.restype = None
 
 
 _LOCK = threading.Lock()
 _LIB: ctypes.CDLL | None = None
+_LIB_ABI: int | None = None
 _LIB_SOURCE: str | None = None
 _LOAD_ERROR: str | None = None
 
 
 def _load() -> ctypes.CDLL:
     """Resolve, dlopen, and ABI-handshake the native kernel. Never caches failure."""
-    global _LIB, _LIB_SOURCE, _LOAD_ERROR
+    global _LIB, _LIB_ABI, _LIB_SOURCE, _LOAD_ERROR
     if os.environ.get(_ENV_DISABLE) == "1":
         raise NativeUnavailable(f"native kernel disabled by {_ENV_DISABLE}=1")
     if _LIB is not None:
@@ -160,17 +188,24 @@ def _load() -> ctypes.CDLL:
                     errors.append(f"{label} ({path}): {exc}")
                     continue
                 try:
-                    _bind_abi(lib)
+                    lib.bm25mojo_abi_version.argtypes = []
+                    lib.bm25mojo_abi_version.restype = ctypes.c_int32
                     abi = int(lib.bm25mojo_abi_version())
                 except Exception as exc:  # missing/renamed symbol = wrong lib
                     errors.append(f"{label} ({path}): ABI not recognized: {exc}")
                     continue
-                if abi != ABI_VERSION:
+                if abi < ABI_VERSION_MIN or abi > ABI_VERSION:
                     errors.append(
-                        f"{label} ({path}): native ABI v{abi} != wrapper ABI v{ABI_VERSION}"
+                        f"{label} ({path}): native ABI v{abi} not in supported range "
+                        f"v{ABI_VERSION_MIN}..v{ABI_VERSION}"
                     )
                     continue
-                _LIB, _LIB_SOURCE = lib, f"{label} ({path})"
+                try:
+                    _bind_abi(lib, abi)
+                except Exception as exc:
+                    errors.append(f"{label} ({path}): ABI not recognized: {exc}")
+                    continue
+                _LIB, _LIB_ABI, _LIB_SOURCE = lib, abi, f"{label} ({path})"
                 _LOAD_ERROR = None
                 return lib
             except OSError as exc:
@@ -208,6 +243,162 @@ def backend_info() -> dict:
     info["native_source"] = _LIB_SOURCE
     info["abi_version_native"] = int(lib.bm25mojo_abi_version())
     return info
+
+
+def native_build_available() -> bool:
+    """True if the loaded native library supports the ABI v4 corpus builder."""
+    try:
+        _load()
+    except NativeUnavailable:
+        return False
+    return _LIB_ABI is not None and _LIB_ABI >= 4
+
+
+class _BuildResultC(ctypes.Structure):
+    """C layout of the Mojo BuildResult struct."""
+
+    _fields_ = [
+        ("status", ctypes.c_int32),
+        ("_pad", ctypes.c_int32),
+        ("n_docs", ctypes.c_int64),
+        ("n_terms", ctypes.c_int64),
+        ("nnz", ctypes.c_int64),
+        ("avgdl", ctypes.c_double),
+        ("doc_len", ctypes.c_void_p),
+        ("doc_offsets", ctypes.c_void_p),
+        ("doc_tids", ctypes.c_void_p),
+        ("doc_freqs", ctypes.c_void_p),
+        ("df", ctypes.c_void_p),
+        ("vocab_buf", ctypes.c_void_p),
+        ("vocab_lens", ctypes.c_void_p),
+    ]
+
+
+_CTYPE_FOR_DTYPE = {
+    np.float64: ctypes.c_double,
+    np.int64: ctypes.c_int64,
+    np.int32: ctypes.c_int32,
+    np.uint8: ctypes.c_uint8,
+}
+
+
+def _array_from_ptr(ptr: int, dtype: np.dtype, shape: tuple[int, ...]) -> np.ndarray:
+    """Wrap a C pointer as a temporary numpy array (caller must copy to own)."""
+    c_type = _CTYPE_FOR_DTYPE[dtype]
+    c_ptr = ctypes.cast(ptr, ctypes.POINTER(c_type))
+    return np.ctypeslib.as_array(c_ptr, shape=shape)
+
+
+def _build_result_to_dict(result_ptr: int) -> dict:
+    """Copy a native BuildResult into Python-owned numpy arrays and free it."""
+    lib = _load()
+    result = ctypes.cast(result_ptr, ctypes.POINTER(_BuildResultC)).contents
+    if result.status != 0:
+        lib.bm25mojo_build_result_free(result_ptr)
+        raise NativeUnavailable(f"native corpus build failed with status {result.status}")
+    n_terms = int(result.n_terms)
+    n_docs_out = int(result.n_docs)
+    nnz = int(result.nnz)
+    avgdl = float(result.avgdl)
+    try:
+        doc_len = _array_from_ptr(result.doc_len, np.float64, (n_docs_out,)).copy()
+        doc_offsets_out = _array_from_ptr(result.doc_offsets, np.int64, (n_docs_out + 1,)).copy()
+        doc_tids = _array_from_ptr(result.doc_tids, np.int32, (nnz,)).copy()
+        doc_freqs = _array_from_ptr(result.doc_freqs, np.float64, (nnz,)).copy()
+        df = _array_from_ptr(result.df, np.int64, (n_terms,)).copy()
+        vocab_lens = _array_from_ptr(result.vocab_lens, np.int32, (n_terms,)).copy()
+        vocab_buf_size = int(vocab_lens.sum())
+        vocab_buf = _array_from_ptr(result.vocab_buf, np.uint8, (vocab_buf_size,)).copy()
+    finally:
+        lib.bm25mojo_build_result_free(result_ptr)
+    return {
+        "n_docs": n_docs_out,
+        "n_terms": n_terms,
+        "nnz": nnz,
+        "avgdl": avgdl,
+        "doc_len": doc_len,
+        "doc_offsets": doc_offsets_out,
+        "doc_tids": doc_tids,
+        "doc_freqs": doc_freqs,
+        "df": df,
+        "vocab_buf": vocab_buf,
+        "vocab_lens": vocab_lens,
+    }
+
+
+def build_index_corpus(
+    n_docs: int,
+    tokens: bytes,
+    doc_offsets: np.ndarray,
+    variant: int,
+    k1: float,
+    b: float,
+    delta: float,
+    epsilon: float,
+) -> dict:
+    """Native corpus ingestion: length-prefixed UTF-8 token stream -> index data.
+
+    The returned arrays are freshly allocated numpy copies; the Mojo-side
+    result object is freed before returning. Raises :class:`NativeUnavailable`
+    on any build error so the caller can fall back to the Python build path.
+    """
+    lib = _load()
+    if _LIB_ABI is None or _LIB_ABI < 4:
+        raise NativeUnavailable("native library does not expose ABI v4 corpus builder")
+    tokens_arr = np.frombuffer(tokens, dtype=np.uint8)
+    doc_offsets = np.ascontiguousarray(doc_offsets, dtype=np.int64)
+    result_ptr = lib.bm25mojo_build_index_corpus(
+        ctypes.c_int64(n_docs),
+        tokens_arr.ctypes.data,
+        doc_offsets.ctypes.data,
+        ctypes.c_int32(variant),
+        ctypes.c_double(k1),
+        ctypes.c_double(b),
+        ctypes.c_double(delta),
+        ctypes.c_double(epsilon),
+    )
+    if not result_ptr:
+        raise NativeUnavailable("native corpus build returned NULL")
+    return _build_result_to_dict(result_ptr)
+
+
+def build_index_tids(
+    n_docs: int,
+    token_tids: np.ndarray,
+    doc_offsets: np.ndarray,
+    variant: int,
+    k1: float,
+    b: float,
+    delta: float,
+    epsilon: float,
+) -> dict:
+    """Native corpus ingestion: term-id stream -> index data.
+
+    `token_tids` must be a contiguous int32 array of all term ids in document
+    order; `doc_offsets` has n_docs + 1 token offsets. Term ids are assigned by
+    the caller in first-appearance order and must form a dense 0..n_terms-1
+    range. The returned arrays are freshly allocated numpy copies; the Mojo-side
+    result object is freed before returning. Raises :class:`NativeUnavailable`
+    on any build error so the caller can fall back to another build path.
+    """
+    lib = _load()
+    if _LIB_ABI is None or _LIB_ABI < 4:
+        raise NativeUnavailable("native library does not expose ABI v4 term-id builder")
+    token_tids = np.ascontiguousarray(token_tids, dtype=np.int32)
+    doc_offsets = np.ascontiguousarray(doc_offsets, dtype=np.int64)
+    result_ptr = lib.bm25mojo_build_index_tids(
+        ctypes.c_int64(n_docs),
+        token_tids.ctypes.data,
+        doc_offsets.ctypes.data,
+        ctypes.c_int32(variant),
+        ctypes.c_double(k1),
+        ctypes.c_double(b),
+        ctypes.c_double(delta),
+        ctypes.c_double(epsilon),
+    )
+    if not result_ptr:
+        raise NativeUnavailable("native term-id build returned NULL")
+    return _build_result_to_dict(result_ptr)
 
 
 class NativeIndex:

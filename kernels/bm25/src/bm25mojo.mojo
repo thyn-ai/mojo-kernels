@@ -4,11 +4,14 @@ Written fresh from the textbook BM25 family of ranking functions
 (Trotman et al., "Improvements to BM25 and Language Models Examined").
 No third-party Mojo code is used or adapted.
 
-Exported C ABI v3 (batch-shaped: the index is built once from doc-major
-term-frequency streams, then each call scores one whole token-id query — or
-one whole batch of queries — against the whole corpus):
+Exported C ABI v4:
 
-    int32_t  bm25mojo_abi_version(void)              -> 3
+    int32_t  bm25mojo_abi_version(void)              -> 4
+    void*    bm25mojo_build_index_corpus(n_docs, tokens, doc_offsets,
+                                         variant, k1, b, delta, epsilon)
+    void*    bm25mojo_build_index_tids(n_docs, token_tids, doc_offsets,
+                                       variant, k1, b, delta, epsilon)
+    void     bm25mojo_build_result_free(result)
     void*    bm25mojo_index_create(n_docs, doc_len, avgdl, k1, b, delta,
                                    variant, n_terms, doc_offsets, doc_tids,
                                    doc_freqs, idf)
@@ -19,6 +22,13 @@ one whole batch of queries — against the whole corpus):
     int32_t  bm25mojo_score_batch_str(handle, toks, width, counts,
                                       n_queries, out_panel)
     void     bm25mojo_index_destroy(handle)
+
+ABI v4 adds native corpus ingestion. The wrapper can hand the kernel either a
+raw UTF-8 token stream (``bm25mojo_build_index_corpus``) or a pre-tokenized
+stream of term ids (``bm25mojo_build_index_tids``). The term-id path moves
+vocabulary assignment to Python (where hashable-token dicts are extremely fast)
+and lets the kernel focus on frequency counting and CSR preparation, which is
+the faster shape for the typical str-token corpus.
 
 ABI v2 changes versus v1 (motivated by benchmarks/AUTOPSY-bm25s.md):
 
@@ -92,7 +102,7 @@ from std.memory.alloc import unsafe_alloc
 from std.origin import MutUntrackedOrigin
 from std.sys import simd_width_of
 
-comptime ABI_VERSION: Int32 = 3
+comptime ABI_VERSION: Int32 = 4
 
 # Fast-path magnitude bound for the BM25Plus floor decomposition (see module
 # docs): Float64 max / 2. A query whose per-term |floor| + max|excess| sum
@@ -111,12 +121,562 @@ comptime VARIANT_PLUS: Int32 = 2
 # Native SIMD width for float64 on the build target (2 on NEON, 4 on AVX2).
 comptime WIDTH = simd_width_of[DType.float64]()
 
+# Int64 bounds as literals (Mojo has no Int64.MAX constant in scope here).
+comptime I64_MAX: Int64 = 9223372036854775807
+comptime I64_POW2_MAX: Int64 = 1 << 62  # 2^62, largest power of two in Int64
+
 # C-side pointer spellings (untracked origin: the caller owns the lifetime
 # of anything passed in; the library owns what it allocates).
 comptime F64Ptr = Pointer[Float64, MutUntrackedOrigin]
 comptime I32Ptr = Pointer[Int32, MutUntrackedOrigin]
 comptime I64Ptr = Pointer[Int64, MutUntrackedOrigin]
+comptime U8Ptr = Pointer[UInt8, MutUntrackedOrigin]
 comptime Handle = Optional[Pointer[UInt8, MutUntrackedOrigin]]
+
+
+# ---------------------------------------------------------------------------
+# ABI v4: native corpus ingestion
+# ---------------------------------------------------------------------------
+
+
+struct BuildResult(Copyable, Movable):
+    """Output of bm25mojo_build_index_corpus; caller copies then frees.
+
+    The explicit ``_pad`` field keeps the C/ctypes layout bit-identical to
+    ``bm25_mojo._native._BuildResultC``: ``status`` is a 32-bit status code,
+    the next 32 bits are unused padding to 64-bit-align ``n_docs``, and every
+    subsequent field is 64-bit aligned. Relying on implicit compiler padding
+    would be fragile across Mojo versions.
+    """
+
+    var status: Int32
+    var _pad: Int32
+    var n_docs: Int64
+    var n_terms: Int64
+    var nnz: Int64
+    var avgdl: Float64
+    var doc_len: F64Ptr
+    var doc_offsets: I64Ptr
+    var doc_tids: I32Ptr
+    var doc_freqs: F64Ptr
+    var df: I64Ptr
+    var vocab_buf: U8Ptr
+    var vocab_lens: I32Ptr
+
+    def __init__(
+        out self,
+        status: Int32,
+        n_docs: Int64,
+        n_terms: Int64,
+        nnz: Int64,
+        avgdl: Float64,
+        doc_len: F64Ptr,
+        doc_offsets: I64Ptr,
+        doc_tids: I32Ptr,
+        doc_freqs: F64Ptr,
+        df: I64Ptr,
+        vocab_buf: U8Ptr,
+        vocab_lens: I32Ptr,
+    ):
+        self.status = status
+        self._pad = 0
+        self.n_docs = n_docs
+        self.n_terms = n_terms
+        self.nnz = nnz
+        self.avgdl = avgdl
+        self.doc_len = doc_len
+        self.doc_offsets = doc_offsets
+        self.doc_tids = doc_tids
+        self.doc_freqs = doc_freqs
+        self.df = df
+        self.vocab_buf = vocab_buf
+        self.vocab_lens = vocab_lens
+
+
+def _next_pow2(n: Int64) -> Int64:
+    if n <= 1:
+        return 1
+    # Guard against overflow: the next power of two past 2^62 does not fit
+    # in a signed Int64, so saturate at the largest representable power of two.
+    if n > I64_POW2_MAX:
+        return I64_POW2_MAX
+    var p = Int64(1)
+    while p < n:
+        p <<= 1
+    return p
+
+
+def _fnv1a_bytes(bytes: U8Ptr, n: Int) -> UInt64:
+    """FNV-1a 64-bit over `n` bytes."""
+    var h = UInt64(14695981039346656037)
+    for i in range(n):
+        h ^= UInt64(Int(bytes[unsafe_offset=i]))
+        h *= UInt64(1099511628211)
+    return h
+
+
+def _token_equal(
+    tokens: U8Ptr,
+    off_a: Int64,
+    len_a: Int,
+    off_b: Int64,
+    len_b: Int,
+) -> Bool:
+    if len_a != len_b:
+        return False
+    for k in range(len_a):
+        if tokens[unsafe_offset=Int(off_a + Int64(k))] != tokens[
+            unsafe_offset=Int(off_b + Int64(k))
+        ]:
+            return False
+    return True
+
+
+struct BuildScratch:
+    """Transient state for the two-pass native corpus builder."""
+
+    var cap: Int64
+    var used: Pointer[Int8, MutUntrackedOrigin]
+    var keys_off: I64Ptr
+    var keys_len: I32Ptr
+    var values: I32Ptr
+    var term_off: I64Ptr
+    var term_len: I32Ptr
+    var token_tids: I32Ptr
+    var df: I64Ptr
+    var count: I64Ptr
+
+    def __init__(
+        out self,
+        cap: Int64,
+        total_tokens: Int64,
+        n_docs: Int64,
+    ):
+        self.cap = cap
+        self.used = unsafe_alloc[Int8](Int(cap))
+        self.keys_off = unsafe_alloc[Int64](Int(cap))
+        self.keys_len = unsafe_alloc[Int32](Int(cap))
+        self.values = unsafe_alloc[Int32](Int(cap))
+        self.term_off = unsafe_alloc[Int64](Int(total_tokens))
+        self.term_len = unsafe_alloc[Int32](Int(total_tokens))
+        self.token_tids = unsafe_alloc[Int32](Int(total_tokens))
+        self.df = unsafe_alloc[Int64](Int(total_tokens))
+        self.count = unsafe_alloc[Int64](Int(total_tokens))
+        for i in range(Int(cap)):
+            self.used[unsafe_offset=i] = 0
+
+    def free(self):
+        self.used.unsafe_free()
+        self.keys_off.unsafe_free()
+        self.keys_len.unsafe_free()
+        self.values.unsafe_free()
+        self.term_off.unsafe_free()
+        self.term_len.unsafe_free()
+        self.token_tids.unsafe_free()
+        self.df.unsafe_free()
+        self.count.unsafe_free()
+
+
+def _lookup_or_insert_bytes(
+    tokens: U8Ptr,
+    off: Int64,
+    L: Int,
+    mut scratch: BuildScratch,
+    mut n_terms: Int64,
+) -> Int32:
+    """Map one token byte slice to a term id, creating the entry if needed."""
+    var h = _fnv1a_bytes(tokens.unsafe_offset(Int(off)), L)
+    var mask = Int(scratch.cap - 1)
+    var i = Int(h % UInt64(scratch.cap))
+    while True:
+        if scratch.used[unsafe_offset=i] == 0:
+            scratch.used[unsafe_offset=i] = 1
+            scratch.keys_off[unsafe_offset=i] = off
+            scratch.keys_len[unsafe_offset=i] = Int32(L)
+            scratch.values[unsafe_offset=i] = Int32(n_terms)
+            scratch.term_off[unsafe_offset=Int(n_terms)] = off
+            scratch.term_len[unsafe_offset=Int(n_terms)] = Int32(L)
+            n_terms += 1
+            return scratch.values[unsafe_offset=i]
+        if Int(scratch.keys_len[unsafe_offset=i]) == L:
+            if _token_equal(
+                tokens,
+                scratch.keys_off[unsafe_offset=i],
+                L,
+                off,
+                L,
+            ):
+                return scratch.values[unsafe_offset=i]
+        i = (i + 1) & mask
+
+
+def _build_index_corpus_impl(
+    n_docs: Int64,
+    tokens: U8Ptr,
+    doc_offsets: I64Ptr,
+    variant: Int32,
+    k1: Float64,
+    b: Float64,
+    delta: Float64,
+    epsilon: Float64,
+) -> Handle:
+    if (
+        n_docs <= 0
+        or variant < VARIANT_OKAPI
+        or variant > VARIANT_PLUS
+    ):
+        return None
+
+    var total_bytes = doc_offsets[unsafe_offset=Int(n_docs)]
+    if total_bytes < 0:
+        return None
+
+    # Validate byte-offset monotonicity.
+    var prev = Int64(0)
+    for d in range(Int(n_docs) + 1):
+        var off = doc_offsets[unsafe_offset=d]
+        if off < prev or off > total_bytes:
+            return None
+        prev = off
+
+    # There cannot be more tokens than bytes, so size transient buffers for the
+    # worst case and trim later. The hash table is sized for that same bound.
+    var max_tokens = total_bytes
+    if max_tokens < 1:
+        max_tokens = 1
+    # Guard the hash-table capacity calculation against signed Int64 overflow:
+    # an impossibly large corpus cannot be processed, so fail cleanly.
+    if max_tokens > I64_MAX // 2:
+        return None
+    var cap = _next_pow2(max_tokens * 2)
+    if cap < 16:
+        cap = 16
+    var scratch = BuildScratch(cap, max_tokens, n_docs)
+
+    var doc_token_offsets = unsafe_alloc[Int64](Int(n_docs) + 1)
+    doc_token_offsets[unsafe_offset=0] = 0
+
+    # Pass 1: read each document's length-prefixed UTF-8 tokens and assign term
+    # ids in first-appearance order. doc_token_offsets records token boundaries.
+    var n_terms = Int64(0)
+    var total_tokens = Int64(0)
+    for d in range(Int(n_docs)):
+        var start = doc_offsets[unsafe_offset=d]
+        var end = doc_offsets[unsafe_offset=d + 1]
+        var i = start
+        while i < end:
+            if i + 4 > end:
+                doc_token_offsets.unsafe_free()
+                scratch.free()
+                return None
+            var L = Int(tokens[unsafe_offset=Int(i)])
+            L |= Int(tokens[unsafe_offset=Int(i + 1)]) << 8
+            L |= Int(tokens[unsafe_offset=Int(i + 2)]) << 16
+            L |= Int(tokens[unsafe_offset=Int(i + 3)]) << 24
+            var tok_start = i + 4
+            var tok_end = tok_start + Int64(L)
+            if tok_end > end or tok_end < tok_start:
+                doc_token_offsets.unsafe_free()
+                scratch.free()
+                return None
+            scratch.token_tids[unsafe_offset=Int(total_tokens)] = _lookup_or_insert_bytes(
+                tokens, tok_start, L, scratch, n_terms
+            )
+            total_tokens += 1
+            i = tok_end
+        doc_token_offsets[unsafe_offset=d + 1] = total_tokens
+
+    if n_terms == 0:
+        # rank_bm25 raises ZeroDivisionError on an empty vocabulary; force the
+        # Python wrapper down its reference build path by reporting failure.
+        doc_token_offsets.unsafe_free()
+        scratch.free()
+        return None
+
+    # Pass 2: per-document frequencies and document frequencies.
+    for t in range(Int(n_terms)):
+        scratch.df[unsafe_offset=t] = 0
+        scratch.count[unsafe_offset=t] = 0
+
+    var doc_len = unsafe_alloc[Float64](Int(n_docs))
+    var doc_offsets_out = unsafe_alloc[Int64](Int(n_docs) + 1)
+    var tids_capacity = Int(total_tokens)
+    if tids_capacity < 1:
+        tids_capacity = 1
+    var doc_tids = unsafe_alloc[Int32](tids_capacity)
+    var doc_freqs = unsafe_alloc[Float64](tids_capacity)
+    var pos = Int64(0)
+    doc_offsets_out[unsafe_offset=0] = 0
+
+    for d in range(Int(n_docs)):
+        var start = doc_token_offsets[unsafe_offset=d]
+        var end = doc_token_offsets[unsafe_offset=d + 1]
+        doc_len[unsafe_offset=d] = Float64(end - start)
+
+        # Count frequencies; increment df on the first sighting in this doc.
+        for e in range(Int(start), Int(end)):
+            var t = Int(scratch.token_tids[unsafe_offset=e])
+            if scratch.count[unsafe_offset=t] == 0:
+                scratch.df[unsafe_offset=t] += 1
+            scratch.count[unsafe_offset=t] += 1
+
+        # Emit unique (tid, freq) pairs for this doc in first-appearance order.
+        for e in range(Int(start), Int(end)):
+            var t = Int(scratch.token_tids[unsafe_offset=e])
+            var c = scratch.count[unsafe_offset=t]
+            if c > 0:
+                doc_tids[unsafe_offset=Int(pos)] = Int32(t)
+                doc_freqs[unsafe_offset=Int(pos)] = Float64(c)
+                pos += 1
+                scratch.count[unsafe_offset=t] = 0
+        doc_offsets_out[unsafe_offset=d + 1] = pos
+
+    doc_token_offsets.unsafe_free()
+    var nnz = pos
+
+    # Compute avgdl.
+    var total_len = Float64(0.0)
+    for d in range(Int(n_docs)):
+        total_len += doc_len[unsafe_offset=d]
+    var avgdl = total_len / Float64(n_docs)
+
+    # Copy document frequencies into the result. Idfs are intentionally left to
+    # the Python wrapper, which evaluates them with the same ``math.log``
+    # implementation as rank_bm25 and applies the Okapi epsilon floor; that is
+    # the only way to keep the ``idf`` dict bit-identical with the reference.
+    var df = unsafe_alloc[Int64](Int(n_terms))
+    for t in range(Int(n_terms)):
+        df[unsafe_offset=t] = scratch.df[unsafe_offset=t]
+
+    # Pack vocabulary terms into a contiguous byte buffer.
+    var vocab_bytes = Int64(0)
+    for t in range(Int(n_terms)):
+        vocab_bytes += Int64(scratch.term_len[unsafe_offset=t])
+    var vocab_buf_size = Int(vocab_bytes)
+    if vocab_buf_size < 1:
+        vocab_buf_size = 1
+    var vocab_buf = unsafe_alloc[UInt8](vocab_buf_size)
+    var vocab_lens = unsafe_alloc[Int32](Int(n_terms))
+    var write = 0
+    for t in range(Int(n_terms)):
+        var L = Int(scratch.term_len[unsafe_offset=t])
+        var off = Int(scratch.term_off[unsafe_offset=t])
+        for k in range(L):
+            vocab_buf[unsafe_offset=write + k] = tokens[unsafe_offset=off + k]
+        vocab_lens[unsafe_offset=t] = Int32(L)
+        write += L
+
+    scratch.free()
+
+    var result = unsafe_alloc[BuildResult](1)
+    result[] = BuildResult(
+        Int32(0),
+        n_docs,
+        n_terms,
+        nnz,
+        avgdl,
+        doc_len,
+        doc_offsets_out,
+        doc_tids,
+        doc_freqs,
+        df,
+        vocab_buf,
+        vocab_lens,
+    )
+    return result.unsafe_bitcast[UInt8]()
+
+
+@export
+def bm25mojo_build_index_corpus(
+    n_docs: Int64,
+    tokens: U8Ptr,
+    doc_offsets: I64Ptr,
+    variant: Int32,
+    k1: Float64,
+    b: Float64,
+    delta: Float64,
+    epsilon: Float64,
+) abi("C") -> Handle:
+    """Native corpus ingestion: length-prefixed UTF-8 token stream -> index data.
+
+    `tokens` is the concatenation of every document's tokens, each encoded as a
+    4-byte little-endian length followed by that many UTF-8 bytes; `doc_offsets`
+    has n_docs + 1 byte offsets into `tokens`. On success returns a BuildResult
+    pointer (status == 0) whose arrays the caller must copy and then free with
+    bm25mojo_build_result_free. On any error returns NULL.
+    """
+    return _build_index_corpus_impl(
+        n_docs, tokens, doc_offsets, variant, k1, b, delta, epsilon
+    )
+
+
+def _build_index_tids_impl(
+    n_docs: Int64,
+    token_tids: I32Ptr,
+    doc_offsets: I64Ptr,
+    variant: Int32,
+    k1: Float64,
+    b: Float64,
+    delta: Float64,
+    epsilon: Float64,
+) -> Handle:
+    """Native corpus ingestion from pre-assigned term ids.
+
+    Python assigns term ids in first-appearance order, so the kernel only has
+    to count per-document frequencies and document frequencies. No byte parsing,
+    no hash table, no vocabulary buffer.
+    """
+    if (
+        n_docs <= 0
+        or variant < VARIANT_OKAPI
+        or variant > VARIANT_PLUS
+    ):
+        return None
+
+    var total_tokens = doc_offsets[unsafe_offset=Int(n_docs)]
+    if total_tokens < 0:
+        return None
+
+    # Validate token-offset monotonicity.
+    var prev = Int64(0)
+    for d in range(Int(n_docs) + 1):
+        var off = doc_offsets[unsafe_offset=d]
+        if off < prev or off > total_tokens:
+            return None
+        prev = off
+
+    # Discover n_terms from the provided tids (they must be dense 0..n_terms-1).
+    var n_terms = Int64(0)
+    for i in range(Int(total_tokens)):
+        var t = Int(token_tids[unsafe_offset=i])
+        if t < 0:
+            return None
+        if Int64(t) >= n_terms:
+            n_terms = Int64(t) + 1
+
+    if n_terms == 0:
+        return None
+
+    var doc_len = unsafe_alloc[Float64](Int(n_docs))
+    var doc_offsets_out = unsafe_alloc[Int64](Int(n_docs) + 1)
+    var tids_capacity = Int(total_tokens)
+    if tids_capacity < 1:
+        tids_capacity = 1
+    var doc_tids = unsafe_alloc[Int32](tids_capacity)
+    var doc_freqs = unsafe_alloc[Float64](tids_capacity)
+
+    # Per-term transient counters (zeroed once, reused per document).
+    var count = unsafe_alloc[Int64](Int(n_terms))
+    for t in range(Int(n_terms)):
+        count[unsafe_offset=t] = 0
+    var df = unsafe_alloc[Int64](Int(n_terms))
+    for t in range(Int(n_terms)):
+        df[unsafe_offset=t] = 0
+
+    var pos = Int64(0)
+    doc_offsets_out[unsafe_offset=0] = 0
+
+    for d in range(Int(n_docs)):
+        var start = doc_offsets[unsafe_offset=d]
+        var end = doc_offsets[unsafe_offset=d + 1]
+        doc_len[unsafe_offset=d] = Float64(end - start)
+
+        # Count frequencies; increment df on the first sighting in this doc.
+        for e in range(Int(start), Int(end)):
+            var t = Int(token_tids[unsafe_offset=e])
+            if count[unsafe_offset=t] == 0:
+                df[unsafe_offset=t] += 1
+            count[unsafe_offset=t] += 1
+
+        # Emit unique (tid, freq) pairs for this doc in first-appearance order.
+        for e in range(Int(start), Int(end)):
+            var t = Int(token_tids[unsafe_offset=e])
+            var c = count[unsafe_offset=t]
+            if c > 0:
+                doc_tids[unsafe_offset=Int(pos)] = Int32(t)
+                doc_freqs[unsafe_offset=Int(pos)] = Float64(c)
+                pos += 1
+                count[unsafe_offset=t] = 0
+        doc_offsets_out[unsafe_offset=d + 1] = pos
+
+    var nnz = pos
+
+    # Compute avgdl.
+    var total_len = Float64(0.0)
+    for d in range(Int(n_docs)):
+        total_len += doc_len[unsafe_offset=d]
+    var avgdl = total_len / Float64(n_docs)
+
+    # Dummy vocabulary buffer: the term-id path owns the vocabulary on the
+    # Python side, so the kernel returns an empty buffer and zero-length terms.
+    var vocab_buf = unsafe_alloc[UInt8](1)
+    var vocab_lens = unsafe_alloc[Int32](Int(n_terms))
+    for t in range(Int(n_terms)):
+        vocab_lens[unsafe_offset=t] = 0
+
+    count.unsafe_free()
+
+    var result = unsafe_alloc[BuildResult](1)
+    result[] = BuildResult(
+        Int32(0),
+        n_docs,
+        n_terms,
+        nnz,
+        avgdl,
+        doc_len,
+        doc_offsets_out,
+        doc_tids,
+        doc_freqs,
+        df,
+        vocab_buf,
+        vocab_lens,
+    )
+    return result.unsafe_bitcast[UInt8]()
+
+
+@export
+def bm25mojo_build_index_tids(
+    n_docs: Int64,
+    token_tids: I32Ptr,
+    doc_offsets: I64Ptr,
+    variant: Int32,
+    k1: Float64,
+    b: Float64,
+    delta: Float64,
+    epsilon: Float64,
+) abi("C") -> Handle:
+    """Native corpus ingestion: term-id stream -> index data.
+
+    `token_tids` is the concatenation of every document's term ids (int32);
+    `doc_offsets` has n_docs + 1 token offsets. Term ids must be a dense
+    0..n_terms-1 range assigned in first-appearance order. On success returns a
+    BuildResult pointer (status == 0) whose arrays the caller must copy and then
+    free with bm25mojo_build_result_free. On any error returns NULL.
+    """
+    return _build_index_tids_impl(
+        n_docs, token_tids, doc_offsets, variant, k1, b, delta, epsilon
+    )
+
+
+@export
+def bm25mojo_build_result_free(result: Handle) abi("C"):
+    """Free a BuildResult and the arrays it owns."""
+    if not result:
+        return
+    var r = result.value().unsafe_bitcast[BuildResult]()
+    r[].doc_len.unsafe_free()
+    r[].doc_offsets.unsafe_free()
+    r[].doc_tids.unsafe_free()
+    r[].doc_freqs.unsafe_free()
+    r[].df.unsafe_free()
+    r[].vocab_buf.unsafe_free()
+    r[].vocab_lens.unsafe_free()
+    r.unsafe_free()
+
+
+# ---------------------------------------------------------------------------
+# ABI v3: baked scoring index
+# ---------------------------------------------------------------------------
 
 
 struct BM25Index(Copyable, Movable):
