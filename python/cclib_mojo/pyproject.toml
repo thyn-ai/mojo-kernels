@@ -7,7 +7,7 @@ name = "cclib-mojo"
 version = "0.2.4"
 description = "Fast electron-density and wavefunction-on-grid evaluation for cclib-style basis sets, powered by a Mojo kernel (pure-Python fallback included)."
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.10"
 license = "Apache-2.0"
 authors = [{ name = "Thyn" }]
 maintainers = [{ name = "Thyn" }]
