@@ -51,6 +51,19 @@ it again on the assets' kernels before the differential suites. A kernel
 built for the host CPU instead would fail with "Illegal instruction" on any
 machine without that CPU's extensions.
 
+## Platform support limits
+
+Native wheels are only produced for the CPU/OS combinations Modular's Mojo
+toolchain supports. As of the pinned `max = "26.6.*"` / `mojo = "1.1.*"`
+release, Modular's conda channel provides the `mojo` and `mojo-compiler`
+packages only for `linux-64` and `osx-arm64`; the repo's `pixi.toml`
+accordingly declares only those two platforms. There is no native Mojo
+compiler for Windows (Windows users run Mojo under WSL) or for Intel macOS,
+so the `py3-none-any` fallback wheel is the supported artifact on those
+platforms. The fallback wheel is intentionally the safety net, not a gap to
+close with unsupported cross-compilation; [`windows-fallback.yml`](./.github/workflows/windows-fallback.yml)
+proves the pure-Python path end-to-end on Windows on every relevant change.
+
 The Release is the one release-please published when the release pull
 request merged, with that pull request's CHANGELOG entry as its notes.
 Creating it is what pushes the tag that starts `release.yml`, which attaches
