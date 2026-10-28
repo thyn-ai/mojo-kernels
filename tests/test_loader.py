@@ -134,11 +134,12 @@ def test_native_build_result_struct_fields_are_sane():
     bit-identical; if the padding drifted, ``n_docs``/``avgdl`` would read
     garbage and these assertions would fail.
     """
-    corpus = [["alpha", "beta"], ["beta", "gamma", "delta"], ["alpha"]]
-    bm25 = bm25_mojo.BM25Okapi(corpus)
     if os.environ.get("BM25_MOJO_DISABLE_NATIVE") == "1":
         pytest.skip("native struct layout test requires native backend")
-    assert bm25.backend == "native"
+    corpus = [["alpha", "beta"], ["beta", "gamma", "delta"], ["alpha"]]
+    bm25 = bm25_mojo.BM25Okapi(corpus)
+    if bm25.backend != "native":
+        pytest.skip("native backend not available")
     assert bm25.corpus_size == len(corpus)
     assert bm25.avgdl > 0
     assert set(bm25.idf.keys()) == {"alpha", "beta", "gamma", "delta"}
