@@ -21,13 +21,23 @@ for that tag:
 
 | Asset | What it is |
 | --- | --- |
-| `bm25_mojo-X.Y.Z-py3-none-{manylinux_2_35_x86_64,macosx_14_0_arm64}.whl` | bm25-mojo wheels, Mojo runtime vendored |
-| `cclib_mojo-X.Y.Z-py3-none-{manylinux_2_35_x86_64,macosx_14_0_arm64}.whl` | cclib-mojo wheels, Mojo runtime vendored |
+| `bm25_mojo-X.Y.Z-py3-none-{manylinux_2_35_x86_64,macosx_14_0_arm64}.whl` | bm25-mojo platform wheels, Mojo runtime vendored |
+| `bm25_mojo-X.Y.Z-py3-none-any.whl` | bm25-mojo pure-Python fallback wheel |
+| `cclib_mojo-X.Y.Z-py3-none-{manylinux_2_35_x86_64,macosx_14_0_arm64}.whl` | cclib-mojo platform wheels, Mojo runtime vendored |
+| `cclib_mojo-X.Y.Z-py3-none-any.whl` | cclib-mojo pure-Python fallback wheel |
+| `croniter_mojo-X.Y.Z-py3-none-{manylinux_2_35_x86_64,macosx_14_0_arm64}.whl` | croniter-mojo platform wheels, Mojo runtime vendored |
+| `croniter_mojo-X.Y.Z-py3-none-any.whl` | croniter-mojo pure-Python fallback wheel |
+| `jsonpath_mojo-X.Y.Z-py3-none-{manylinux_2_35_x86_64,macosx_14_0_arm64}.whl` | jsonpath-mojo platform wheels, Mojo runtime vendored |
+| `jsonpath_mojo-X.Y.Z-py3-none-any.whl` | jsonpath-mojo pure-Python fallback wheel |
+| `jsonschema_mojo-X.Y.Z-py3-none-{manylinux_2_35_x86_64,macosx_14_0_arm64}.whl` | jsonschema-mojo platform wheels, Mojo runtime vendored |
+| `jsonschema_mojo-X.Y.Z-py3-none-any.whl` | jsonschema-mojo pure-Python fallback wheel |
+| `sacrebleu_mojo-X.Y.Z-py3-none-{manylinux_2_35_x86_64,macosx_14_0_arm64}.whl` | sacrebleu-mojo platform wheels, Mojo runtime vendored |
+| `sacrebleu_mojo-X.Y.Z-py3-none-any.whl` | sacrebleu-mojo pure-Python fallback wheel |
 | `fuse-mojo-core-X.Y.Z.tgz` | `@thyn-ai/fuse-mojo-core` (wrapper + vendored Fuse.js fallback) |
 | `fuse-mojo-linux-x64-X.Y.Z.tgz`, `fuse-mojo-darwin-arm64-X.Y.Z.tgz` | `@thyn-ai/fuse-mojo-*` platform packages, one kernel each |
-| `SHA256SUMS` | SHA-256 of the seven files above |
+| `SHA256SUMS` | SHA-256 of the 21 distributables above |
 | `<asset>.sigstore.json` (one per asset, `SHA256SUMS` included) | keyless [Sigstore](https://www.sigstore.dev/) signature bundle, signed by the `release.yml` run itself |
-| `multiple.intoto.jsonl` | [SLSA](https://slsa.dev/) build provenance covering all eight assets, from the [SLSA generic generator](https://github.com/slsa-framework/slsa-github-generator) |
+| `multiple.intoto.jsonl` | [SLSA](https://slsa.dev/) build provenance covering all 21 distributables, from the [SLSA generic generator](https://github.com/slsa-framework/slsa-github-generator) |
 
 The kernels inside them are built for a fixed instruction-set baseline, not
 for the CPU of whichever runner GitHub hands out: Linux x86-64 kernels for
@@ -190,7 +200,7 @@ gh workflow run release.yml -R thyn-ai/mojo-kernels --ref <branch> -f dry_run=tr
 ```
 
 It builds, signs and attests the branch tip and leaves two workflow
-artifacts on the run: `release-assets` (the seven distributables,
+artifacts on the run: `release-assets` (the 21 distributables,
 `SHA256SUMS`, and one `.sigstore.json` per file) and `multiple.intoto.jsonl`.
 Download them with `gh run download <run-id>` and verify them as below, with
 `--certificate-identity .../release.yml@refs/heads/<branch>` and
@@ -209,7 +219,7 @@ Download them with `gh run download <run-id>` and verify them as below, with
   already published by then, so the notes fall back to GitHub's generated
   list instead (a `Release-As:` override over commits that are all hidden
   types is how an entry ends up empty).
-- An asset set that is not exactly four wheels and three tarballs, all
+- An asset set that is not exactly 18 wheels (6 projects x 2 platforms + 6 py3-none-any fallbacks) and 3 npm tarballs, all
   carrying the version.
 - A signature bundle that does not verify against the run's own identity.
 
