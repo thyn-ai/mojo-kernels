@@ -31,7 +31,14 @@ case "$(uname -s)" in
     ;;
 esac
 
-mojo build --target-cpu "${target_cpu}" --emit shared-lib -o "build/${lib}" src/bm25mojo.mojo
+# NumPy evaluates each operation separately; contraction changes results near
+# cancelling denominators, so the parity kernel must not fuse multiply-adds.
+mojo build \
+  --target-cpu "${target_cpu}" \
+  --fp-mode contract=off \
+  --emit shared-lib \
+  -o "build/${lib}" \
+  src/bm25mojo.mojo
 if [ "$(uname -s)" = "Linux" ]; then
   bash ../../scripts/check_x86_64_baseline.sh "build/${lib}"
 fi
