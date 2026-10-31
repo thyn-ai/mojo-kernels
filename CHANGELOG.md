@@ -10,6 +10,13 @@ Entries after 0.1.0 are written by [release-please](https://github.com/googleapi
 from the Conventional Commits merged since the previous tag, in the release
 pull request that cuts the version ([RELEASING.md](RELEASING.md)).
 
+## [0.2.6](https://github.com/thyn-ai/mojo-kernels/compare/v0.2.5...v0.2.6) (2026-10-31)
+
+
+### Fixed
+
+* **bm25:** disable floating-point contraction ([#97](https://github.com/thyn-ai/mojo-kernels/issues/97)) ([3ffec01](https://github.com/thyn-ai/mojo-kernels/commit/3ffec01f8483d694c314cc10327f2c423ba59ecc))
+
 ## [0.2.5](https://github.com/thyn-ai/mojo-kernels/compare/v0.2.4...v0.2.5) (2026-10-29)
 
 
