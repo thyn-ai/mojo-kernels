@@ -888,7 +888,7 @@ jobs:
           ls -la pypi/*
 
       - name: Publish bm25-mojo
-        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+        uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
         with:
           packages-dir: pypi/bm25-mojo/
           skip-existing: true
@@ -902,31 +902,31 @@ jobs:
           password: ${{ secrets.PYPI_TOKEN }}
 
       - name: Publish cclib-mojo
-        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+        uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
         with:
           packages-dir: pypi/cclib-mojo/
           skip-existing: true
           password: ${{ secrets.PYPI_TOKEN }}
       - name: Publish croniter-mojo
-        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+        uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
         with:
           packages-dir: pypi/croniter-mojo/
           skip-existing: true
           password: ${{ secrets.PYPI_TOKEN }}
       - name: Publish jsonpath-mojo
-        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+        uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
         with:
           packages-dir: pypi/jsonpath-mojo/
           skip-existing: true
           password: ${{ secrets.PYPI_TOKEN }}
       - name: Publish jsonschema-mojo
-        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+        uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
         with:
           packages-dir: pypi/jsonschema-mojo/
           skip-existing: true
           password: ${{ secrets.PYPI_TOKEN }}
       - name: Publish sacrebleu-mojo
-        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+        uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
         with:
           packages-dir: pypi/sacrebleu-mojo/
           skip-existing: true
