@@ -38,7 +38,7 @@
     "node": ">=18"
   },
   "dependencies": {
-    "koffi": "^3.3.4"
+    "koffi": "^3.3.6"
   },
   "repository": {
     "type": "git",
