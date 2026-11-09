@@ -104,7 +104,7 @@ Warm steady-state (ms/query, lower is better):
 | 100,000 | 10 | 0.0090 | 0.0068 | **1.33x** |
 | 100,000 | 20 | 0.0115 | 0.0105 | **1.10x** |
 
-An earlier revision of this table (v1 kernel) honestly reported bm25s winning
+An earlier revision of this table (v1 kernel) reported bm25s winning
 most cells (0.45x-1.02x). The counterattack is documented layer by layer in
 [`benchmarks/AUTOPSY-bm25s.md`](benchmarks/AUTOPSY-bm25s.md): baking the
 idf-weighted scores into the CSR at index time (the bm25s trick, in float64
@@ -115,7 +115,7 @@ stayed 0-3.6e-15). float32 value storage was measured and **rejected** (9.4e-7
 max error, 94x over the parity gate); threading was not needed — all cells
 win single-threaded.
 
-The remaining honest differences:
+The remaining differences:
 
 - **Cold start**: bm25s pays a one-time numba JIT cost (**1.1-4.1 s** for
   float32, ~0.2 s float64, measured once per process) plus lazy-binding cost
@@ -194,8 +194,8 @@ Correctness gate (asserted before every timing run, element-wise vs the
 PyQuante1 reference): max abs diff **1.5e-12** — the values are the same
 numbers, not approximations. Against cclib's fastest shipping backend
 (pyquante2, NumPy-vectorized): **72x** on the same 50³ single-MO workload
-(0.689 s vs 0.0095 s, max abs diff 8.4e-13). Full methodology and the honest
-two-baseline framing are in the
+(0.689 s vs 0.0095 s, max abs diff 8.4e-13). Full methodology and the
+two-baseline comparison are in the
 [package README](python/cclib_mojo/README.md).
 
 ## Install & quickstart
