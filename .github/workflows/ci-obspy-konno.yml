@@ -13,11 +13,17 @@ permissions:
 jobs:
   test:
     name: obspy-mojo differential tests + wheel (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        # Ubuntu 26.04 links log10f@GLIBC_2.43, outside manylinux_2_35.
+        # Keep the required check and artifact names stable on the 24.04 toolchain.
+        include:
+          - os: ubuntu-latest
+            runner: ubuntu-24.04
+          - os: macos-latest
+            runner: macos-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
