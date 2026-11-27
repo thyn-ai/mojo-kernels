@@ -102,8 +102,9 @@ zero dependencies.
 
 ## pydicom-compatibility notes (pinned by the differential suite)
 
-The oracle is the published PyPI package, used as a black box. Where the
-spec and pydicom's observable behaviour differ, we match pydicom:
+The behavioral oracle is the published `pydicom==3.0.2` package. The
+frame-codec implementation is adapted from that pinned source; where the spec
+and pydicom's observable behaviour differ, we match pydicom:
 
 - Decode is lenient at the end of a segment: a literal packet whose
   payload overruns the input is silently truncated, a replicate packet
