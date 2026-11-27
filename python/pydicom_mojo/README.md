@@ -102,8 +102,9 @@ zero dependencies.
 
 ## pydicom-compatibility notes (pinned by the differential suite)
 
-The oracle is the published PyPI package, used as a black box. Where the
-spec and pydicom's observable behaviour differ, we match pydicom:
+The behavioral oracle is the published `pydicom==3.0.2` package. The
+frame-codec implementation is adapted from that pinned source; where the spec
+and pydicom's observable behaviour differ, we match pydicom:
 
 - Decode is lenient at the end of a segment: a literal packet whose
   payload overruns the input is silently truncated, a replicate packet
@@ -190,4 +191,6 @@ Source, tests, and development: <https://github.com/thyn-ai/mojo-kernels>
   and `pytest` on the active interpreter)
 - Quickstart: `python python/pydicom_mojo/examples/quickstart.py`
 
-License: Apache-2.0, © 2026 Algenta
+Package license: Apache-2.0, © 2026 Algenta. The pydicom-derived frame-codec
+portions of `pydicom_mojo/core.py` are also subject to pydicom's MIT license;
+see `LICENSE.pydicom`, included in every wheel.

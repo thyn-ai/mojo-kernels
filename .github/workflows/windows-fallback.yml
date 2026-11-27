@@ -272,6 +272,9 @@ jobs:
               *) echo "expected a py3-none-any wheel, got $whl" >&2; exit 1 ;;
             esac
           done
+          if [ "$PACKAGE" = "pydicom_mojo" ]; then
+            python tests/test_pydicom_rle_packaging.py dist-pure-windows/*.whl
+          fi
 
       - name: Install the wheel + pinned oracle into a fresh venv
         # numpy at pixi.lock's version (unless the leg overrides it) because

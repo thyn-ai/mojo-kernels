@@ -14,7 +14,9 @@ repos:
         exclude: ^(charts?|helm|infra/helm)/
       - id: check-json
       - id: end-of-file-fixer
+        exclude: ^python/pydicom_mojo/LICENSE\.pydicom$
       - id: trailing-whitespace
+        exclude: ^python/pydicom_mojo/LICENSE\.pydicom$
 
   # thyn-security-toolchain:begin -- managed by thyn-ai/security-toolchain (propagate). Edit args, not rev.
   - repo: https://github.com/thyn-ai/security-toolchain

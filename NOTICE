@@ -6,9 +6,15 @@ This product is licensed under the Apache License, Version 2.0. See LICENSE
 for the full license text.
 
 This repository contains clean-room Mojo kernels and their Python and
-TypeScript wrapper packages (bm25-mojo, cclib-mojo, @thyn-ai/fuse-mojo-core). The
+TypeScript wrapper packages (bm25-mojo, cclib-mojo, @thyn-ai/fuse-mojo-core),
+except for the pydicom-derived Python frame-codec code described below. The
 reference libraries they accelerate (rank_bm25, Fuse.js, cclib/PyQuante) are
 used only as test and benchmark oracles and are not runtime dependencies.
+
+The frame-codec functions in `python/pydicom_mojo/pydicom_mojo/core.py` are
+adapted from pydicom 3.0.2's RLE decoder and encoder. The pydicom MIT copyright
+and license text is preserved in `python/pydicom_mojo/LICENSE.pydicom` and
+included in every pydicom-mojo wheel.
 
 Fuse.js is additionally vendored as fuse-mojo's fallback backend under its
 own Apache-2.0 license; see typescript/fuse-mojo/packages/core/NOTICE.

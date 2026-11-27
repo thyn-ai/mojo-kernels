@@ -9,9 +9,11 @@ by both backends in this module, so results are identical either way; the
 differential test suite asserts byte-for-byte agreement with the published
 `pydicom` package on both paths.
 
-Decode mirrors `pydicom.pixels.decoders.rle._rle_decode_frame` and encode
-mirrors `pydicom.pixels.encoders.native._encode_frame` (pydicom 3.0.2),
-including their validation errors, warning behaviour, and edge semantics.
+Decode and encode frame assembly are adapted from pydicom 3.0.2
+(`pydicom.pixels.decoders.rle._rle_decode_frame` and
+`pydicom.pixels.encoders.native._encode_frame`), including their validation
+errors, warning behaviour, and edge semantics. The pydicom MIT copyright and
+permission notice is preserved in `LICENSE.pydicom`.
 """
 
 from __future__ import annotations
