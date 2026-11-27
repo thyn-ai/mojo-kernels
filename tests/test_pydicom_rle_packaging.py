@@ -45,7 +45,7 @@ def assert_wheel_attribution(wheel_path: str | Path) -> None:
         assert len(metadata_paths) == 1, metadata_paths
         metadata_path = metadata_paths[0]
         metadata = Parser().parsestr(archive.read(metadata_path).decode("utf-8"))
-        assert metadata["License-Expression"] == "Apache-2.0"
+        assert metadata["License-Expression"] == "Apache-2.0 AND MIT"
 
         license_files = metadata.get_all("License-File", failobj=[])
         assert len(license_files) == len(set(license_files)), license_files
