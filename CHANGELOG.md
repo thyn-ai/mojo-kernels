@@ -10,6 +10,13 @@ Entries after 0.1.0 are written by [release-please](https://github.com/googleapi
 from the Conventional Commits merged since the previous tag, in the release
 pull request that cuts the version ([RELEASING.md](RELEASING.md)).
 
+## [0.2.7](https://github.com/thyn-ai/mojo-kernels/compare/v0.2.6...v0.2.7) (2026-11-27)
+
+
+### Fixed
+
+* **pydicom:** include upstream attribution in wheels ([#109](https://github.com/thyn-ai/mojo-kernels/issues/109)) ([4f6c4ef](https://github.com/thyn-ai/mojo-kernels/commit/4f6c4efc179aa6b28649a15c3559153d80ca15ba))
+
 ## [0.2.6](https://github.com/thyn-ai/mojo-kernels/compare/v0.2.5...v0.2.6) (2026-10-31)
 
 

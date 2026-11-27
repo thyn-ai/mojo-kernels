@@ -22,7 +22,7 @@ from nuscenes_eval_mojo.core import (
     evaluate,
 )
 
-__version__ = "0.2.6"  # x-release-please-version
+__version__ = "0.2.7"  # x-release-please-version
 __all__ = [
     "ATTRIBUTE_NAMES",
     "DETECTION_NAMES",
