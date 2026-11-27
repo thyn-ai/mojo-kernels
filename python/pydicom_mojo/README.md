@@ -190,4 +190,6 @@ Source, tests, and development: <https://github.com/thyn-ai/mojo-kernels>
   and `pytest` on the active interpreter)
 - Quickstart: `python python/pydicom_mojo/examples/quickstart.py`
 
-License: Apache-2.0, © 2026 Algenta
+Package license: Apache-2.0, © 2026 Algenta. The pydicom-derived frame-codec
+portions of `pydicom_mojo/core.py` are also subject to pydicom's MIT license;
+see `LICENSE.pydicom`, included in every wheel.

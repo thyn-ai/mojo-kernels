@@ -68,6 +68,9 @@ jobs:
       - name: Build + repair the platform wheel (delocate/auditwheel)
         run: pixi run bash python/pydicom_mojo/build_wheel.sh
 
+      - name: Verify source and pure-wheel attribution
+        run: pixi run python -m pytest tests/test_pydicom_rle_packaging.py -q
+
       - name: Smoke-test the wheel in a clean venv
         shell: bash
         run: |

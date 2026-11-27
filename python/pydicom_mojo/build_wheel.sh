@@ -14,7 +14,8 @@
 # before any public release of the wheels.
 set -euo pipefail
 
-cd "$(dirname "$0")"
+repo_root="$(cd "$(dirname "$0")/../.." && pwd)"
+cd "$repo_root/python/pydicom_mojo"
 export MACOSX_DEPLOYMENT_TARGET="${MACOSX_DEPLOYMENT_TARGET:-14.0}"
 rm -rf dist dist-repaired
 python -m build --wheel --no-isolation --outdir dist .
@@ -29,4 +30,5 @@ esac
 
 rm -rf dist
 mv dist-repaired dist
+python "$repo_root/tests/test_pydicom_rle_packaging.py" dist/*.whl
 ls -la dist/

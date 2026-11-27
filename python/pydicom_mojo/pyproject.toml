@@ -32,6 +32,7 @@ Company = "https://thyn.ai"
 # target is offered. Per-platform wheels are produced by CI.
 [tool.hatch.build.targets.wheel]
 packages = ["pydicom_mojo"]
+license-files = ["LICENSE", "LICENSE.pydicom"]
 
 [tool.hatch.build.hooks.custom]
 path = "hatch_build.py"
